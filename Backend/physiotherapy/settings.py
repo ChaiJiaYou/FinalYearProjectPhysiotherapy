@@ -84,8 +84,12 @@ WSGI_APPLICATION = 'physiotherapy.wsgi.application'
 
 DATABASES = {
     'default': {
-        'ENGINE': 'django.db.backends.sqlite3',
-        'NAME': BASE_DIR / 'db.sqlite3',
+        'ENGINE': 'django.db.backends.postgresql',
+        'NAME': 'physiotherapy',  # Replace with your database name
+        'USER': 'physio_user',    # Replace with your PostgreSQL username
+        'PASSWORD': 'chai030513',  # Replace with your PostgreSQL password
+        'HOST': 'localhost',      # Or the IP address of your database server
+        'PORT': '5432',           # Default PostgreSQL port
     }
 }
 
