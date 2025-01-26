@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { TextField, Button, IconButton, InputAdornment, Typography, Box } from '@mui/material';
 import { Visibility, VisibilityOff } from '@mui/icons-material';
@@ -13,6 +13,9 @@ function LoginPage() {
 
   const [error, setError] = useState('');
   const navigate = useNavigate();
+
+  // Ref to the password input field
+  const passwordInputRef = useRef(null);
 
   // Handle input changes
   const handleChange = (e) => {
@@ -112,6 +115,7 @@ function LoginPage() {
           </Typography>
         )}
 
+        {/* Username Field */}
         <TextField
           label="Username"
           name="username"
@@ -119,7 +123,15 @@ function LoginPage() {
           onChange={handleChange}
           fullWidth
           margin="normal"
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') {
+              e.preventDefault();
+              passwordInputRef.current.focus(); // Focus on password field
+            }
+          }}
         />
+
+        {/* Password Field */}
         <TextField
           label="Password"
           name="password"
@@ -128,6 +140,7 @@ function LoginPage() {
           onChange={handleChange}
           fullWidth
           margin="normal"
+          inputRef={passwordInputRef} // Attach the ref to the password field
           InputProps={{
             endAdornment: (
               <InputAdornment position="end">
