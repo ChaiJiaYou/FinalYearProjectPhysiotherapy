@@ -4,6 +4,7 @@ from rest_framework import status
 from django.contrib.auth import authenticate
 from django.http import JsonResponse
 from django.views.decorators.csrf import csrf_exempt
+from django.middleware.csrf import get_token
 from django.shortcuts import get_object_or_404
 from .models import CustomUser
 from .serializers import CustomUserSerializer
@@ -16,27 +17,40 @@ import json
 @csrf_exempt
 def login(request):
     # Access request data using DRF's Request object
-        data = request.data
-        username = data.get('username')
-        password = data.get('password')
+    data = request.data
+    username = data.get('username')
+    password = data.get('password')
 
-        # Validate required fields
-        if not username or not password:
-            return JsonResponse({'success': False, 'error': 'Username and password are required.'}, status=400)
+    # Validate required fields
+    if not username or not password:
+        return JsonResponse({'success': False, 'error': 'Username and password are required.'}, status=400)
 
-        # Authenticate user
-        user = authenticate(username=username, password=password)
-        if user is not None:
-            # Return user-specific data
-            return JsonResponse({
-                'success': True,
-                'id': user.id,
-                'username': user.username,
-                'role': user.role,
-            })
-        else:
-            return JsonResponse({'success': False, 'error': 'Invalid username or password'}, status=401)        
-        
+    # Authenticate user
+    user = authenticate(username=username, password=password)
+    if user is not None:
+        if not user.is_active:
+            return JsonResponse({'success': False, 'error': 'Your account is deactivated. Please contact support.'}, status=403)
+
+        # Generate CSRF token to include in the response
+        csrf_token = get_token(request)
+
+        # Return user-specific data and token
+        response = JsonResponse({
+            'success': True,
+            'id': user.id,
+            'username': user.username,
+            'role': user.role,
+            'csrfToken': csrf_token,
+        })
+
+        # Optionally set cookies for username or role (if needed for autofill purposes)
+        response.set_cookie('username', username, max_age=7 * 24 * 3600, httponly=True)  # Expires in 7 days
+        response.set_cookie('role', user.role, max_age=7 * 24 * 3600, httponly=True)  # Optional
+
+        return response
+    else:
+        return JsonResponse({'success': False, 'error': 'Invalid username or password'}, status=401)        
+
 # User Account Management Module
 # Fetch All User From Database
 @api_view(['GET'])

@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { TextField, Button, IconButton, InputAdornment, Typography, Box } from '@mui/material';
 import { Visibility, VisibilityOff } from '@mui/icons-material';
@@ -16,6 +16,25 @@ function LoginPage() {
 
   // Ref to the password input field
   const passwordInputRef = useRef(null);
+
+  // Fetch CSRF token and prefill username from cookies
+  useEffect(() => {
+    const getCookie = (name) => {
+      const cookies = document.cookie.split('; ');
+      for (let cookie of cookies) {
+        const [cookieName, cookieValue] = cookie.split('=');
+        if (cookieName === name) {
+          return decodeURIComponent(cookieValue);
+        }
+      }
+      return '';
+    };
+
+    setFormData((prev) => ({
+      ...prev,
+      username: getCookie('username') || '',
+    }));
+  }, []);
 
   // Handle input changes
   const handleChange = (e) => {
@@ -54,6 +73,7 @@ function LoginPage() {
         username: formData.username,
         password: formData.password,
       }),
+      credentials: 'include', // Include cookies from the backend
     })
       .then((response) => response.json())
       .then((data) => {
@@ -104,14 +124,18 @@ function LoginPage() {
             boxShadow: 6,
           },
         }}
-        
       >
-        <Typography variant="h4" component="h1" mb={2} align="center"
-        sx={{
-          '&:hover': {
-              cursor: 'default'
-          }
-        }}>
+        <Typography
+          variant="h4"
+          component="h1"
+          mb={2}
+          align="center"
+          sx={{
+            '&:hover': {
+              cursor: 'default',
+            },
+          }}
+        >
           Login
         </Typography>
 
