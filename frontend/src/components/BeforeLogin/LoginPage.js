@@ -169,16 +169,26 @@ function LoginPage() {
           value={formData.password}
           onChange={handleChange}
           fullWidth
+          paddingRight
           margin="normal"
           inputRef={passwordInputRef} // Attach the ref to the password field
+          inputProps={{
+            style: {
+              paddingRight: '47px'
+            }
+          }}
           InputProps={{
             endAdornment: (
-              <InputAdornment position="end">
-                <IconButton onClick={toggleShowPassword} edge="end">
+              <InputAdornment sx={{
+                position:'absolute',
+                right: '0',
+              }}>
+                <IconButton onClick={toggleShowPassword} edge="end" sx={{ mr: 1 }}>
                   {formData.showPassword ? <VisibilityOff /> : <Visibility />}
                 </IconButton>
               </InputAdornment>
             ),
+            sx: { paddingRight: '0'},
           }}
         />
         <Typography align="right" mb={2}>
