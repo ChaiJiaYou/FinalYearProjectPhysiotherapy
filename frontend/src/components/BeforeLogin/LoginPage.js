@@ -82,7 +82,7 @@ function LoginPage() {
       justifyContent="center"
       minHeight="100vh"
       bgcolor="#f4f4f9"
-      p={2}
+      p={0}
     >
       <img
         src={logo}
@@ -104,8 +104,14 @@ function LoginPage() {
             boxShadow: 6,
           },
         }}
+        
       >
-        <Typography variant="h4" component="h1" mb={2} align="center">
+        <Typography variant="h4" component="h1" mb={2} align="center"
+        sx={{
+          '&:hover': {
+              cursor: 'default'
+          }
+        }}>
           Login
         </Typography>
 

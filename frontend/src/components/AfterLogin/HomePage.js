@@ -1,45 +1,66 @@
 import React, { useState, useEffect } from 'react';
-import { Box, Drawer, List, ListItem, ListItemIcon, ListItemText, Typography, Avatar } from '@mui/material';
-import { AccountCircle, FitnessCenter, Event, Assignment, Chat, Group } from '@mui/icons-material';
+import { Box, Drawer, List, ListItem, ListItemIcon, ListItemText, Typography, Avatar} from '@mui/material';
+import {
+  AccountCircle,
+  Dashboard,
+  FitnessCenter,
+  Event,
+  Assignment,
+  Group,
+  HistoryEdu,
+  Assessment,
+  Logout,
+} from '@mui/icons-material';
+import { useNavigate } from 'react-router-dom';
+import UserAccountManagementHome from './UserAccountManagement/UserAccountManagementHome';
 
 function HomePage() {
   const [selectedPage, setSelectedPage] = useState('Profile'); // Default page is "Profile"
   const [role, setRole] = useState(null); // Store the role of the logged-in user
+  const [username, setUsername] = useState(null);
+  const navigate = useNavigate();
 
   // Fetch role from localStorage or API
   useEffect(() => {
-    const userRole = localStorage.getItem('role'); // Replace with API call if needed
+    const userName = localStorage.getItem('username');
+    const userRole = localStorage.getItem('role');
+    setUsername(userName);
     setRole(userRole);
   }, []);
 
   // Define menu items for each role
-  const getMenuItems = (role) => {
-    switch (role) {
-      case 'admin':
-        return [
-          { text: 'Profile', icon: <AccountCircle /> },
-          { text: 'User Management', icon: <Group /> },
-          { text: 'Appointment', icon: <Event /> },
-          { text: 'Chat', icon: <Chat /> },
-        ];
-      case 'therapist':
-        return [
-          { text: 'Profile', icon: <AccountCircle /> },
-          { text: 'Exercise', icon: <FitnessCenter /> },
-          { text: 'Treatment', icon: <Assignment /> },
-          { text: 'Appointment', icon: <Event /> },
-        ];
-      case 'patient':
-        return [
-          { text: 'Profile', icon: <AccountCircle /> },
-          { text: 'Exercise', icon: <FitnessCenter /> },
-          { text: 'Appointment', icon: <Event /> },
-          { text: 'Chat', icon: <Chat /> },
-        ];
-      default:
-        return [];
-    }
-  };
+const getMenuItems = (role) => {
+  switch (role) {
+    case 'admin':
+      return [
+        { text: 'Profile', icon: <AccountCircle /> },
+        { text: 'User Management', icon: <Group /> },
+        { text: 'Appointment Overview', icon: <Event /> },
+        { text: 'Reports & Analytics', icon: <Assignment /> },
+        { text: 'Patient Information', icon: <HistoryEdu /> },
+      ];
+    case 'patient':
+      return [
+        { text: 'Dashboard', icon: <Dashboard/>},
+        { text: 'Profile', icon: <AccountCircle /> },
+        { text: 'Exercise', icon: <FitnessCenter /> },
+        { text: 'Appointment', icon: <Event /> },
+        { text: 'Medical History', icon: <HistoryEdu /> },
+      ];
+    case 'therapist':
+      return [
+        { text: 'Dashboard', icon: <Dashboard/>},
+        { text: 'Profile', icon: <AccountCircle /> },
+        { text: 'Exercise Monitoring', icon: <FitnessCenter /> },
+        { text: 'Treatment', icon: <Assignment /> },
+        { text: 'Appointment', icon: <Event /> },
+        { text: 'Patient Information', icon: <HistoryEdu /> },
+        { text: 'Patient Reports', icon: <Assessment /> },
+      ];
+    default:
+      return [];
+  }
+};
 
   // Get menu items based on the role
   const menuItems = getMenuItems(role);
@@ -49,60 +70,52 @@ function HomePage() {
     setSelectedPage(page);
   };
 
+  // Handle Logout
+  const handleLogout = () => {
+    localStorage.clear();
+    navigate('/login');
+  };
+
   // Right-side content based on the selected page
   const renderContent = () => {
     switch (selectedPage) {
       case 'Profile':
-        return (
-          <Box>
-            <Typography variant="h4">Profile</Typography>
-            <Typography variant="body1">This is the Profile page content.</Typography>
-          </Box>
-        );
-      case 'Exercise':
-        return (
-          <Box>
-            <Typography variant="h4">Exercise</Typography>
-            <Typography variant="body1">This is the Exercise page content.</Typography>
-          </Box>
-        );
-      case 'Treatment':
-        return (
-          <Box>
-            <Typography variant="h4">Treatment</Typography>
-            <Typography variant="body1">This is the Treatment page content.</Typography>
-          </Box>
-        );
-      case 'Appointment':
-        return (
-          <Box>
-            <Typography variant="h4">Appointment</Typography>
-            <Typography variant="body1">This is the Appointment page content.</Typography>
-          </Box>
-        );
-      case 'Chat':
-        return (
-          <Box>
-            <Typography variant="h4">Chat</Typography>
-            <Typography variant="body1">This is the Chat page content.</Typography>
-          </Box>
-        );
+        return <Typography variant="h4">This is the Profile page content.</Typography>;
       case 'User Management':
-        return (
-          <Box>
-            <Typography variant="h4">User Management</Typography>
-            <Typography variant="body1">This is the User Management page content.</Typography>
-          </Box>
-        );
+        return <UserAccountManagementHome/>;
+      case 'Appointment Overview':
+        return <Typography variant="h4">This is Appointment Overview Page</Typography>;
+      case 'Reports & Analytics':
+        return <Typography variant="h4">This is Report Page</Typography>
+      case 'Exercise':
+        return <Typography variant="h4">This is exercise Page</Typography>
+      case 'Appointment':
+        return <Typography variant="h4">This is the Appointment page content.</Typography>;
+      case 'Medical History':
+        return <Typography variant="h4">This is the Medical History page content.</Typography>;  
+      case 'Exercise Monitoring':
+        return <Typography variant="h4">This is the Exercise Monitoring page content.</Typography>;
+      case 'Treatment':
+        return <Typography variant="h4">This is the Treatment page content.</Typography>;
+      case 'Patient Reports':
+        return <Typography variant="h4">This is the Reports page content.</Typography>;
+        case 'Patient Information':
+          return (
+            <Box>
+              <Typography variant="h4" gutterBottom>
+                Patient Information
+              </Typography>
+              <Typography variant="body1">
+                Here you can view details of all patients or assigned patients (based on role).
+              </Typography>
+              {/* Add a table, list, or other components to display patient information */}
+            </Box>
+          );
       default:
-        return (
-          <Box>
-            <Typography variant="h4">Profile</Typography>
-            <Typography variant="body1">This is the Profile page content.</Typography>
-          </Box>
-        );
+        return <Typography variant="h4">Welcome to the dashboard!</Typography>;
     }
   };
+
 
   return (
     <Box sx={{ display: 'flex', height: '100vh' }}>
@@ -111,33 +124,44 @@ function HomePage() {
         variant="permanent"
         sx={{
           width: 240,
-          '& .MuiDrawer-paper': { width: 240, boxSizing: 'border-box' },
+          '& .MuiDrawer-paper': { width: 240, boxSizing: 'border-box', display: 'flex', flexDirection: 'column', justifyContent: 'space-between' },
         }}
       >
-        <Box display="flex" flexDirection="column" alignItems="center" p={2}>
-          <Avatar
-            src="https://via.placeholder.com/150"
-            alt="User Avatar"
-            sx={{ width: 100, height: 100, mb: 2 }}
-          />
-          <Typography variant="h6">Chai Jia You</Typography>
-          <Typography variant="body2" color="textSecondary">
-            {role ? role.charAt(0).toUpperCase() + role.slice(1) : 'Loading...'}
-          </Typography>
+        <Box>
+          <Box display="flex" flexDirection="column" alignItems="center" p={2}>
+            <Avatar
+              src="https://via.placeholder.com/150"
+              alt="User Avatar"
+              sx={{ width: 100, height: 100, mb: 2 }}
+            />
+            <Typography variant="h6">{username || 'Error'}</Typography>
+            <Typography variant="body2" color="textSecondary">
+              {role ? role.charAt(0).toUpperCase() + role.slice(1) : 'Error'}
+            </Typography>
+          </Box>
+          <List>
+            {menuItems.map((item) => (
+              <ListItem
+                button
+                key={item.text}
+                selected={selectedPage === item.text}
+                onClick={() => handlePageChange(item.text)}
+                sx={{ cursor: 'default' }}
+              >
+                <ListItemIcon>{item.icon}</ListItemIcon>
+                <ListItemText primary={item.text} />
+              </ListItem>
+            ))}
+          </List>
         </Box>
-        <List>
-          {menuItems.map((item) => (
-            <ListItem
-              button
-              key={item.text}
-              selected={selectedPage === item.text}
-              onClick={() => handlePageChange(item.text)}
-            >
-              <ListItemIcon>{item.icon}</ListItemIcon>
-              <ListItemText primary={item.text} />
-            </ListItem>
-          ))}
-        </List>
+        <Box>
+          <ListItem button onClick={handleLogout}>
+            <ListItemIcon>
+              <Logout />
+            </ListItemIcon>
+            <ListItemText primary="Logout" />
+          </ListItem>
+        </Box>
       </Drawer>
 
       {/* Main Content */}
