@@ -71,3 +71,28 @@ def get_user(request, user_id):
         return JsonResponse(serializer.data, safe=False)
     except Exception as e:
         return JsonResponse({'error': str(e)}, status=500)
+    
+# Update User Status From User Account Management
+@api_view(['PUT'])
+def update_user_status(request, user_id):
+    try:
+        user = get_object_or_404(CustomUser, id=user_id) # Fetch user from database
+        data = request.data
+        new_status = data.get('status')
+        
+        if new_status is None:
+            return Response({'error': 'Status field is required'}, status=status.HTTP_400_BAD_REQUEST)
+        
+        #Update user status
+        user.status = new_status
+        user.save()
+        
+        serializer = CustomUserSerializer(user)
+        
+        return Response({
+            'success': True,
+            'message': 'User status updated successfully.',
+            'user': serializer.data
+        }, status=status.HTTP_200_OK)
+    except Exception as e:
+        return Response({'error' : str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)

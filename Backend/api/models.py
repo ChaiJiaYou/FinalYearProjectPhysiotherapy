@@ -9,15 +9,14 @@ class CustomUser(AbstractUser):
     gender = models.CharField(max_length=10, choices=[('Male', 'Male'), ('Female', 'Female')], blank=True)
     dob = models.DateField(blank=True, null=True)  # Date of Birth
     create_date = models.DateField(default=now)  # Automatically set when created
-    status = models.CharField(
-        max_length=20,
-        choices=[('Active', 'Active'), ('Inactive', 'Inactive')],
-        default='Active'
+    status = models.BooleanField(
+        default=True
     )
     role = models.CharField(
         max_length=20,
         choices=[('admin', 'Admin'), ('therapist', 'Therapist'), ('patient', 'Patient')],
     )
+    avatar = models.ImageField(upload_to='avatars/', blank=True, null=True)
 
     def __str__(self):
         return f"{self.username} ({self.role})"
