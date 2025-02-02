@@ -146,7 +146,13 @@ const getMenuItems = (role) => {
                 key={item.text}
                 selected={selectedPage === item.text}
                 onClick={() => handlePageChange(item.text)}
-                sx={{ cursor: 'default' }}
+                sx={{ 
+                  cursor: 'default',
+                  backgroundColor: selectedPage === item.text ? '#e0e0e0' : 'inherit', // Change background color if selected
+                  '&:hover': {
+                    backgroundColor: selectedPage === item.text ? '#e0e0e0' : '#f5f5f5' //hover effect
+                  }
+                 }}
               >
                 <ListItemIcon>{item.icon}</ListItemIcon>
                 <ListItemText primary={item.text} />
