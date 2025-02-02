@@ -82,6 +82,7 @@ function LoginPage() {
           localStorage.setItem('userId', data.id);
           localStorage.setItem('username', data.username);
           localStorage.setItem('role', data.role);
+          
 
           // Navigate to the appropriate dashboard
           navigate('/Home');

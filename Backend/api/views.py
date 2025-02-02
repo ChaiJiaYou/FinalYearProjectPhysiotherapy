@@ -34,12 +34,16 @@ def login(request):
         # Generate CSRF token to include in the response
         csrf_token = get_token(request)
 
-        # Return user-specific data and token
+        # Get full avatar URL
+        avatar_url = request.build_absolute_uri(user.avatar.url) if user.avatar else None
+
+        # Return user-specific data including avatar
         response = JsonResponse({
             'success': True,
             'id': user.id,
             'username': user.username,
             'role': user.role,
+            'avatar': avatar_url,  # Include avatar URL
             'csrfToken': csrf_token,
         })
 
@@ -49,7 +53,8 @@ def login(request):
 
         return response
     else:
-        return JsonResponse({'success': False, 'error': 'Invalid username or password'}, status=401)        
+        return JsonResponse({'success': False, 'error': 'Invalid username or password'}, status=401)
+   
 
 # User Account Management Module
 # Fetch All User From Database
