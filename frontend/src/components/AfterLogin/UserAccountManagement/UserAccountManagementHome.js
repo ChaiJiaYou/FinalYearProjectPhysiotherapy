@@ -24,6 +24,9 @@ import {
   DialogActions,
   Tooltip,
 } from "@mui/material";
+import CloudUploadIcon from "@mui/icons-material/CloudUpload";
+import {toast, ToastContainer} from "react-toastify";
+import "react-toastify/dist/ReactToastify.css";
 
 const UserAccountManagementHome = () => {
   const navigate = useNavigate();
@@ -41,7 +44,13 @@ const UserAccountManagementHome = () => {
     role: "",
     contact_number: "",
     password: "",
+    ic: "",
+    gender: "",
+    dob: "",
+    avatar: null, //Avatar file
   });
+  const [avatarPreview, setAvatarPreview] = useState(null);
+  const [errors, setErrors] = useState({});
 
   // Fetch users from the API
   useEffect(() => {
@@ -91,6 +100,18 @@ const UserAccountManagementHome = () => {
     page * rowsPerPage + rowsPerPage
   );
 
+  // Handle avatar file selection
+  const handleAvatarChange = (e) => {
+    const file = e.target.files[0];
+    if (file) {
+      setNewUser((prevUser) => ({
+        ...prevUser,
+        avatar: file,
+      }));
+      setAvatarPreview(URL.createObjectURL(file)); // Preview selected image
+    }
+  };
+
   // Handle toggle user status (Active/Inactive)
   const handleToggleStatus = (user) => {
     const updatedUsers = users.map((u) =>
@@ -133,6 +154,8 @@ const UserAccountManagementHome = () => {
     );
   }
 
+
+  // Create User Backend ////
   const handleNewUserChange = (e) => {
     setNewUser({ ...newUser, [e.target.name]: e.target.value });
   };
@@ -149,11 +172,126 @@ const UserAccountManagementHome = () => {
       role: "",
       contact_number: "",
       password: "",
+      ic: "",
+      gender: "",
+      dob: "",
+      avatar: "",
     });
+    setAvatarPreview(null);
+    setErrors({});
   };
 
+  //Create User Validation
+  const validateForm = () => {
+    let tempErrors = {};
+    // Empty Field validation
+    if (!newUser.username) tempErrors.username = "Username is required";
+    if (!newUser.email) tempErrors.email = "Email is required";
+    if (!newUser.ic) tempErrors.ic = "IC Number is required";
+    if (!newUser.gender) tempErrors.gender = "Gender is required";
+    if (!newUser.role) tempErrors.role = "Role is required";
+    if (!newUser.contact_number) tempErrors.contact_number = "Contact Number is required";
+    if (!newUser.password) tempErrors.password = "Password is required";
+    if (!newUser.dob) tempErrors.dob = "Date of Birth is required";
+
+    // 如果有空字段，直接返回错误
+    if (Object.keys(tempErrors).length > 0) {
+      setErrors(tempErrors);
+      return false;
+    }
+
+    // IC 验证
+    const icPattern = /^\d{12}$/; // IC Patten 12 Digits
+    if (!icPattern.test(newUser.ic)) {
+      tempErrors.ic = "IC Number must be 12 digits";
+    } else {
+      
+      // Check IC with dob
+      const dobDate = new Date(newUser.dob);
+      const year = dobDate.getFullYear().toString().slice(-2); // get dob year
+      const month = (dobDate.getMonth() + 1).toString().padStart(2, '0'); // get dob month
+      const day = dobDate.getDate().toString().padStart(2, '0'); // get dob day
+
+      const icYear = newUser.ic.slice(0, 2); // IC First 2 digit
+      const icMonth = newUser.ic.slice(2, 4); // IC No 3 and 4 digit
+      const icDay = newUser.ic.slice(4, 6); // IC No 5 and 6 digit
+
+      if (icYear !== year || icMonth !== month || icDay !== day) {
+        tempErrors.ic = "IC Number does not match with Date of Birth";
+      }
+    }
+
+    setErrors(tempErrors);
+    return Object.keys(tempErrors).length === 0;
+  };
+
+  // Craete User API Call
+  const handleCreateUser = async () => {
+    if(!validateForm()) {
+      toast.error("Please fill in all required fields.",{
+        autoClose: 3000,
+        closeOnClick: true,
+      });
+      return;
+    }
+
+    const formData = new FormData();
+    formData.append("username", newUser.username);
+    formData.append("email", newUser.email);
+    formData.append("role", newUser.role);
+    formData.append("contact_number", newUser.contact_number);
+    formData.append("ic", newUser.ic);
+    formData.append("gender", newUser.gender);
+  
+    // ✅ Ensure `dob` is formatted as YYYY-MM-DD
+    if (newUser.dob) {
+      const dobDate = new Date(newUser.dob);
+      const formattedDOB = dobDate.toISOString().split("T")[0]; // Extract date part
+      formData.append("dob", formattedDOB);
+    }
+  
+    formData.append("password", newUser.password);
+    if (newUser.avatar) {
+      formData.append("avatar", newUser.avatar);
+    }
+  
+    try {
+      const response = await fetch("http://127.0.0.1:8000/api/create-user/", {
+        method: "POST",
+        body: formData,
+      });
+  
+      const data = await response.json();
+  
+      if (response.ok) {
+        toast.success("User created successfully!", {
+          autoClose: 2000,
+          closeOnClick: true,
+        });
+        setUsers((prevUsers) => [...prevUsers, data]); // Add user to list without refresh
+        handleCloseCreateDialog();
+      } else {
+        toast.error(`Error: ${JSON.stringify(data.error)}`, { 
+          autoClose: 3500,
+          closeOnClick: true,
+        }); // Error toast
+      }
+    } catch (error) {
+      console.error("Create user error:", error);
+      toast.error("Something went wrong. Please try again.", { 
+        autoClose: 3500,
+          closeOnClick: true,
+      }); // Error toast
+     }
+  };
+
+  /////////////////////////
+  
   return (
     <Box sx={{ p: 3, borderRadius: "8px" }}>
+      {/* Toast Notification */}
+      <ToastContainer/>
+
       {/* Header and Search Bar */}
       <Box display="flex" justifyContent="space-between" alignItems="center" mb={3}>
         <Typography variant="h4" sx={{ fontWeight: "bold", color: "#333" }}>
@@ -312,12 +450,8 @@ const UserAccountManagementHome = () => {
             value={newUser.username}
             onChange={handleNewUserChange}
             margin="normal"
-            inputProps={{
-              autocomplete: "new-username",
-              form: {
-                autocomplete: "off",
-              },
-            }}
+            error={!!errors.username}
+            helperText={errors.username}
           />
           <TextField
             fullWidth
@@ -326,14 +460,48 @@ const UserAccountManagementHome = () => {
             value={newUser.email}
             onChange={handleNewUserChange}
             margin="normal"
-            inputProps={{
-              autocomplete: "new-email",
-              form: {
-                autocomplete: "off",
-              },
-            }}
+            error={!!errors.email}
+            helperText={errors.email}
           />
-          <FormControl fullWidth margin="normal">
+          <TextField
+            fullWidth
+            label="IC Number"
+            name="ic"
+            value={newUser.ic}
+            onChange={handleNewUserChange}
+            margin="normal"
+            error={!!errors.ic}
+            helperText={errors.ic}
+            type="number"
+            length="12"
+          />
+          <FormControl fullWidth margin="normal" error={!!errors.gender}>
+            <InputLabel>Gender</InputLabel>
+            <Select
+              name="gender"
+              value={newUser.gender}
+              onChange={handleNewUserChange}
+              label="Gender"
+            >
+              <MenuItem value="male">Male</MenuItem>
+              <MenuItem value="female">Female</MenuItem>
+              <MenuItem value="other">Other</MenuItem>
+            </Select>
+            {errors.gender && <Typography variant="caption" color="error">{errors.gender}</Typography>}
+          </FormControl>
+          <TextField
+            fullWidth
+            label="Date of Birth"
+            name="dob"
+            type="date"
+            value={newUser.dob}
+            onChange={handleNewUserChange}
+            margin="normal"
+            InputLabelProps={{ shrink: true }}
+            error={!!errors.dob}
+            helperText={errors.dob}
+          />
+          <FormControl fullWidth margin="normal" error={!!errors.role}>
             <InputLabel>Role</InputLabel>
             <Select
               name="role"
@@ -345,6 +513,7 @@ const UserAccountManagementHome = () => {
               <MenuItem value="patient">Patient</MenuItem>
               <MenuItem value="therapist">Therapist</MenuItem>
             </Select>
+            {errors.role && <Typography variant="caption" color="error">{errors.role}</Typography>}
           </FormControl>
           <TextField
             fullWidth
@@ -353,12 +522,8 @@ const UserAccountManagementHome = () => {
             value={newUser.contact_number}
             onChange={handleNewUserChange}
             margin="normal"
-            inputProps={{
-              autocomplete: "new-contact",
-              form: {
-                autocomplete: "off",
-              },
-            }}
+            error={!!errors.contact_number}
+            helperText={errors.contact_number}
           />
           <TextField
             fullWidth
@@ -368,17 +533,37 @@ const UserAccountManagementHome = () => {
             value={newUser.password}
             onChange={handleNewUserChange}
             margin="normal"
-            inputProps={{
-              autocomplete: "new-password",
-              form: {
-                autocomplete: "off",
-              },
-            }}
+            error={!!errors.password}
+            helperText={errors.password}
           />
+
+          {/* Avatar Upload Section */}
+          <Box mt={2} display="flex" flexDirection="column" alignItems="center">
+            {avatarPreview ? (
+              <img
+                src={avatarPreview}
+                alt="Avatar Preview"
+                style={{ width: 100, height: 100, borderRadius: "50%" }}
+              />
+            ) : (
+              <Typography variant="body2" color="textSecondary">
+                No avatar selected
+              </Typography>
+            )}
+            <Button
+              variant="contained"
+              component="label"
+              startIcon={<CloudUploadIcon />}
+              sx={{ mt: 1 }}
+            >
+              Upload Avatar
+              <input type="file" hidden onChange={handleAvatarChange} accept="image/*" />
+            </Button>
+          </Box>
         </DialogContent>
         <DialogActions>
           <Button onClick={handleCloseCreateDialog}>Cancel</Button>
-          <Button variant="contained" color="primary">
+          <Button onClick={handleCreateUser} variant="contained" color="primary">
             Create
           </Button>
         </DialogActions>

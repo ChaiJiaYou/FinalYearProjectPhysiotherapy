@@ -15,7 +15,7 @@ import { useNavigate } from 'react-router-dom';
 import UserAccountManagementHome from './UserAccountManagement/UserAccountManagementHome';
 
 function HomePage() {
-  const [selectedPage, setSelectedPage] = useState('Profile'); // Default page is "Profile"
+  const [selectedPage, setSelectedPage] = useState('User Management'); // Default page is "Profile"
   const [role, setRole] = useState(null); // Store the role of the logged-in user
   const [username, setUsername] = useState(null);
   const navigate = useNavigate();
@@ -33,6 +33,7 @@ const getMenuItems = (role) => {
   switch (role) {
     case 'admin':
       return [
+        { text: 'Dashboard', icon: <Dashboard/>},
         { text: 'Profile', icon: <AccountCircle /> },
         { text: 'User Management', icon: <Group /> },
         { text: 'Appointment Overview', icon: <Event /> },
@@ -45,7 +46,6 @@ const getMenuItems = (role) => {
         { text: 'Profile', icon: <AccountCircle /> },
         { text: 'Exercise', icon: <FitnessCenter /> },
         { text: 'Appointment', icon: <Event /> },
-        { text: 'Medical History', icon: <HistoryEdu /> },
       ];
     case 'therapist':
       return [
@@ -79,38 +79,26 @@ const getMenuItems = (role) => {
   // Right-side content based on the selected page
   const renderContent = () => {
     switch (selectedPage) {
-      case 'Profile':
-        return <Typography variant="h4">This is the Profile page content.</Typography>;
-      case 'User Management':
-        return <UserAccountManagementHome/>;
-      case 'Appointment Overview':
-        return <Typography variant="h4">This is Appointment Overview Page</Typography>;
-      case 'Reports & Analytics':
-        return <Typography variant="h4">This is Report Page</Typography>
-      case 'Exercise':
-        return <Typography variant="h4">This is exercise Page</Typography>
       case 'Appointment':
         return <Typography variant="h4">This is the Appointment page content.</Typography>;
-      case 'Medical History':
-        return <Typography variant="h4">This is the Medical History page content.</Typography>;  
+      case 'Appointment Overview':
+        return <Typography variant="h4">This is Appointment Overview Page</Typography>;
+      case 'Exercise':
+        return <Typography variant="h4">This is exercise Page</Typography>      
       case 'Exercise Monitoring':
         return <Typography variant="h4">This is the Exercise Monitoring page content.</Typography>;
-      case 'Treatment':
-        return <Typography variant="h4">This is the Treatment page content.</Typography>;
+      case 'Patient Information':
+        return <Typography variant="h4">Patient Information</Typography>
       case 'Patient Reports':
         return <Typography variant="h4">This is the Reports page content.</Typography>;
-        case 'Patient Information':
-          return (
-            <Box>
-              <Typography variant="h4" gutterBottom>
-                Patient Information
-              </Typography>
-              <Typography variant="body1">
-                Here you can view details of all patients or assigned patients (based on role).
-              </Typography>
-              {/* Add a table, list, or other components to display patient information */}
-            </Box>
-          );
+      case 'Profile':
+        return <Typography variant="h4">This is the Profile page content.</Typography>;
+      case 'Reports & Analytics':
+        return <Typography variant="h4">This is Report Page</Typography>
+      case 'Treatment':
+        return <Typography variant="h4">This is the Treatment page content.</Typography>;
+      case 'User Management':
+        return <UserAccountManagementHome/>;
       default:
         return <Typography variant="h4">Welcome to the dashboard!</Typography>;
     }

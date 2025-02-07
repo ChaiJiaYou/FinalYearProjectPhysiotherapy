@@ -6,7 +6,7 @@ import logo from '../../static/images/logo.png';
 
 function LoginPage() {
   const [formData, setFormData] = useState({
-    username: '',
+    id: '',
     password: '',
     showPassword: false,
   });
@@ -32,7 +32,7 @@ function LoginPage() {
 
     setFormData((prev) => ({
       ...prev,
-      username: getCookie('username') || '',
+      id : getCookie('id') || ''
     }));
   }, []);
 
@@ -58,8 +58,8 @@ function LoginPage() {
     e.preventDefault();
 
     // Client-side validation
-    if (!formData.username || !formData.password) {
-      setError('Both username and password are required.');
+    if (!formData.id || !formData.password) {
+      setError('Both user id and password are required.');
       return;
     }
 
@@ -70,7 +70,7 @@ function LoginPage() {
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        username: formData.username,
+        id: formData.id,
         password: formData.password,
       }),
       credentials: 'include', // Include cookies from the backend
@@ -146,11 +146,11 @@ function LoginPage() {
           </Typography>
         )}
 
-        {/* Username Field */}
+        {/* UserId Field */}
         <TextField
-          label="Username"
-          name="username"
-          value={formData.username}
+          label="User ID"
+          name="id"
+          value={formData.id}
           onChange={handleChange}
           fullWidth
           margin="normal"

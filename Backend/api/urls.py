@@ -8,9 +8,10 @@ urlpatterns = [
     path('login/', views.login, name='login'),
     
     ## User Management
-    path('list-users/', views.list_users, name='fetch_all_users'),    
-    path('get-user/<int:user_id>/', views.get_user, name='get_user'),
+    path('list-users/', views.list_users, name='fetch_all_users'),
+    path('create-user/', views.create_user, name="create-user"),    
     path('update-user-status/<int:user_id>/', views.update_user_status, name='update-user-status'),
+    path('get-user/<int:user_id>/', views.get_user, name='get_user'),
     
 ]
 
