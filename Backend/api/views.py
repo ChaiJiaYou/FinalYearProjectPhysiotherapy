@@ -2,6 +2,7 @@ from rest_framework.decorators import api_view, parser_classes
 from rest_framework.response import Response
 from rest_framework import status
 from rest_framework.parsers import MultiPartParser, FormParser
+from datetime import datetime
 from django.contrib.auth import authenticate
 from django.contrib.auth.hashers import make_password
 from django.core.exceptions import ValidationError
@@ -10,8 +11,8 @@ from django.http import JsonResponse
 from django.views.decorators.csrf import csrf_exempt
 from django.middleware.csrf import get_token
 from django.shortcuts import get_object_or_404
-from .models import CustomUser
-from .serializers import CustomUserSerializer
+from .models import CustomUser, Admin, Patient, Therapist,Appointment, Timetable
+from .serializers import CustomUserSerializer, TimetableSerializer
 
 import json
 
@@ -62,7 +63,7 @@ def login(request):
     else:
         return JsonResponse({'success': False, 'error': 'Invalid user ID or password'}, status=401)
    
-
+   
 # User Account Management Module
 # Fetch All User From Database
 @api_view(['GET'])
@@ -153,6 +154,14 @@ def create_user(request):
         
         user.set_password(password)
         user.save()
+        
+        if role == "patient":
+            Patient.objects.create(user=user, emergency_contact="Not Provided")
+        elif role == "therapist":
+            Therapist.objects.create(user=user, specialization="General", employmentDate=datetime.now().date())
+        elif role == "admin":
+            Admin.objects.create(user=user, admin_role="General Admin")
+        
 
         # ✅ Explicitly format create_date before returning
         serializer = CustomUserSerializer(user)
@@ -166,3 +175,68 @@ def create_user(request):
     except Exception as e:
         return JsonResponse({"error": str(e)}, status=500)
 
+
+WORKING_HOURS = [
+    ("09:00", "10:00"),
+    ("10:00", "11:00"),
+    ("11:00", "12:00"),
+    ("13:00", "14:00"),
+    ("14:00", "15:00"),
+    ("15:00", "16:00"),
+    ("16:00", "17:00"),
+]
+
+@api_view(["GET"])
+def get_available_slots(request, therapist_id, date):
+    try:
+        therapist = Therapist.objects.get(id=therapist_id)
+        date_obj = datetime.strptime(date, "%Y-%m-%d").date()
+
+        # Retrieve all booked slots for the therapist on the given date
+        booked_slots = Appointment.objects.filter(
+            therapistId=therapist, appointmentDateTime__date=date_obj
+        ).values_list("appointmentDateTime", flat=True)
+
+        # Convert booked slots to string format (HH:MM)
+        booked_times = {slot.strftime("%H:%M") for slot in booked_slots}
+
+        # Get available slots by subtracting booked times from working hours
+        available_slots = [
+            {"start": start, "end": end}
+            for start, end in WORKING_HOURS
+            if start not in booked_times
+        ]
+
+        return Response({"date": date, "available_slots": available_slots})
+    except Therapist.DoesNotExist:
+        return Response({"error": "Therapist not found"}, status=404)
+    except Exception as e:
+        return Response({"error": str(e)}, status=500)
+    
+@api_view(['POST'])
+def book_appointment(request):
+    try:
+        timetable_id = request.data.get("timetable_id")
+        patient_id = request.data.get("patient_id")
+
+        # Ensure both timetable and patient exist
+        timetable = Timetable.objects.get(id=timetable_id, is_booked=False)
+        patient = Patient.objects.get(id=patient_id)
+
+        # Mark slot as booked
+        timetable.is_booked = True
+        timetable.save()
+
+        # Create an appointment record
+        Appointment.objects.create(
+            patientId=patient,
+            therapistId=timetable.therapist,
+            appointmentDateTime=f"{timetable.date} {timetable.start_time}",
+            status="Scheduled"
+        )
+
+        return Response({"message": "Appointment booked successfully!"}, status=201)
+    except Timetable.DoesNotExist:
+        return Response({"error": "Invalid or already booked slot."}, status=400)
+    except Exception as e:
+        return Response({"error": str(e)}, status=500)

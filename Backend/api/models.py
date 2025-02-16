@@ -55,7 +55,6 @@ class Admin(models.Model):
     def __str__(self):
         return f"Admin: {self.user.id}"
 
-
 class Therapist(models.Model):
     user = models.OneToOneField(CustomUser, on_delete=models.CASCADE, related_name='therapist_profile')
     specialization = models.CharField(max_length=100)
@@ -63,10 +62,60 @@ class Therapist(models.Model):
     def __str__(self):
         return f"Therapist: {self.user.id}"
 
-
 class Patient(models.Model):
     user = models.OneToOneField(CustomUser, on_delete=models.CASCADE, related_name='patient_profile')
     emergency_contact = models.CharField(max_length=15, blank=True)
 
     def __str__(self):
         return f"Patient: {self.user.id}"
+    
+class Appointment(models.Model):
+    STATUS_CHOICES =[
+        ("Scheduled","Scheduled"),
+        ("Cancelled","Cancelled"),
+        ("Completed","Completed"),
+    ]
+    
+    appointmentId = models.CharField(max_length=50, unique=True, editable=False)
+    patientId = models.ForeignKey(Patient, on_delete=models.CASCADE, related_name="appointments")
+    therapistId = models.ForeignKey(Therapist, on_delete=models.CASCADE, related_name="appointments")
+    appointmentDateTime = models.DateTimeField()
+    creationDate = models.DateTimeField(auto_now_add=True)
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default="Scheduled")
+    
+    def __str__(self):
+        return f"Appointment {self.appointmentId} - {self.status} ({self.therapistId.specialization})"
+
+    def save(self, *args, **kwargs):
+        # Automatically generate a unique appointmentId if not provided
+        if not self.appointmentId:
+            self.appointmentId = f"APPT-{datetime.now().strftime('%Y%m%d%H%M%S')}"
+        super().save(*args, **kwargs)
+        
+        # Schedule an appointment
+    def scheduleAppointment(self, patient, therapist, date_time):
+        self.patientId = patient
+        self.therapistId = therapist  # ✅ Assign therapist
+        self.appointmentDateTime = date_time
+        self.status = "Scheduled"
+        self.save()
+        return f"Appointment {self.appointmentId} scheduled with {therapist.specialization}."
+
+    # Cancel an appointment
+    def cancelAppointment(self):
+        if self.status != "Cancelled":
+            self.status = "Cancelled"
+            self.save()
+            return f"Appointment {self.appointmentId} cancelled."
+        return f"Appointment {self.appointmentId} is already cancelled."
+
+    # View appointment details
+    def viewAppointment(self):
+        return {
+            "appointmentId": self.appointmentId,
+            "patient": self.patientId.id,
+            "therapist": self.therapistId.specialization,
+            "appointmentDateTime": self.appointmentDateTime,
+            "creationDate": self.creationDate,
+            "status": self.status,
+        }

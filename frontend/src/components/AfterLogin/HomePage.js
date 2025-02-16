@@ -12,7 +12,12 @@ import {
   Logout,
 } from '@mui/icons-material';
 import { useNavigate } from 'react-router-dom';
+// Page Import Section
 import UserAccountManagementHome from './UserAccountManagement/UserAccountManagementHome';
+import TherapistAppointments from './Appointment/TherapistAppointments';
+import PatientAppointments from './Appointment/PatientAppointments';
+
+
 
 function HomePage() {
   const [selectedPage, setSelectedPage] = useState('User Management'); // Default page is "Profile"
@@ -79,8 +84,21 @@ const getMenuItems = (role) => {
   // Right-side content based on the selected page
   const renderContent = () => {
     switch (selectedPage) {
-      case 'Appointment':
-        return <Typography variant="h4">This is the Appointment page content.</Typography>;
+      case 'Appointment': {    
+        return (
+            <>
+                {role === "therapist" && (
+                    <TherapistAppointments/>
+                )}
+                {role === "patient" && (
+                    <PatientAppointments/>
+                )}
+                {role === "admin" && (
+                    <Typography variant="h4">Admin Appointment Overview</Typography>
+                )}
+            </>
+        );
+    }
       case 'Appointment Overview':
         return <Typography variant="h4">This is Appointment Overview Page</Typography>;
       case 'Exercise':
