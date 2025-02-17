@@ -2,7 +2,7 @@ from rest_framework.decorators import api_view, parser_classes
 from rest_framework.response import Response
 from rest_framework import status
 from rest_framework.parsers import MultiPartParser, FormParser
-from datetime import datetime
+from datetime import datetime, timedelta
 from django.contrib.auth import authenticate
 from django.contrib.auth.hashers import make_password
 from django.core.exceptions import ValidationError
@@ -11,8 +11,8 @@ from django.http import JsonResponse
 from django.views.decorators.csrf import csrf_exempt
 from django.middleware.csrf import get_token
 from django.shortcuts import get_object_or_404
-from .models import CustomUser, Admin, Patient, Therapist,Appointment, Timetable
-from .serializers import CustomUserSerializer, TimetableSerializer
+from .models import CustomUser, Admin, Patient, Therapist,Appointment
+from .serializers import CustomUserSerializer
 
 import json
 
@@ -156,9 +156,9 @@ def create_user(request):
         user.save()
         
         if role == "patient":
-            Patient.objects.create(user=user, emergency_contact="Not Provided")
+            Patient.objects.create(user=user, emergency_contact="123")
         elif role == "therapist":
-            Therapist.objects.create(user=user, specialization="General", employmentDate=datetime.now().date())
+            Therapist.objects.create(user=user, specialization="General", employment_date=datetime.now().date())
         elif role == "admin":
             Admin.objects.create(user=user, admin_role="General Admin")
         
@@ -213,30 +213,35 @@ def get_available_slots(request, therapist_id, date):
     except Exception as e:
         return Response({"error": str(e)}, status=500)
     
-@api_view(['POST'])
-def book_appointment(request):
+
+@api_view(['GET'])
+def therapist_weekly_schedule(request):
+    therapist_id = request.user.id  # Assuming authenticated therapist
+    week_start = request.GET.get('weekStart')
+
+    if not week_start:
+        return JsonResponse({"error": "Start date of the week is required"}, status=400)
+
     try:
-        timetable_id = request.data.get("timetable_id")
-        patient_id = request.data.get("patient_id")
+        week_start_date = datetime.strptime(week_start, "%Y-%m-%d").date()
+    except ValueError:
+        return JsonResponse({"error": "Invalid date format. Use YYYY-MM-DD."}, status=400)
 
-        # Ensure both timetable and patient exist
-        timetable = Timetable.objects.get(id=timetable_id, is_booked=False)
-        patient = Patient.objects.get(id=patient_id)
+    # Generate all dates for the week
+    week_dates = [(week_start_date + timedelta(days=i)).strftime("%Y-%m-%d") for i in range(7)]
 
-        # Mark slot as booked
-        timetable.is_booked = True
-        timetable.save()
+    # Fetch all appointments for the therapist in this week
+    booked_appointments = Appointment.objects.filter(
+        therapistId=therapist_id,
+        appointmentDateTime__date__range=[week_dates[0], week_dates[-1]]
+    )
 
-        # Create an appointment record
-        Appointment.objects.create(
-            patientId=patient,
-            therapistId=timetable.therapist,
-            appointmentDateTime=f"{timetable.date} {timetable.start_time}",
-            status="Scheduled"
-        )
+    # Create a dictionary of booked slots
+    weekly_schedule = {date: {slot: False for slot in timeSlots} for date in week_dates}
 
-        return Response({"message": "Appointment booked successfully!"}, status=201)
-    except Timetable.DoesNotExist:
-        return Response({"error": "Invalid or already booked slot."}, status=400)
-    except Exception as e:
-        return Response({"error": str(e)}, status=500)
+    for appointment in booked_appointments:
+        formatted_time = appointment.appointmentDateTime.strftime("%I:%M %p - %I:%M %p")
+        if appointment.appointmentDateTime.strftime("%Y-%m-%d") in weekly_schedule:
+            weekly_schedule[appointment.appointmentDateTime.strftime("%Y-%m-%d")][formatted_time] = True
+
+    return JsonResponse(weekly_schedule, status=200)

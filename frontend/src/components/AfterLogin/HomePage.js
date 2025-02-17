@@ -16,7 +16,7 @@ import { useNavigate } from 'react-router-dom';
 import UserAccountManagementHome from './UserAccountManagement/UserAccountManagementHome';
 import TherapistAppointments from './Appointment/TherapistAppointments';
 import PatientAppointments from './Appointment/PatientAppointments';
-
+import TherapistSchedule from './TherapistTemp/TherapistSchedule';
 
 
 function HomePage() {
@@ -55,6 +55,7 @@ const getMenuItems = (role) => {
     case 'therapist':
       return [
         { text: 'Dashboard', icon: <Dashboard/>},
+        { text: 'Time Table', icon: <Event/>},
         { text: 'Profile', icon: <AccountCircle /> },
         { text: 'Exercise Monitoring', icon: <FitnessCenter /> },
         { text: 'Treatment', icon: <Assignment /> },
@@ -117,6 +118,8 @@ const getMenuItems = (role) => {
         return <Typography variant="h4">This is the Treatment page content.</Typography>;
       case 'User Management':
         return <UserAccountManagementHome/>;
+      case 'Time Table':
+        return <TherapistSchedule/>
       default:
         return <Typography variant="h4">Welcome to the dashboard!</Typography>;
     }

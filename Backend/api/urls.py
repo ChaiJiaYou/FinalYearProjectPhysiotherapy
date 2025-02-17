@@ -13,6 +13,8 @@ urlpatterns = [
     path('update-user-status/<int:user_id>/', views.update_user_status, name='update-user-status'),
     path('get-user/<int:user_id>/', views.get_user, name='get_user'),
     
+    #Appointment
+    path('api/therapist-weekly-schedule/', views.therapist_weekly_schedule, name='therapist-weekly-schedule'),
 ]
 
 urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
