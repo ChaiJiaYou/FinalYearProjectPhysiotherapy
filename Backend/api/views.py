@@ -1,75 +1,81 @@
 from rest_framework.decorators import api_view, parser_classes
 from rest_framework.response import Response
-from rest_framework import status
-from rest_framework.parsers import MultiPartParser, FormParser
-from datetime import datetime, timedelta
-from django.contrib.auth import authenticate
-from django.contrib.auth.hashers import make_password
+from rest_framework import status, generics, permissions
+from rest_framework.parsers import MultiPartParser, FormParser, JSONParser
+from datetime import timedelta, datetime, time
 from django.core.exceptions import ValidationError
-from django.core.files.storage import default_storage
 from django.http import JsonResponse
 from django.views.decorators.csrf import csrf_exempt
 from django.middleware.csrf import get_token
 from django.shortcuts import get_object_or_404
-from .models import CustomUser, Admin, Patient, Therapist,Appointment
-from .serializers import CustomUserSerializer
-
-import json
-
+from django.utils.timezone import localtime, now, make_aware
+from .models import CustomUser, Admin, Patient, Therapist, Appointment, Notification, TreatmentTemplate, TemplateExercise, Treatment, TreatmentExercise, Exercise
+from .serializers import CustomUserSerializer, AppointmentSerializer, PatientHistorySerializer, NotificationSerializer
+from django.utils.dateparse import parse_datetime
+from django.db import transaction
+from django.contrib.auth import login
+from django.db.models import Q
+import base64
 
 
 @api_view(['POST'])
 @csrf_exempt
-def login(request):
-    # Access request data using DRF's Request object
+def login_view(request):
     data = request.data
     user_id = data.get('id')
-    
-    username = data.get('username')
     password = data.get('password')
 
-    # Validate required fields
     if not user_id or not password:
         return JsonResponse({'success': False, 'error': 'User ID and password are required.'}, status=400)
 
-    # Authenticate user
     user = CustomUser.objects.filter(id=user_id).first()
     if user and user.check_password(password):
         if not user.status:
             return JsonResponse({'success': False, 'error': 'Your account is deactivated. Please contact staff.'}, status=403)
 
-        # Generate CSRF token to include in the response
+        # ✅ Login the user into Django session
+        login(request._request, user)
+
+
+        user.last_login = now()
+        user.save(update_fields=["last_login"])
+        
         csrf_token = get_token(request)
 
-        # Get full avatar URL
-        avatar_url = request.build_absolute_uri(user.avatar.url) if user.avatar else None
-
-        # Return user-specific data including avatar
         response = JsonResponse({
             'success': True,
             'id': user.id,
+            'userId': user.id,  # Add userId for frontend consistency
             'username': user.username,
             'role': user.role,
-            'avatar': avatar_url,  # Include avatar URL
             'csrfToken': csrf_token,
         })
+        
+        response.set_cookie(
+            key='sessionid',
+            value=request.session.session_key,
+            httponly=True,
+            max_age=7 * 24 * 3600,
+            samesite='Lax',
+            secure=False,
+        )
 
-        # Optionally set cookies for username or role (if needed for autofill purposes)
-        response.set_cookie('id', id, max_age=7 * 24 * 3600, httponly=True)
-        response.set_cookie('username', username, max_age=7 * 24 * 3600, httponly=True)  # Expires in 7 days
-        response.set_cookie('role', user.role, max_age=7 * 24 * 3600, httponly=True)  # Optional
+        response.set_cookie('id', user.id, max_age=7 * 24 * 3600, httponly=True)
+        response.set_cookie('username', user.username, max_age=7 * 24 * 3600, httponly=True)
+        response.set_cookie('role', user.role, max_age=7 * 24 * 3600, httponly=True)
 
         return response
+
     else:
         return JsonResponse({'success': False, 'error': 'Invalid user ID or password'}, status=401)
-   
+
    
 # User Account Management Module
 # Fetch All User From Database
 @api_view(['GET'])
 def list_users(request):
     try:
-        users = CustomUser.objects.all()  # Fetch all users
+        users = CustomUser.objects.all().order_by('-create_date')
         serializer = CustomUserSerializer(users, many=True)  # Serialize the data
         return Response(serializer.data, status=status.HTTP_200_OK)
     except Exception as e:
@@ -79,11 +85,12 @@ def list_users(request):
 @api_view(['GET'])
 def get_user(request, user_id):
     try:
-        user = get_object_or_404(CustomUser, id=user_id)  # Fetch user or return 404
-        serializer = CustomUserSerializer(user)  # Serialize user data
-        return JsonResponse(serializer.data, safe=False)
+        user = get_object_or_404(CustomUser, id=user_id)
+        serializer = CustomUserSerializer(user, context={'request': request})
+        return Response(serializer.data, status=status.HTTP_200_OK)
     except Exception as e:
-        return JsonResponse({'error': str(e)}, status=500)
+        print(f"Error in get_user: {str(e)}")  # Add debug log
+        return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
     
 # Update User Status From User Account Management
 @api_view(['PUT'])
@@ -110,138 +117,1144 @@ def update_user_status(request, user_id):
     except Exception as e:
         return Response({'error' : str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
-# Create New User
 @api_view(['POST'])
 @parser_classes([MultiPartParser, FormParser])
 def create_user(request):
     try:
-        # Extract form data
-        username = request.data.get("username")
-        email = request.data.get("email")
-        role = request.data.get("role")
-        contact_number = request.data.get("contact_number")
-        ic = request.data.get("ic")
-        gender = request.data.get("gender")
-        dob = request.data.get("dob")
-        password = request.data.get("password")
-        avatar = request.FILES.get("avatar")
+        with transaction.atomic():
+            # Extract form data
+            username = request.data.get("username")
+            email = request.data.get("email")
+            role = request.data.get("role")
+            contact_number = request.data.get("contact_number")
+            ic = request.data.get("ic")
+            gender = request.data.get("gender")
+            dob = request.data.get("dob")
+            password = request.data.get("password")
+            avatar_file = request.FILES.get("avatar")
+            creator_id = request.data.get("creator_id")
+
+            # Validate required fields
+            if not all([username, email, role, password]):
+                return Response({"error": "Missing required fields."}, status=status.HTTP_400_BAD_REQUEST)
+
+            # Check for existing IC
+            if ic and CustomUser.objects.filter(ic=ic).exists():
+                return Response({"error": "Account with this IC already exists."}, status=status.HTTP_400_BAD_REQUEST)
+
+            # Get creator user if creator_id is provided
+            creator_user = None
+            if creator_id:
+                try:
+                    creator_user = CustomUser.objects.get(id=creator_id)
+                except CustomUser.DoesNotExist:
+                    return Response({"error": "Creator user not found."}, status=status.HTTP_400_BAD_REQUEST)
+
+            # Process date of birth
+            try:
+                dob_date = datetime.strptime(dob, "%Y-%m-%d").date() if dob else None
+            except ValueError:
+                return Response({'error': 'Invalid date format. Use YYYY-MM-DD.'}, status=status.HTTP_400_BAD_REQUEST)
+
+            # Create user instance
+            user = CustomUser(
+                username=username,
+                email=email,
+                role=role,
+                contact_number=contact_number,
+                ic=ic,
+                gender=gender,
+                dob=dob_date,
+                created_by=creator_user,
+                modified_by=creator_user,
+            )
+
+            # Set password
+            user.set_password(password)
+
+            # Handle avatar
+            if avatar_file:
+                user.avatar = avatar_file.read()
+
+            # Save user
+            user.save()
+
+            # Create role-specific profile
+            if role == "patient":
+                emergency_contact = request.data.get("emergency_contact", "")
+                Patient.objects.create(
+                    user=user,
+                    emergency_contact=emergency_contact
+                )
+            elif role == "therapist":
+                specialization = request.data.get("specialization", "General")
+                employment_date = request.data.get("employment_date") or datetime.now().date()
+                Therapist.objects.create(
+                    user=user,
+                    specialization=specialization,
+                    employment_date=employment_date
+                )
+            elif role == "admin":
+                admin_role = request.data.get("admin_role", "General Admin")
+                Admin.objects.create(
+                    user=user,
+                    admin_role=admin_role
+                )
+
+            # Serialize and return the created user
+            serializer = CustomUserSerializer(user)
+            return Response(serializer.data, status=status.HTTP_201_CREATED)
+
+    except Exception as e:
+        print(f"Error creating user: {str(e)}")  # For debugging
+        return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+@api_view(['PUT'])
+@parser_classes([MultiPartParser, FormParser, JSONParser])
+def update_user(request, user_id):
+    try:
+        user = CustomUser.objects.get(pk=user_id)
+    except CustomUser.DoesNotExist:
+        return Response({"error": "User not found."}, status=status.HTTP_404_NOT_FOUND)
+
+    # Handle avatar file update if provided
+    avatar_file = request.FILES.get('avatar')
+    if avatar_file:
+        avatar_data = avatar_file.read()
+        user.avatar = avatar_data
+
+    serializer = CustomUserSerializer(user, data=request.data, context={"request": request}, partial=True)
+    if serializer.is_valid():
+        serializer.save()
+
+        # 🔁 Manually update related role-specific model
+        role = user.role
+        if role == "admin":
+            admin = getattr(user, "admin_profile", None)
+            if admin:
+                admin.admin_role = request.data.get("admin_profile.admin_role", admin.admin_role)
+                admin.save()
+        elif role == "therapist":
+            therapist = getattr(user, "therapist_profile", None)
+            if therapist:
+                therapist.specialization = request.data.get("therapist_profile.specialization", therapist.specialization)
+                therapist.employment_date = request.data.get("therapist_profile.employment_date", therapist.employment_date)
+                therapist.save()
+        elif role == "patient":
+            patient = getattr(user, "patient_profile", None)
+            if patient:
+                patient.emergency_contact = request.data.get("patient_profile.emergency_contact", patient.emergency_contact)
+                patient.save()
+
+        return Response(serializer.data, status=status.HTTP_200_OK)
+    
+    return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 
-        from datetime import datetime
-        try:
-            dob = datetime.strptime(dob, "%Y-%m-%d").date() if dob else None
-        except ValueError:
-            return JsonResponse({'error': 'Invalid date format. Use YYYY-MM-DD.'}, status=400)
+
+
+@api_view(['POST'])
+def create_appointment(request):
+    try:
+        data = request.data
+        patient_id = data.get("patient_id")
+        therapist_id = data.get("therapist_id")
+        appointmentDateTime = data.get("appointmentDateTime")
+        duration = data.get("duration", 30)
+        notes = data.get("notes", "")
 
         # Validate required fields
-        if not all([username, email, role, password]):
-            return JsonResponse({"error": "Missing required fields."}, status=400)
+        missing_fields = []
+        if not patient_id:
+            missing_fields.append("patient_id")
+        if not therapist_id:
+            missing_fields.append("therapist_id")
+        if not appointmentDateTime:
+            missing_fields.append("appointmentDateTime")
 
-        # Check if username or email already exists
-        if CustomUser.objects.filter(ic=ic).exists():
-            return JsonResponse({"error": "Account already registered."}, status=400)
+        if missing_fields:
+            return Response({
+                "error": f"Missing required fields: {', '.join(missing_fields)}"
+            }, status=status.HTTP_400_BAD_REQUEST)
 
-        user = CustomUser.objects.create(
-            username=username,
-            email=email,
-            role=role,
-            contact_number=contact_number,
-            ic=ic,
-            gender=gender,
-            dob=dob,
-            avatar=avatar,
+        # Validate duration
+        if duration not in [30, 45, 60]:
+            return Response({
+                "error": "Invalid duration. Must be 30, 45, or 60 minutes."
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            appointmentDateTime = parse_datetime(appointmentDateTime)
+            if appointmentDateTime is None:
+                raise ValueError("Could not parse datetime")
+        except ValueError as e:
+            return Response({
+                "error": f"Invalid date format: {str(e)}. Use ISO format (YYYY-MM-DDTHH:MM:SSZ)"
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        # Validate users exist
+        try:
+            patient = get_object_or_404(CustomUser, id=patient_id, role="patient")
+            therapist = get_object_or_404(CustomUser, id=therapist_id, role="therapist")
+        except Exception as e:
+            return Response({
+                "error": f"Invalid user: {str(e)}"
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        # Check for time conflicts
+        appointmentEndTime = appointmentDateTime + timedelta(minutes=duration)
+        overlapping_appointments = Appointment.objects.filter(
+            therapistId=therapist,
+            appointmentDateTime__lt=appointmentEndTime,
+            appointmentDateTime__gt=appointmentDateTime
+        ).exists()
+
+        if overlapping_appointments:
+            return Response({
+                "error": "This time slot conflicts with another appointment."
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        # Create appointment
+        appointment = Appointment.objects.create(
+            patientId=patient,
+            therapistId=therapist,
+            appointmentDateTime=appointmentDateTime,
+            duration=duration,
+            notes=notes
         )
-        
-        user.set_password(password)
-        user.save()
-        
-        if role == "patient":
-            Patient.objects.create(user=user, emergency_contact="123")
-        elif role == "therapist":
-            Therapist.objects.create(user=user, specialization="General", employment_date=datetime.now().date())
-        elif role == "admin":
-            Admin.objects.create(user=user, admin_role="General Admin")
-        
 
-        # ✅ Explicitly format create_date before returning
-        serializer = CustomUserSerializer(user)
-        response_data = serializer.data
-        response_data['create_date'] = user.create_date.strftime("%Y-%m-%d")  # Ensures correct date format
+        # Create notification for the patient
+        Notification.objects.create(
+            user=patient,
+            title="New Appointment Scheduled",
+            message=f"You have a new appointment scheduled with {therapist.username} on {appointmentDateTime.strftime('%d/%b/%Y at %I:%M %p')}",
+            notification_type='appointment',
+            related_id=str(appointment.appointmentId)
+        )
 
-        return JsonResponse(response_data, status=201)
+        # Create notification for the therapist
+        Notification.objects.create(
+            user=therapist,
+            title="New Appointment Created",
+            message=f"New appointment scheduled with {patient.username} on {appointmentDateTime.strftime('%d/%b/%Y at %I:%M %p')}",
+            notification_type='appointment',
+            related_id=str(appointment.appointmentId)
+        )
 
-    except ValidationError as e:
-        return JsonResponse({"error": str(e)}, status=400)
+        serializer = AppointmentSerializer(appointment)
+        return Response({
+            "message": "Appointment created successfully!",
+            "appointment": serializer.data
+        }, status=status.HTTP_201_CREATED)
+
     except Exception as e:
-        return JsonResponse({"error": str(e)}, status=500)
-
-
-WORKING_HOURS = [
-    ("09:00", "10:00"),
-    ("10:00", "11:00"),
-    ("11:00", "12:00"),
-    ("13:00", "14:00"),
-    ("14:00", "15:00"),
-    ("15:00", "16:00"),
-    ("16:00", "17:00"),
-]
-
-@api_view(["GET"])
-def get_available_slots(request, therapist_id, date):
-    try:
-        therapist = Therapist.objects.get(id=therapist_id)
-        date_obj = datetime.strptime(date, "%Y-%m-%d").date()
-
-        # Retrieve all booked slots for the therapist on the given date
-        booked_slots = Appointment.objects.filter(
-            therapistId=therapist, appointmentDateTime__date=date_obj
-        ).values_list("appointmentDateTime", flat=True)
-
-        # Convert booked slots to string format (HH:MM)
-        booked_times = {slot.strftime("%H:%M") for slot in booked_slots}
-
-        # Get available slots by subtracting booked times from working hours
-        available_slots = [
-            {"start": start, "end": end}
-            for start, end in WORKING_HOURS
-            if start not in booked_times
-        ]
-
-        return Response({"date": date, "available_slots": available_slots})
-    except Therapist.DoesNotExist:
-        return Response({"error": "Therapist not found"}, status=404)
-    except Exception as e:
-        return Response({"error": str(e)}, status=500)
-    
+        return Response({
+            "error": f"An error occurred: {str(e)}"
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 @api_view(['GET'])
-def therapist_weekly_schedule(request):
-    therapist_id = request.user.id  # Assuming authenticated therapist
-    week_start = request.GET.get('weekStart')
+def list_therapists(request):
+    try:
+        therapists = Therapist.objects.all()
+        
+        # Serialize the therapist data
+        data = [
+            {
+                "id": therapist.user.id,  # Therapist's unique user ID
+                "username": therapist.user.username,
+            }
+            for therapist in therapists
+        ]
 
-    if not week_start:
-        return JsonResponse({"error": "Start date of the week is required"}, status=400)
+        return Response(data, status=status.HTTP_200_OK)
+
+    except Exception as e:
+        return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+    
+@api_view(['GET'])
+def list_appointments(request):
+    try:
+        appointments = Appointment.objects.all()
+        data = [
+            {
+                "appointmentId": appt.appointmentId,
+                "patient": {
+                    "id": appt.patientId.id,
+                    "username": appt.patientId.username,
+                },
+                "therapist": {
+                    "id": appt.therapistId.id,
+                    "username": appt.therapistId.username,
+                },
+                "appointmentDateTime": appt.appointmentDateTime,
+                "status": appt.status,
+            }
+            for appt in appointments
+        ]
+        return Response(data, status=200)
+    except Exception as e:
+        return Response({"error": str(e)}, status=500)
+
+# Fetch Available Time slot for selected therapist
+@api_view(['GET'])
+def therapist_available_slots(request):
+    therapist_id = request.GET.get("therapist_id")
+    date = request.GET.get("date")
+
+    if not therapist_id or not date:
+        return Response({"error": "Missing therapist_id or date"}, status=status.HTTP_400_BAD_REQUEST)
 
     try:
-        week_start_date = datetime.strptime(week_start, "%Y-%m-%d").date()
+        # 获取指定日期的所有预约
+        appointments = Appointment.objects.filter(
+            therapistId__id=therapist_id,
+            appointmentDateTime__date=date
+        ).order_by('appointmentDateTime')
+
+        # 序列化预约数据
+        serializer = AppointmentSerializer(appointments, many=True)
+        
+        return Response({
+            "appointments": serializer.data
+        }, status=status.HTTP_200_OK)
+        
+    except Exception as e:
+        return Response(
+            {"error": f"Error fetching appointments: {str(e)}"},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+        )
+
+from django.utils.timezone import localdate
+
+@api_view(['GET'])
+def therapist_today_appointments(request):
+    therapist_id = request.GET.get("therapist_id")
+    date_str = request.GET.get("date")
+
+    if not therapist_id or not date_str:
+        return Response({"error": "Missing therapist_id or date"}, status=status.HTTP_400_BAD_REQUEST)
+
+    try:
+        # 将日期字符串转换为日期对象
+        selected_date = datetime.strptime(date_str, '%Y-%m-%d').date()
+        
+        # 获取当天的开始和结束时间（使用本地时区）
+        start_datetime = make_aware(datetime.combine(selected_date, time.min))
+        end_datetime = make_aware(datetime.combine(selected_date, time.max))
+
+        # 获取指定日期的预约
+        appointments = Appointment.objects.filter(
+            therapistId__id=therapist_id,
+            appointmentDateTime__range=(start_datetime, end_datetime)
+        ).order_by('appointmentDateTime')
+
+        serializer = AppointmentSerializer(appointments, many=True)
+        return Response(serializer.data, status=status.HTTP_200_OK)
     except ValueError:
-        return JsonResponse({"error": "Invalid date format. Use YYYY-MM-DD."}, status=400)
+        return Response({"error": "Invalid date format"}, status=status.HTTP_400_BAD_REQUEST)
+    except Exception as e:
+        return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
-    # Generate all dates for the week
-    week_dates = [(week_start_date + timedelta(days=i)).strftime("%Y-%m-%d") for i in range(7)]
+@api_view(['GET'])
+def therapist_upcoming_appointments(request):
+    therapist_id = request.GET.get("therapist_id")
 
-    # Fetch all appointments for the therapist in this week
-    booked_appointments = Appointment.objects.filter(
-        therapistId=therapist_id,
-        appointmentDateTime__date__range=[week_dates[0], week_dates[-1]]
-    )
+    if not therapist_id:
+        return Response({"error": "Missing therapist_id"}, status=status.HTTP_400_BAD_REQUEST)
 
-    # Create a dictionary of booked slots
-    weekly_schedule = {date: {slot: False for slot in timeSlots} for date in week_dates}
+    # Get today's date and 7 days later
+    today = localtime().date()
+    end_date = today + timedelta(days=7)
+    today = today + timedelta(days=1)
+    # Filter appointments within the next 7 days
+    upcoming_appointments = Appointment.objects.filter(
+        therapistId__id=therapist_id,
+        appointmentDateTime__date__range=[today, end_date]
+    ).order_by("appointmentDateTime")
 
-    for appointment in booked_appointments:
-        formatted_time = appointment.appointmentDateTime.strftime("%I:%M %p - %I:%M %p")
-        if appointment.appointmentDateTime.strftime("%Y-%m-%d") in weekly_schedule:
-            weekly_schedule[appointment.appointmentDateTime.strftime("%Y-%m-%d")][formatted_time] = True
+    serializer = AppointmentSerializer(upcoming_appointments, many=True)
+    return Response(serializer.data, status=status.HTTP_200_OK)
 
-    return JsonResponse(weekly_schedule, status=200)
+# Retrieve specific Patient Appointment
+@api_view(['GET'])
+def get_patient_appointments(request):
+    patient_id = request.GET.get("patient_id")
+
+    if not patient_id:
+        return Response({"error": "Missing patient_id"}, status=status.HTTP_400_BAD_REQUEST)
+
+    # Retrieve all appointments for this patient
+    appointments = Appointment.objects.filter(patientId__id=patient_id).order_by("-appointmentDateTime")
+    
+    serializer = AppointmentSerializer(appointments, many=True)
+    return Response(serializer.data, status=status.HTTP_200_OK)
+
+
+# Cancel Patient Appointment
+@api_view(['PUT'])
+def update_appointment_status(request, appointment_id):
+    try:
+        # Get the appointment by ID
+        appointment = get_object_or_404(Appointment, appointmentId=appointment_id)
+
+        # Get the new status and notes from request
+        data = request.data
+        new_status = data.get("status")
+        new_session_notes = data.get("sessionNotes")
+
+        if new_status not in ["Scheduled", "Cancelled", "Completed"]:
+            return Response({"error": "Invalid status"}, status=status.HTTP_400_BAD_REQUEST)
+
+        old_status = appointment.status
+        # Update the status and notes
+        appointment.status = new_status
+        if new_session_notes is not None:
+            appointment.sessionNotes = new_session_notes
+        appointment.save()
+
+        # Create notifications based on status change
+        if new_status != old_status:
+            if new_status == "Cancelled":
+                # Notify patient
+                Notification.objects.create(
+                    user=appointment.patientId,
+                    title="Appointment Cancelled",
+                    message=f"Your appointment with {appointment.therapistId.username} scheduled for {appointment.appointmentDateTime.strftime('%d/%b/%Y at %I:%M %p')} has been cancelled.",
+                    notification_type='appointment',
+                    related_id=appointment.appointmentId
+                )
+                # Notify therapist
+                Notification.objects.create(
+                    user=appointment.therapistId,
+                    title="Appointment Cancelled",
+                    message=f"The appointment with {appointment.patientId.username} scheduled for {appointment.appointmentDateTime.strftime('%d/%b/%Y at %I:%M %p')} has been cancelled.",
+                    notification_type='appointment',
+                    related_id=appointment.appointmentId
+                )
+            elif new_status == "Completed":
+                # Notify patient
+                Notification.objects.create(
+                    user=appointment.patientId,
+                    title="Appointment Completed",
+                    message=f"Your appointment with {appointment.therapistId.username} has been marked as completed.",
+                    notification_type='appointment',
+                    related_id=appointment.appointmentId
+                )
+                # Notify therapist
+                Notification.objects.create(
+                    user=appointment.therapistId,
+                    title="Appointment Completed",
+                    message=f"The appointment with {appointment.patientId.username} has been marked as completed.",
+                    notification_type='appointment',
+                    related_id=appointment.appointmentId
+                )
+
+        serializer = AppointmentSerializer(appointment)
+        return Response(
+            {
+                "message": f"Appointment {new_status} successfully",
+                "appointment": serializer.data
+            },
+            status=status.HTTP_200_OK
+        )
+
+    except Exception as e:
+        return Response(
+            {"error": f"An error occurred: {str(e)}"},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+        )
+
+
+
+@api_view(['GET'])
+def therapist_all_appointments(request):
+    therapist_id = request.GET.get("therapist_id")
+
+    if not therapist_id:
+        return Response({"error": "Missing therapist_id"}, status=status.HTTP_400_BAD_REQUEST)
+
+    # Fetch all appointments from now onward
+    appointments = Appointment.objects.filter(
+        therapistId__id=therapist_id,
+        appointmentDateTime__gte=now()
+    ).order_by("appointmentDateTime")
+
+    serializer = AppointmentSerializer(appointments, many=True)
+    return Response(serializer.data, status=status.HTTP_200_OK)
+
+@api_view(['GET'])
+def get_patient_history(request):
+    try:
+        # Get query parameters
+        search_query = request.GET.get('search', '')
+        
+        # Get all patients with their related user data and medical histories
+        patients = Patient.objects.select_related('user').prefetch_related(
+            'user__medical_histories'
+        ).all()
+        
+        # Apply search filter if provided
+        if search_query:
+            patients = patients.filter(
+                Q(user__username__icontains=search_query) |
+                Q(user__ic__icontains=search_query) |
+                Q(user__email__icontains=search_query)
+            )
+        
+        # Serialize the data
+        serializer = PatientHistorySerializer(patients, many=True)
+        return Response(serializer.data, status=status.HTTP_200_OK)
+    
+    except Exception as e:
+        return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+@api_view(['GET'])
+def get_patient_detail(request, patient_id):
+    try:
+        print(f"Fetching patient detail for ID: {patient_id}, type: {type(patient_id)}")
+        # Get patient with related user data and medical histories
+        patient = Patient.objects.select_related('user').prefetch_related(
+            'user__medical_histories'
+        ).get(id=patient_id)
+        
+        serializer = PatientHistorySerializer(patient)
+        return Response(serializer.data, status=status.HTTP_200_OK)
+    except Patient.DoesNotExist:
+        print(f"Patient not found with ID: {patient_id}")
+        return Response({'error': 'Patient not found'}, status=status.HTTP_404_NOT_FOUND)
+    except Exception as e:
+        print(f"Error fetching patient detail: {str(e)}")
+        return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+@api_view(['GET'])
+def list_patients(request):
+    try:
+        patients = CustomUser.objects.filter(role='patient', status=True)
+        
+        data = [{
+            'id': patient.id,
+            'username': patient.username,
+            'gender': patient.gender,
+            'contact_number': patient.contact_number,
+            'email': patient.email
+        } for patient in patients]
+        
+        return Response(data, status=status.HTTP_200_OK)
+    except Exception as e:
+        return Response(
+            {'error': str(e)}, 
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+        )
+
+@api_view(['GET'])
+def therapist_month_appointments(request):
+    therapist_id = request.GET.get("therapist_id")
+    start_date = request.GET.get("start_date")
+    end_date = request.GET.get("end_date")
+
+    if not all([therapist_id, start_date, end_date]):
+        return Response(
+            {"error": "Missing required parameters"},
+            status=status.HTTP_400_BAD_REQUEST
+        )
+
+    try:
+        # 获取指定日期范围内的所有预约
+        appointments = Appointment.objects.filter(
+            therapistId__id=therapist_id,
+            appointmentDateTime__date__range=[start_date, end_date]
+        ).order_by('appointmentDateTime')
+
+        serializer = AppointmentSerializer(appointments, many=True)
+        return Response(serializer.data, status=status.HTTP_200_OK)
+
+    except Exception as e:
+        return Response(
+            {"error": f"An error occurred: {str(e)}"},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+        )
+
+class NotificationListCreateView(generics.ListCreateAPIView):
+    serializer_class = NotificationSerializer
+    permission_classes = [permissions.AllowAny]  # 允许所有请求，但我们会在视图中处理认证
+
+    def get_queryset(self):
+        user_id = self.request.headers.get('X-User-ID')
+        if not user_id:
+            return Notification.objects.none()
+        try:
+            user = CustomUser.objects.get(id=user_id)
+            return Notification.objects.filter(user=user).order_by('-created_at')
+        except CustomUser.DoesNotExist:
+            return Notification.objects.none()
+
+    def perform_create(self, serializer):
+        user_id = self.request.headers.get('X-User-ID')
+        try:
+            user = CustomUser.objects.get(id=user_id)
+            serializer.save(user=user)
+        except CustomUser.DoesNotExist:
+            raise ValidationError('User not found')
+
+    def get(self, request, *args, **kwargs):
+        user_id = request.headers.get('X-User-ID')
+        if not user_id:
+            return Response({'error': 'X-User-ID header is required'}, status=status.HTTP_401_UNAUTHORIZED)
+            
+        try:
+            queryset = self.get_queryset()
+            serializer = self.get_serializer(queryset, many=True)
+            unread_count = queryset.filter(is_read=False).count()
+            
+            return Response({
+                'notifications': serializer.data,
+                'unread_count': unread_count
+            })
+        except Exception as e:
+            return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+class NotificationMarkReadView(generics.UpdateAPIView):
+    serializer_class = NotificationSerializer
+    permission_classes = [permissions.AllowAny]  # 允许所有请求，但我们会在视图中处理认证
+    
+    def get_queryset(self):
+        user_id = self.request.headers.get('X-User-ID')
+        if not user_id:
+            return Notification.objects.none()
+        try:
+            user = CustomUser.objects.get(id=user_id)
+            return Notification.objects.filter(user=user)
+        except CustomUser.DoesNotExist:
+            return Notification.objects.none()
+
+    def patch(self, request, *args, **kwargs):
+        user_id = request.headers.get('X-User-ID')
+        if not user_id:
+            return Response({'error': 'X-User-ID header is required'}, status=status.HTTP_401_UNAUTHORIZED)
+            
+        try:
+            if kwargs.get('pk') == 'all':
+                self.get_queryset().filter(is_read=False).update(is_read=True)
+                return Response({'status': 'All notifications marked as read'})
+            
+            notification = self.get_object()
+            notification.is_read = True
+            notification.save()
+            return Response({'status': 'Notification marked as read'})
+        except Exception as e:
+            return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+# Treatment Management Views
+
+@api_view(['GET', 'POST'])
+def treatment_templates(request):
+    """Get all treatment templates or create a new one"""
+    try:
+        if request.method == 'GET':
+            templates = TreatmentTemplate.objects.filter(is_active=True).prefetch_related('template_exercises__exercise_id')
+            
+            data = []
+            for template in templates:
+                template_exercises = []
+                for te in template.template_exercises.all():
+                    template_exercises.append({
+                        'exercise_id': str(te.exercise_id.exercise_id),
+                        'exercise_name': te.exercise_id.name,
+                        'body_part': te.exercise_id.body_part,
+                        'default_target_metrics': te.default_target_metrics,
+                        'default_repetitions': te.default_repetitions,
+                        'default_sets': te.default_sets,
+                        'default_pain_threshold': te.default_pain_threshold,
+                        'order_in_template': te.order_in_template,
+                        'is_required': te.is_required,
+                    })
+                
+                data.append({
+                    'template_id': str(template.template_id),
+                    'name': template.name,
+                    'treatment_type': template.treatment_type,
+                    'treatment_subtype': template.treatment_subtype,
+                    'condition': template.condition,
+                    'description': template.description,
+                    'default_frequency': template.default_frequency,
+                    'estimated_duration_weeks': template.estimated_duration_weeks,
+                    'is_active': template.is_active,
+                    'exercises': template_exercises,
+                })
+            
+            return Response(data, status=status.HTTP_200_OK)
+            
+        elif request.method == 'POST':
+            data = request.data
+            
+            # Get the therapist creating the template
+            created_by = None
+            if 'created_by' in data:
+                created_by = get_object_or_404(CustomUser, id=data['created_by'], role='therapist')
+            
+            template = TreatmentTemplate.objects.create(
+                name=data.get('name', 'Unnamed Template'),
+                treatment_type=data.get('treatment_type'),
+                treatment_subtype=data.get('treatment_subtype'),
+                condition=data.get('condition'),
+                description=data.get('description', ''),
+                default_frequency=data.get('default_frequency', ''),
+                estimated_duration_weeks=data.get('estimated_duration_weeks', 4),
+                is_active=data.get('is_active', True),
+                created_by=created_by,
+            )
+            
+            return Response({
+                'template_id': str(template.template_id),
+                'message': 'Template created successfully'
+            }, status=status.HTTP_201_CREATED)
+            
+    except Exception as e:
+        return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+@api_view(['GET', 'PUT', 'DELETE'])
+def treatment_template_detail(request, template_id):
+    """Get, update, or delete a specific treatment template with exercises"""
+    try:
+        template = TreatmentTemplate.objects.prefetch_related('template_exercises__exercise_id').get(template_id=template_id)
+        
+        if request.method == 'GET':
+            template_exercises = []
+            for te in template.template_exercises.all():
+                template_exercises.append({
+                    'exercise_id': str(te.exercise_id.exercise_id),
+                    'exercise_name': te.exercise_id.name,
+                    'body_part': te.exercise_id.body_part,
+                    'default_target_metrics': te.default_target_metrics,
+                    'default_repetitions': te.default_repetitions,
+                    'default_sets': te.default_sets,
+                    'default_pain_threshold': te.default_pain_threshold,
+                    'order_in_template': te.order_in_template,
+                    'is_required': te.is_required,
+                })
+            
+            data = {
+                'template_id': str(template.template_id),
+                'name': template.name,
+                'treatment_type': template.treatment_type,
+                'treatment_subtype': template.treatment_subtype,
+                'condition': template.condition,
+                'description': template.description,
+                'default_frequency': template.default_frequency,
+                'estimated_duration_weeks': template.estimated_duration_weeks,
+                'is_active': template.is_active,
+                'exercises': template_exercises,
+            }
+            
+            return Response(data, status=status.HTTP_200_OK)
+            
+        elif request.method == 'PUT':
+            data = request.data
+            
+            # Update fields if provided
+            if 'name' in data:
+                template.name = data['name']
+            if 'treatment_type' in data:
+                template.treatment_type = data['treatment_type']
+            if 'treatment_subtype' in data:
+                template.treatment_subtype = data['treatment_subtype']
+            if 'condition' in data:
+                template.condition = data['condition']
+            if 'description' in data:
+                template.description = data['description']
+            if 'default_frequency' in data:
+                template.default_frequency = data['default_frequency']
+            if 'estimated_duration_weeks' in data:
+                template.estimated_duration_weeks = data['estimated_duration_weeks']
+            if 'is_active' in data:
+                template.is_active = data['is_active']
+                
+            template.save()
+            
+            return Response({'message': 'Template updated successfully'}, status=status.HTTP_200_OK)
+            
+        elif request.method == 'DELETE':
+            template.is_active = False  # Soft delete
+            template.save()
+            return Response({'message': 'Template deleted successfully'}, status=status.HTTP_200_OK)
+            
+    except TreatmentTemplate.DoesNotExist:
+        return Response({'error': 'Template not found'}, status=status.HTTP_404_NOT_FOUND)
+    except Exception as e:
+        return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+@api_view(['GET', 'POST'])
+def treatments(request):
+    """Get all treatments or create a new treatment plan"""
+    try:
+        if request.method == 'GET':
+            treatments = Treatment.objects.all().select_related('patient_id', 'therapist_id', 'template_id').order_by('-created_at')
+            
+            data = []
+            for treatment in treatments:
+                # Get exercise count
+                exercise_count = TreatmentExercise.objects.filter(treatment_id=treatment.treatment_id).count()
+                
+                data.append({
+                    'treatment_id': str(treatment.treatment_id),
+                    'patient_name': treatment.patient_id.username if treatment.patient_id else 'Unknown',
+                    'patient_id': treatment.patient_id.id if treatment.patient_id else '',
+                    'therapist_name': treatment.therapist_id.username if treatment.therapist_id else 'Unknown',
+                    'therapist_id': treatment.therapist_id.id if treatment.therapist_id else '',
+                    'name': treatment.name,
+                    'treatment_type': treatment.treatment_type,
+                    'treatment_subtype': treatment.treatment_subtype,
+                    'condition': treatment.condition,
+                    'status': treatment.status,
+                    'frequency': treatment.frequency,
+                    'start_date': treatment.start_date,
+                    'end_date': treatment.end_date,
+                    'created_at': treatment.created_at,
+                    'creation_method': treatment.creation_method,
+                    'template_name': treatment.template_id.name if treatment.template_id else None,
+                    'exercise_count': exercise_count,
+                })
+            
+            return Response(data, status=status.HTTP_200_OK)
+            
+        elif request.method == 'POST':
+            data = request.data
+            
+            # Get patient and therapist
+            patient = get_object_or_404(CustomUser, id=data.get('patient_id'), role='patient')
+            therapist = get_object_or_404(CustomUser, id=data.get('therapist_id'), role='therapist')
+            
+            # Get template if using template
+            template = None
+            if data.get('template_id'):
+                template = get_object_or_404(TreatmentTemplate, template_id=data.get('template_id'))
+            
+            # Create treatment
+            treatment = Treatment.objects.create(
+                patient_id=patient,
+                therapist_id=therapist,
+                template_id=template,
+                creation_method='template' if template else 'custom',
+                name=data.get('name', template.name if template else 'Unnamed Treatment'),
+                treatment_type=data.get('treatment_type'),
+                treatment_subtype=data.get('treatment_subtype'),
+                frequency=data.get('frequency'),
+                start_date=data.get('start_date'),
+                status=data.get('status', 'active'),
+            )
+            
+            return Response({
+                'treatment_id': str(treatment.treatment_id),
+                'message': 'Treatment created successfully'
+            }, status=status.HTTP_201_CREATED)
+        
+    except Exception as e:
+        return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+@api_view(['GET'])
+def therapist_treatments(request, therapist_id):
+    """Get all treatments for a therapist"""
+    try:
+        treatments = Treatment.objects.filter(therapist_id=therapist_id).select_related('patient_id', 'template_id')
+        
+        data = []
+        for treatment in treatments:
+            data.append({
+                'treatment_id': str(treatment.treatment_id),
+                'patient_name': treatment.patient_id.username,
+                'patient_id': treatment.patient_id.id,
+                'name': treatment.name,
+                'treatment_type': treatment.treatment_type,
+                'treatment_subtype': treatment.treatment_subtype,
+                'condition': treatment.condition,
+                'status': treatment.status,
+                'frequency': treatment.frequency,
+                'start_date': treatment.start_date,
+                'end_date': treatment.end_date,
+                'created_at': treatment.created_at,
+                'creation_method': treatment.creation_method,
+                'template_name': treatment.template_id.name if treatment.template_id else None,
+            })
+        
+        return Response(data, status=status.HTTP_200_OK)
+    except Exception as e:
+        return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+@api_view(['GET'])
+def treatment_exercises(request, treatment_id):
+    """Get all exercises for a treatment"""
+    try:
+        exercises = TreatmentExercise.objects.filter(treatment_id=treatment_id).select_related('exercise_id')
+        
+        data = []
+        for te in exercises:
+            data.append({
+                'exercise_id': str(te.treatment_exercise_id),
+                'exercise_name': te.exercise_id.name if te.exercise_id else 'Custom Exercise',
+                'body_part': te.exercise_id.body_part if te.exercise_id else 'N/A',
+                'target_metrics': te.target_metrics,
+                'repetitions': te.repetitions,
+                'sets': te.sets,
+                'pain_threshold': te.pain_threshold,
+                'order_in_treatment': te.order_in_treatment,
+                'is_active': te.is_active,
+            })
+        
+        return Response(data, status=status.HTTP_200_OK)
+    except Exception as e:
+        return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+@api_view(['POST'])
+def create_treatment_exercise(request):
+    """Create a new exercise for a treatment"""
+    try:
+        data = request.data
+        
+        treatment = get_object_or_404(Treatment, treatment_id=data.get('treatment_id'))
+        
+        # Try to find existing exercise or create custom one
+        exercise = None
+        exercise_name = data.get('exercise_name')
+        body_part = data.get('body_part', 'general')
+        
+        if data.get('exercise_id'):
+            exercise = get_object_or_404(Exercise, exercise_id=data.get('exercise_id'))
+        else:
+            # Create a new exercise if it doesn't exist
+            exercise, created = Exercise.objects.get_or_create(
+                name=exercise_name,
+                body_part=body_part,
+                defaults={
+                    'category': 'custom',
+                    'difficulty': 'beginner',
+                    'default_metrics': data.get('target_metrics', {}),
+                    'instructions': f'Custom exercise: {exercise_name}',
+                }
+            )
+        
+        treatment_exercise = TreatmentExercise.objects.create(
+            treatment_id=treatment,
+            exercise_id=exercise,
+            target_metrics=data.get('target_metrics', {}),
+            repetitions=data.get('repetitions'),
+            sets=data.get('sets'),
+            pain_threshold=data.get('pain_threshold'),
+            order_in_treatment=data.get('order_in_treatment', 1),
+        )
+        
+        return Response({
+            'exercise_id': str(treatment_exercise.treatment_exercise_id),
+            'message': 'Treatment exercise created successfully'
+        }, status=status.HTTP_201_CREATED)
+        
+    except Exception as e:
+        return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+@api_view(['GET', 'PATCH', 'DELETE'])
+def treatment_detail(request, treatment_id):
+    """Get, update, or delete a treatment"""
+    try:
+        treatment = get_object_or_404(Treatment, treatment_id=treatment_id)
+        
+        if request.method == 'GET':
+            # Get exercise count
+            exercise_count = TreatmentExercise.objects.filter(treatment_id=treatment.treatment_id).count()
+            
+            data = {
+                'treatment_id': str(treatment.treatment_id),
+                'patient_name': treatment.patient_id.username if treatment.patient_id else 'Unknown',
+                'patient_id': treatment.patient_id.id if treatment.patient_id else '',
+                'therapist_name': treatment.therapist_id.username if treatment.therapist_id else 'Unknown',
+                'therapist_id': treatment.therapist_id.id if treatment.therapist_id else '',
+                'name': treatment.name,
+                'treatment_type': treatment.treatment_type,
+                'treatment_subtype': treatment.treatment_subtype,
+                'condition': treatment.condition,
+                'status': treatment.status,
+                'frequency': treatment.frequency,
+                'start_date': treatment.start_date,
+                'end_date': treatment.end_date,
+                'created_at': treatment.created_at,
+                'creation_method': treatment.creation_method,
+                'template_name': treatment.template_id.name if treatment.template_id else None,
+                'exercise_count': exercise_count,
+            }
+            
+            return Response(data, status=status.HTTP_200_OK)
+            
+        elif request.method == 'PATCH':
+            data = request.data
+            
+            # Update fields if provided
+            if 'name' in data:
+                treatment.name = data['name']
+            if 'treatment_type' in data:
+                treatment.treatment_type = data['treatment_type']
+            if 'treatment_subtype' in data:
+                treatment.treatment_subtype = data['treatment_subtype']
+            if 'condition' in data:
+                treatment.condition = data['condition']
+            if 'status' in data:
+                treatment.status = data['status']
+            if 'frequency' in data:
+                treatment.frequency = data['frequency']
+            if 'end_date' in data:
+                treatment.end_date = data['end_date']
+                
+            treatment.save()
+            
+            return Response({'message': 'Treatment updated successfully'}, status=status.HTTP_200_OK)
+            
+        elif request.method == 'DELETE':
+            treatment.delete()
+            return Response({'message': 'Treatment deleted successfully'}, status=status.HTTP_200_OK)
+        
+    except Exception as e:
+        return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+@api_view(['PATCH'])
+def update_treatment_exercise(request, exercise_id):
+    """Update a treatment exercise"""
+    try:
+        exercise = get_object_or_404(TreatmentExercise, treatment_exercise_id=exercise_id)
+        data = request.data
+        
+        # Update fields if provided
+        if 'target_metrics' in data:
+            exercise.target_metrics = data['target_metrics']
+        if 'repetitions' in data:
+            exercise.repetitions = data['repetitions']
+        if 'sets' in data:
+            exercise.sets = data['sets']
+        if 'pain_threshold' in data:
+            exercise.pain_threshold = data['pain_threshold']
+            
+        exercise.save()
+        
+        return Response({'message': 'Treatment exercise updated successfully'}, status=status.HTTP_200_OK)
+        
+    except Exception as e:
+        return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+@api_view(['GET'])
+def list_exercises(request):
+    """Get all available exercises"""
+    try:
+        exercises = Exercise.objects.all().order_by('category', 'name')
+        
+        data = []
+        for exercise in exercises:
+            data.append({
+                'exercise_id': str(exercise.exercise_id),
+                'exercise_name': exercise.name,
+                'body_part': exercise.body_part,
+                'category': exercise.category,
+                'difficulty': exercise.difficulty,
+                'description': exercise.instructions,  # Using instructions as description for compatibility
+                'instructions': exercise.instructions,
+                'default_target_metrics': exercise.default_metrics,
+                'default_repetitions': 10,  # Default values for frontend compatibility
+                'default_sets': 3,
+                'default_pain_threshold': 5,
+                'demo_video_url': exercise.demo_video_url,
+                'created_at': exercise.created_at,
+                'created_by_name': exercise.created_by.username if exercise.created_by else 'System',
+                'is_active': exercise.is_active,  # Include is_active field
+            })
+        
+        return Response(data, status=status.HTTP_200_OK)
+    except Exception as e:
+        return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+@api_view(['POST'])
+def create_exercise(request):
+    """Create a new exercise"""
+    try:
+        data = request.data
+        
+        # Get the therapist creating the exercise
+        created_by = None
+        if 'created_by' in data:
+            created_by = get_object_or_404(CustomUser, id=data['created_by'], role='therapist')
+        
+        exercise = Exercise.objects.create(
+            name=data.get('name', 'Unnamed Exercise'),
+            body_part=data.get('body_part', 'general'),
+            category=data.get('category', 'general'),
+            difficulty=data.get('difficulty', 'beginner'),
+            default_metrics=data.get('default_metrics', {}),
+            instructions=data.get('instructions', 'No instructions provided'),
+            demo_video_url=data.get('demo_video_url'),
+            created_by=created_by,
+        )
+        
+        return Response({
+            'exercise_id': str(exercise.exercise_id),
+            'message': 'Exercise created successfully'
+        }, status=status.HTTP_201_CREATED)
+        
+    except Exception as e:
+        return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+@api_view(['GET', 'PUT', 'DELETE'])
+def exercise_detail(request, exercise_id):
+    """Get, update, or delete a specific exercise by ID"""
+    try:
+        exercise = get_object_or_404(Exercise, exercise_id=exercise_id)
+        
+        if request.method == 'GET':
+            data = {
+                'exercise_id': str(exercise.exercise_id),
+                'exercise_name': exercise.name,
+                'body_part': exercise.body_part,
+                'category': exercise.category,
+                'difficulty': exercise.difficulty,
+                'description': exercise.instructions,
+                'instructions': exercise.instructions,
+                'default_target_metrics': exercise.default_metrics,
+                'default_sets': 3,  # Default values
+                'default_repetitions': 10,
+                'default_pain_threshold': 5,
+                'demo_video_url': exercise.demo_video_url,
+                'is_active': exercise.is_active,
+                'created_at': exercise.created_at,
+                'created_by_name': exercise.created_by.username if exercise.created_by else 'System',
+            }
+            return Response(data, status=status.HTTP_200_OK)
+            
+        elif request.method == 'PUT':
+            data = request.data
+            
+            # Update fields if provided
+            if 'exercise_name' in data:
+                exercise.name = data['exercise_name']
+            if 'body_part' in data:
+                exercise.body_part = data['body_part']
+            if 'category' in data:
+                exercise.category = data['category']
+            if 'difficulty' in data:
+                exercise.difficulty = data['difficulty']
+            if 'description' in data:
+                exercise.instructions = data['description']
+            if 'instructions' in data:
+                exercise.instructions = data['instructions']
+            if 'default_target_metrics' in data:
+                exercise.default_metrics = data['default_target_metrics']
+            if 'demo_video_url' in data:
+                exercise.demo_video_url = data['demo_video_url']
+            if 'is_active' in data:
+                exercise.is_active = data['is_active']
+                
+            exercise.save()
+            
+            return Response({'message': 'Exercise updated successfully'}, status=status.HTTP_200_OK)
+            
+        elif request.method == 'DELETE':
+            exercise.is_active = False  # Soft delete
+            exercise.save()
+            return Response({'message': 'Exercise deleted successfully'}, status=status.HTTP_200_OK)
+            
+    except Exercise.DoesNotExist:
+        return Response({'error': 'Exercise not found'}, status=status.HTTP_404_NOT_FOUND)
+    except Exception as e:
+        return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)

@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { TextField, Button, IconButton, InputAdornment, Typography, Box } from '@mui/material';
 import { Visibility, VisibilityOff } from '@mui/icons-material';
 import logo from '../../static/images/logo.png';
+import api from '../../utils/axiosConfig';
 
 function LoginPage() {
   const [formData, setFormData] = useState({
@@ -38,10 +39,11 @@ function LoginPage() {
 
   // Handle input changes
   const handleChange = (e) => {
-    setFormData({
-      ...formData,
-      [e.target.name]: e.target.value,
-    });
+    const { name, value } = e.target;
+    setFormData(prevState => ({
+      ...prevState,
+      [name]: value
+    }));
     setError(''); // Clear any errors on input change
   };
 
@@ -54,45 +56,34 @@ function LoginPage() {
   };
 
   // Handle form submission
-  const handleSubmit = (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault();
+    setError('');
 
-    // Client-side validation
     if (!formData.id || !formData.password) {
       setError('Both user id and password are required.');
       return;
     }
 
-    // Call backend API for login
-    fetch('http://127.0.0.1:8000/api/login/', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
+    try {
+      const response = await api.post('/login/', {
         id: formData.id,
-        password: formData.password,
-      }),
-      credentials: 'include', // Include cookies from the backend
-    })
-      .then((response) => response.json())
-      .then((data) => {
-        if (data.success) {
-          // Save user data in localStorage
-          localStorage.setItem('userId', data.id);
-          localStorage.setItem('username', data.username);
-          localStorage.setItem('role', data.role);
-          
-
-          // Navigate to the appropriate dashboard
-          navigate('/Home');
-        } else {
-          setError(data.error || 'Invalid username or password.');
-        }
-      })
-      .catch(() => {
-        setError('An error occurred. Please try again later.');
+        password: formData.password
       });
+
+      const data = response.data;
+      if (data.success) {
+        localStorage.setItem('id', data.id);
+        localStorage.setItem('userId', data.userId || data.id);  // Store userId for consistency
+        localStorage.setItem('username', data.username);
+        localStorage.setItem('role', data.role);
+        navigate('/home');
+      } else {
+        setError(data.error || 'Invalid username or password.');
+      }
+    } catch (error) {
+      setError(error.response?.data?.error || 'An error occurred. Please try again later.');
+    }
   };
 
   return (
