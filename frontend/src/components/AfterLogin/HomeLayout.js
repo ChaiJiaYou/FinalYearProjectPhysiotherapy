@@ -139,7 +139,7 @@ function HomeLayout() {
           { text: "Appointment Overview", icon: <Event />, path: "/admin-appointments" },
           { text: "Treatment Admin", icon: <AdminPanelSettings />, path: "/admin-treatment" },
           { text: "Reports & Analytics", icon: <Assignment />, path: "/reports" },
-          { text: "Patient Information", icon: <HistoryEdu />, path : "/patient-info" },
+          { text: "Patient Information", icon: <HistoryEdu />, path : "/patients" },
           { text: "Profile", icon: <AccountCircle />, path: "/profile" },
         ];
       case "patient":
@@ -155,7 +155,7 @@ function HomeLayout() {
           { text: "My Schedule", icon: <Event />, path: "/schedule" },
           { text: "Appointment", icon: <Event />, path: "/therapist-appointments" },
           { text: "Treatment Management", icon: <MedicalServices />, path: "/treatment" },
-          { text: "Patient Information", icon: <HistoryEdu />, path : "/patient-info" },
+          { text: "Patient Information", icon: <HistoryEdu />, path : "/patients" },
           { text: "Patient Reports", icon: <Assessment />, path: "/patient-reports" },
           { text: "Profile", icon: <AccountCircle />, path: "/profile" },
         ];

@@ -12,6 +12,8 @@ import AdminTherapistAppointments from './components/AfterLogin/Appointment/Admi
 import TherapistSchedule from './components/Therapist/TherapistSchedule';
 import { TreatmentManagement } from './components/AfterLogin/Treatment/Therapist';
 import { TreatmentAdminCenter } from './components/AfterLogin/Treatment/Admin';
+import PatientListPage from './components/AfterLogin/PatientInfo/PatientListPage';
+import PatientDetailPage from './components/AfterLogin/PatientInfo/PatientDetailPage';
 
 function App() {
   return (
@@ -28,6 +30,8 @@ function App() {
         <Route path="schedule" element={<TherapistSchedule />} />
         <Route path="treatment" element={<TreatmentManagement />} />
         <Route path="admin-treatment" element={<TreatmentAdminCenter />} />
+        <Route path="patients" element={<PatientListPage />} />
+        <Route path="patients/:patientId" element={<PatientDetailPage />} />
       </Route>
       <Route path="*" element={<LoginPage />} />
     </Routes>
