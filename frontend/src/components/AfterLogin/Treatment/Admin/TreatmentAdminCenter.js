@@ -15,12 +15,10 @@ import {
 import {
   Dashboard as DashboardIcon,
   Assignment as TemplateIcon,
-  FitnessCenter as ExerciseIcon,
   List as TreatmentIcon,
   TrendingUp as StatsIcon,
 } from "@mui/icons-material";
 import TemplateManagement from "./TemplateManagement";
-import ExerciseManagement from "./ExerciseManagement";
 import TreatmentList from "./TreatmentList";
 
 const TreatmentAdminCenter = () => {
@@ -33,7 +31,6 @@ const TreatmentAdminCenter = () => {
   const tabs = [
     { label: "Treatments", icon: <TreatmentIcon />, component: <TreatmentList /> },
     { label: "Templates", icon: <TemplateIcon />, component: <TemplateManagement /> },
-    { label: "Exercises", icon: <ExerciseIcon />, component: <ExerciseManagement /> },
   ];
 
   return (
@@ -49,7 +46,7 @@ const TreatmentAdminCenter = () => {
               Treatment Administration
             </Typography>
             <Typography variant="h6" color="text.secondary">
-              Manage treatments, templates, and exercises
+              Manage treatments and templates
             </Typography>
           </Box>
         </Box>

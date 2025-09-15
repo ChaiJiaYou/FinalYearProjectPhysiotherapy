@@ -15,6 +15,8 @@ urlpatterns = [
     path('update-user-status/<str:user_id>/', views.update_user_status, name='update-user-status'),
     path('get-user/<str:user_id>/', views.get_user, name='get_user'),
     path('update-user/<str:user_id>/', views.update_user, name="update_user"),
+    path('change-password/', views.change_password, name='change-password'),
+    path('change-user-password/<str:user_id>/', views.change_user_password, name='change-user-password'),
     path('list-patients/', views.list_patients, name='list-patients'),
 
     #Appointment
@@ -53,6 +55,25 @@ urlpatterns = [
     path('exercises/', views.list_exercises, name='list-exercises'),
     path('exercises/<str:exercise_id>/', views.exercise_detail, name='exercise-detail'),
     path('create-exercise/', views.create_exercise, name='create-exercise'),
+
+    path('detect-pose/', views.detect_pose, name='detect-pose'),
+
+    # New Action Learning API Endpoints
+    path('actions/', views.list_actions, name='list-actions'),
+    path('actions/create/', views.create_action, name='create-action'),
+    path('actions/<int:action_id>/', views.action_detail, name='action-detail'),
+    path('actions/<int:action_id>/record/', views.upload_record, name='upload-record'),
+    path('actions/<int:action_id>/finalize/', views.finalize_action, name='finalize-action'),
+    path('actions/<int:action_id>/setup/', views.setup_action_inference, name='setup-action-inference'),
+    
+    # Real-time inference endpoints
+    path('infer/stream/', views.infer_stream, name='infer-stream'),
+    path('infer/reset/', views.reset_inference, name='reset-inference'),
+    path('infer/status/', views.inference_status, name='inference-status'),
+    
+    # Legacy mode support
+    path('legacy/mode-status/', views.legacy_mode_status, name='legacy-mode-status'),
+    path('legacy/detect-pose/', views.legacy_detect_pose, name='legacy-detect-pose'),
 ]
 
 urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)

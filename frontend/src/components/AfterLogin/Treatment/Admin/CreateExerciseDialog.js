@@ -19,12 +19,18 @@ import {
   Paper,
   Divider,
   Alert,
+  Accordion,
+  AccordionSummary,
+  AccordionDetails,
 } from "@mui/material";
 import {
   FitnessCenter as ExerciseIcon,
   Save as SaveIcon,
 } from "@mui/icons-material";
+import ExpandMoreIcon from "@mui/icons-material/ExpandMore";
 import { toast } from "react-toastify";
+import BodyPartPicker from "./BodyPartPicker";
+import RuleTypeIllustrations from "./RuleTypeIllustrations";
 
 const BODY_PARTS = [
   { value: 'shoulder', label: 'Shoulder' },
@@ -50,6 +56,29 @@ const CATEGORIES = [
   { value: 'stabilization', label: 'Stabilization' },
 ];
 
+// Simple keypoint indices for presets
+const KP = {
+  leftShoulder: 5,
+  rightShoulder: 6,
+  leftElbow: 7,
+  rightElbow: 8,
+  leftWrist: 9,
+  rightWrist: 10,
+  leftHip: 11,
+  rightHip: 12,
+  leftKnee: 13,
+  rightKnee: 14,
+  leftAnkle: 15,
+  rightAnkle: 16,
+};
+
+const RULE_TYPES = [
+  { value: 'angle', label: 'Angle (关节角度)' },
+  { value: 'distance', label: 'Distance (两点距离)' },
+  { value: 'direction', label: 'Direction (位移方向累计)' },
+  { value: 'position', label: 'Position (坐标范围)' },
+];
+
 const CreateExerciseDialog = ({ open, onClose, onSuccess, editingExercise }) => {
   const [loading, setLoading] = useState(false);
   const [formData, setFormData] = useState({
@@ -60,13 +89,57 @@ const CreateExerciseDialog = ({ open, onClose, onSuccess, editingExercise }) => 
     category: '',
     default_sets: 3,
     default_repetitions: 10,
-    default_pain_threshold: 5,
-    default_target_metrics: {
-      repetitions: 10,
-      hold_sec: 2,
-    },
     is_active: true,
+    detection_rules: null,
   });
+
+  // Detection rule builder state
+  const [enableRule, setEnableRule] = useState(false);
+  const [ruleType, setRuleType] = useState('angle');
+  const [ruleSide, setRuleSide] = useState('auto');
+  const [ruleAxis, setRuleAxis] = useState('y');
+  const [ruleDirection, setRuleDirection] = useState('down');
+  const [confirmFrames, setConfirmFrames] = useState(3);
+  const [rangeMin, setRangeMin] = useState(0);
+  const [rangeMax, setRangeMax] = useState(60);
+  const [countThreshold, setCountThreshold] = useState(0.12);
+
+  const buildPoints = () => {
+    if (ruleType === 'angle') {
+      return ruleSide === 'right'
+        ? [KP.rightShoulder, KP.rightElbow, KP.rightWrist]
+        : [KP.leftShoulder, KP.leftElbow, KP.leftWrist];
+    }
+    if (ruleType === 'distance') {
+      return ruleSide === 'right'
+        ? [KP.rightKnee, KP.rightAnkle]
+        : [KP.leftKnee, KP.leftAnkle];
+    }
+    if (ruleType === 'position' || ruleType === 'direction') {
+      return ruleSide === 'right' ? [KP.rightWrist] : [KP.leftWrist];
+    }
+    return [];
+  };
+
+  const getComposedDetectionRules = () => {
+    if (!enableRule) return null;
+    const rule = { type: ruleType, points: buildPoints() };
+    if (ruleType === 'angle' || ruleType === 'distance' || ruleType === 'position') {
+      rule.range = [Number(rangeMin), Number(rangeMax)];
+    }
+    if (ruleType === 'position') {
+      rule.axis = ruleAxis;
+    }
+    if (ruleType === 'direction') {
+      rule.axis = ruleAxis;
+      rule.direction = ruleDirection;
+      rule.count_threshold = Number(countThreshold);
+    }
+    return {
+      confirmFrames: Number(confirmFrames) || 3,
+      rules: [rule],
+    };
+  };
 
   useEffect(() => {
     if (editingExercise) {
@@ -78,13 +151,32 @@ const CreateExerciseDialog = ({ open, onClose, onSuccess, editingExercise }) => 
         category: editingExercise.category || '',
         default_sets: editingExercise.default_sets || 3,
         default_repetitions: editingExercise.default_repetitions || 10,
-        default_pain_threshold: editingExercise.default_pain_threshold || 5,
-        default_target_metrics: editingExercise.default_target_metrics || {
-          repetitions: 10,
-          hold_sec: 2,
-        },
         is_active: editingExercise.is_active !== undefined ? editingExercise.is_active : true,
+        detection_rules: editingExercise.detection_rules || null,
       });
+
+      const dr = editingExercise.detection_rules;
+      if (dr) {
+        setEnableRule(true);
+        if (typeof dr.confirmFrames === 'number') setConfirmFrames(dr.confirmFrames);
+        const r0 = Array.isArray(dr.rules) ? dr.rules[0] : (dr.type ? dr : null);
+        if (r0) {
+          if (r0.type) setRuleType(r0.type);
+          if (r0.axis) setRuleAxis(r0.axis);
+          if (r0.direction) setRuleDirection(r0.direction);
+          if (Array.isArray(r0.range)) {
+            setRangeMin(Number(r0.range[0] ?? 0));
+            setRangeMax(Number(r0.range[1] ?? 0));
+          } else {
+            if (r0.type === 'angle') { setRangeMin(0); setRangeMax(60); }
+            if (r0.type === 'distance') { setRangeMin(0.35); setRangeMax(1.0); }
+            if (r0.type === 'position') { setRangeMin(0.0); setRangeMax(0.3); }
+          }
+          if (typeof r0.count_threshold === 'number') setCountThreshold(r0.count_threshold);
+        }
+      } else {
+        setEnableRule(false);
+      }
     } else if (open) {
       resetForm();
     }
@@ -99,13 +191,17 @@ const CreateExerciseDialog = ({ open, onClose, onSuccess, editingExercise }) => 
       category: '',
       default_sets: 3,
       default_repetitions: 10,
-      default_pain_threshold: 5,
-      default_target_metrics: {
-        repetitions: 10,
-        hold_sec: 2,
-      },
       is_active: true,
+      detection_rules: null,
     });
+    setEnableRule(false);
+    setRuleType('angle');
+    setRuleSide('auto');
+    setRuleAxis('y');
+    setRuleDirection('down');
+    setConfirmFrames(3);
+    setRangeMin(0); setRangeMax(60);
+    setCountThreshold(0.12);
   };
 
   const handleChange = (field, value) => {
@@ -115,34 +211,22 @@ const CreateExerciseDialog = ({ open, onClose, onSuccess, editingExercise }) => 
     }));
   };
 
-  const handleTargetMetricChange = (key, value) => {
-    setFormData(prev => ({
-      ...prev,
-      default_target_metrics: {
-        ...prev.default_target_metrics,
-        [key]: value
-      }
-    }));
-  };
+  // removed hold duration/target metrics editor
 
   const handleSubmit = async () => {
     try {
       setLoading(true);
-      
       const url = editingExercise 
         ? `http://127.0.0.1:8000/api/exercises/${editingExercise.exercise_id}/`
         : "http://127.0.0.1:8000/api/exercises/";
-      
       const method = editingExercise ? "PUT" : "POST";
-
+      const detection = getComposedDetectionRules();
+      const payload = { ...formData, detection_rules: detection || null };
       const response = await fetch(url, {
         method,
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify(formData),
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
       });
-
       if (response.ok) {
         toast.success(`Exercise ${editingExercise ? 'updated' : 'created'} successfully!`);
         onSuccess();
@@ -211,26 +295,16 @@ const CreateExerciseDialog = ({ open, onClose, onSuccess, editingExercise }) => 
                 label="Instructions"
                 value={formData.instructions}
                 onChange={(e) => handleChange('instructions', e.target.value)}
-                placeholder="1. Starting position: ...&#10;2. Movement: ...&#10;3. End position: ..."
+                placeholder="1. Starting position: ...\n2. Movement: ...\n3. End position: ..."
                 helperText="Provide step-by-step instructions for performing the exercise"
               />
             </Grid>
 
             <Grid item xs={12} sm={6}>
-              <FormControl fullWidth required>
-                <InputLabel>Body Part</InputLabel>
-                <Select
-                  value={formData.body_part}
-                  onChange={(e) => handleChange('body_part', e.target.value)}
-                  label="Body Part"
-                >
-                  {BODY_PARTS.map((part) => (
-                    <MenuItem key={part.value} value={part.value}>
-                      {part.label}
-                    </MenuItem>
-                  ))}
-                </Select>
-              </FormControl>
+              <BodyPartPicker
+                value={formData.body_part}
+                onChange={(part) => handleChange('body_part', part)}
+              />
             </Grid>
 
             <Grid item xs={12} sm={6}>
@@ -281,44 +355,178 @@ const CreateExerciseDialog = ({ open, onClose, onSuccess, editingExercise }) => 
               />
             </Grid>
 
-            <Grid item xs={12} sm={4}>
-              <TextField
-                fullWidth
-                type="number"
-                label="Default Pain Threshold (1-10)"
-                value={formData.default_pain_threshold}
-                onChange={(e) => handleChange('default_pain_threshold', parseInt(e.target.value))}
-                inputProps={{ min: 1, max: 10 }}
-                helperText="Default pain threshold level"
-              />
-            </Grid>
 
             <Grid item xs={12}>
-              <Typography variant="subtitle1" sx={{ mb: 2, fontWeight: 'medium' }}>
-                Default Target Metrics
+              <Divider sx={{ my: 2 }} />
+              <Typography variant="h6" sx={{ mb: 1.5, color: 'primary.main' }}>
+                Detection Rule (Optional)
               </Typography>
-              <Grid container spacing={2}>
-                <Grid item xs={12} sm={6}>
-                  <TextField
-                    fullWidth
-                    type="number"
-                    label="Target Repetitions"
-                    value={formData.default_target_metrics.repetitions}
-                    onChange={(e) => handleTargetMetricChange('repetitions', parseInt(e.target.value))}
-                    inputProps={{ min: 1, max: 100 }}
+              <FormControlLabel
+                control={
+                  <Switch
+                    checked={enableRule}
+                    onChange={(e) => setEnableRule(e.target.checked)}
+                    color="primary"
                   />
-                </Grid>
-                <Grid item xs={12} sm={6}>
-                  <TextField
-                    fullWidth
-                    type="number"
-                    label="Hold Duration (seconds)"
-                    value={formData.default_target_metrics.hold_sec}
-                    onChange={(e) => handleTargetMetricChange('hold_sec', parseInt(e.target.value))}
-                    inputProps={{ min: 0, max: 60 }}
-                  />
-                </Grid>
-              </Grid>
+                }
+                label={
+                  <Box>
+                    <Typography variant="body1">Enable Movement Counting</Typography>
+                    <Typography variant="body2" color="text.secondary">
+                      Turn on to define how repetitions are detected in real-time
+                    </Typography>
+                  </Box>
+                }
+              />
+
+              {enableRule && (
+                <Box sx={{ mt: 2, p: 2, border: '1px solid', borderColor: 'divider', borderRadius: 1 }}>
+                  <Grid container spacing={2}>
+                    <Grid item xs={12} sm={6} md={4}>
+                      <FormControl fullWidth>
+                        <InputLabel>Rule Type</InputLabel>
+                        <Select value={ruleType} label="Rule Type" onChange={(e) => {
+                          const v = e.target.value; setRuleType(v);
+                          if (v === 'angle') { setRangeMin(0); setRangeMax(60); }
+                          if (v === 'distance') { setRangeMin(0.35); setRangeMax(1.0); }
+                          if (v === 'position') { setRangeMin(0.0); setRangeMax(0.3); setRuleAxis('y'); }
+                          if (v === 'direction') { setRuleAxis('y'); setRuleDirection('down'); setCountThreshold(0.12); }
+                        }}>
+                          {RULE_TYPES.map(t => (
+                            <MenuItem key={t.value} value={t.value}>{t.label}</MenuItem>
+                          ))}
+                        </Select>
+                      </FormControl>
+                    </Grid>
+
+                    <Grid item xs={12} sm={6} md={4}>
+                      <FormControl fullWidth>
+                        <InputLabel>Side</InputLabel>
+                        <Select value={ruleSide} label="Side" onChange={(e) => setRuleSide(e.target.value)}>
+                          <MenuItem value="auto">Auto (choose clearer side)</MenuItem>
+                          <MenuItem value="left">Left</MenuItem>
+                          <MenuItem value="right">Right</MenuItem>
+                        </Select>
+                      </FormControl>
+                    </Grid>
+
+                    <Grid item xs={12} sm={6} md={4}>
+                      <TextField
+                        fullWidth
+                        type="number"
+                        label="Confirm Frames"
+                        value={confirmFrames}
+                        onChange={(e) => setConfirmFrames(parseInt(e.target.value) || 1)}
+                        inputProps={{ min: 1, max: 30 }}
+                        helperText="How many consecutive frames must meet the rule to confirm"
+                      />
+                    </Grid>
+
+                    {(ruleType === 'angle' || ruleType === 'distance' || ruleType === 'position') && (
+                      <>
+                        <Grid item xs={12} sm={6} md={4}>
+                          <TextField
+                            fullWidth
+                            type="number"
+                            label={ruleType === 'angle' ? 'Range Min (deg)' : (ruleType === 'distance' ? 'Range Min (0-1)' : 'Range Min (0-1)')}
+                            value={rangeMin}
+                            onChange={(e) => setRangeMin(Number(e.target.value))}
+                            helperText={ruleType === 'angle' ? 'Lower bound of angle in degrees' : 'Lower bound of normalized value'}
+                          />
+                        </Grid>
+                        <Grid item xs={12} sm={6} md={4}>
+                          <TextField
+                            fullWidth
+                            type="number"
+                            label={ruleType === 'angle' ? 'Range Max (deg)' : (ruleType === 'distance' ? 'Range Max (0-1)' : 'Range Max (0-1)')}
+                            value={rangeMax}
+                            onChange={(e) => setRangeMax(Number(e.target.value))}
+                            helperText={ruleType === 'angle' ? 'Upper bound of angle in degrees' : 'Upper bound of normalized value'}
+                          />
+                        </Grid>
+                      </>
+                    )}
+
+                    {(ruleType === 'position' || ruleType === 'direction') && (
+                      <Grid item xs={12} sm={6} md={4}>
+                        <FormControl fullWidth>
+                          <InputLabel>Axis</InputLabel>
+                          <Select value={ruleAxis} label="Axis" onChange={(e) => setRuleAxis(e.target.value)}>
+                            <MenuItem value="x">X (left-right)</MenuItem>
+                            <MenuItem value="y">Y (up-down)</MenuItem>
+                          </Select>
+                        </FormControl>
+                      </Grid>
+                    )}
+
+                    {ruleType === 'direction' && (
+                      <>
+                        <Grid item xs={12} sm={6} md={4}>
+                          <FormControl fullWidth>
+                            <InputLabel>Direction</InputLabel>
+                            <Select value={ruleDirection} label="Direction" onChange={(e) => setRuleDirection(e.target.value)}>
+                              <MenuItem value="up">Up</MenuItem>
+                              <MenuItem value="down">Down</MenuItem>
+                              <MenuItem value="left">Left</MenuItem>
+                              <MenuItem value="right">Right</MenuItem>
+                            </Select>
+                          </FormControl>
+                        </Grid>
+                        <Grid item xs={12} sm={6} md={4}>
+                          <TextField
+                            fullWidth
+                            type="number"
+                            label="Movement Threshold (0-1)"
+                            value={countThreshold}
+                            onChange={(e) => setCountThreshold(Number(e.target.value))}
+                            helperText="How far it must move along axis before counting"
+                          />
+                        </Grid>
+                      </>
+                    )}
+
+                    <Grid item xs={12}>
+                      <Accordion sx={{ bgcolor: 'grey.50' }}>
+                        <AccordionSummary expandIcon={<ExpandMoreIcon />}>
+                          <Typography variant="subtitle2">What is a detection rule?</Typography>
+                        </AccordionSummary>
+                        <AccordionDetails>
+                          <Typography variant="body2" sx={{ mb: 1 }}>
+                            A detection rule tells the counter when to add one repetition. Choose a type and simple thresholds.
+                          </Typography>
+                          <Box sx={{ mb: 2 }}>
+                            <RuleTypeIllustrations />
+                          </Box>
+                          <ul style={{ marginTop: 0 }}>
+                            <li>
+                              <strong>Angle</strong>: 3 points [A,B,C], measures the angle at B (degrees). When angle is within [min,max], it is considered ON.
+                            </li>
+                            <li>
+                              <strong>Distance</strong>: 2 points [P,Q], uses normalized distance (0–1). Within [min,max] is ON.
+                            </li>
+                            <li>
+                              <strong>Position</strong>: 1 point, compare its X or Y (0–1) with [min,max]. Within range is ON.
+                            </li>
+                            <li>
+                              <strong>Direction</strong>: 1 point, accumulates movement along X or Y towards a direction. When accumulated movement ≥ threshold, it is ON.
+                            </li>
+                          </ul>
+                          <Typography variant="body2" sx={{ mt: 1 }}>
+                            Confirm Frames debounces noise (e.g., 3). Recommended defaults: Angle [0,60], Distance [0.35,1.0], Position [0.0,0.3], Direction threshold 0.12.
+                          </Typography>
+                        </AccordionDetails>
+                      </Accordion>
+                    </Grid>
+
+                    <Grid item xs={12}>
+                      <Typography variant="subtitle2" sx={{ mb: 1 }}>Preview</Typography>
+                      <Paper sx={{ p: 1.5, bgcolor: 'grey.50', fontFamily: 'monospace', fontSize: 12, whiteSpace: 'pre-wrap' }}>
+                        {JSON.stringify(getComposedDetectionRules() || {}, null, 2)}
+                      </Paper>
+                    </Grid>
+                  </Grid>
+                </Box>
+              )}
             </Grid>
 
             <Grid item xs={12}>

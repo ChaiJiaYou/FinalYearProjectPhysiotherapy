@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useCallback } from "react";
 import {
   Box,
   Dialog,
@@ -19,11 +19,7 @@ const TherapistSchedule = () => {
   const [selectedEvent, setSelectedEvent] = useState(null);
   const therapistId = localStorage.getItem("userId");
 
-  useEffect(() => {
-    fetchAppointments();
-  }, []);
-
-  const fetchAppointments = async () => {
+  const fetchAppointments = useCallback(async () => {
     try {
       const res = await fetch(
         `http://127.0.0.1:8000/api/therapist-all-appointments/?therapist_id=${therapistId}`
@@ -44,7 +40,11 @@ const TherapistSchedule = () => {
     } catch (err) {
       console.error("Failed to fetch appointments", err);
     }
-  };
+  }, [therapistId]);
+
+  useEffect(() => {
+    fetchAppointments();
+  }, [fetchAppointments]);
 
   return (
     <Box

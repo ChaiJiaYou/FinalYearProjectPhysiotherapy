@@ -258,6 +258,7 @@ class Exercise(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
     created_by = models.ForeignKey(CustomUser, on_delete=models.CASCADE, related_name="created_exercises", limit_choices_to={'role': 'therapist'}, null=True, blank=True)
     is_active = models.BooleanField(default=True)
+    detection_rules = models.JSONField(default=dict, blank=True)  # JSON rules for Rule Engine
     
     def __str__(self):
         return f"{self.name} ({self.body_part})"
@@ -423,3 +424,86 @@ class ExerciseRecord(models.Model):
     
     class Meta:
         ordering = ['-recorded_at']
+
+
+# ==================== NEW ACTION LEARNING MODELS ====================
+# Support for "demo video → automatic learning → real-time recognition & counting"
+
+class Action(models.Model):
+    """
+    Main action definition supporting video-based learning workflow
+    """
+    MODE_CHOICES = [
+        ('dtw', 'DTW Recognition'),
+        ('clf', 'Classifier Model'),
+    ]
+    
+    id = models.AutoField(primary_key=True)
+    name = models.CharField(max_length=120)
+    description = models.TextField(blank=True)
+    mode = models.CharField(max_length=10, choices=MODE_CHOICES, default='dtw')
+    params_json = models.JSONField(default=dict)  # thresholds, window, etc.
+    model_path = models.CharField(max_length=255, blank=True)  # for trained models
+    created_by = models.IntegerField(null=True, blank=True)  # optional FK to user
+    created_at = models.DateTimeField(auto_now_add=True)
+    
+    def __str__(self):
+        return f"Action: {self.name} ({self.mode})"
+    
+    class Meta:
+        ordering = ['-created_at']
+
+
+class ActionSample(models.Model):
+    """
+    Demo video samples and extracted keypoints for action learning
+    """
+    id = models.AutoField(primary_key=True)
+    action = models.ForeignKey(Action, on_delete=models.CASCADE, related_name='samples')
+    video_url = models.CharField(max_length=255, blank=True)  # optional video file path
+    keypoints_json = models.JSONField(default=dict)  # frame->keypoints mapping
+    fps = models.IntegerField(default=30)
+    weak_labels_json = models.JSONField(default=dict)  # auto-segmentation labels
+    refined_labels_json = models.JSONField(default=dict)  # user-refined labels
+    created_at = models.DateTimeField(auto_now_add=True)
+    
+    def __str__(self):
+        return f"Sample for {self.action.name} - {self.created_at.date()}"
+    
+    class Meta:
+        ordering = ['-created_at']
+
+
+class ActionTemplate(models.Model):
+    """
+    Individual action templates (one per detected repetition)
+    """
+    id = models.AutoField(primary_key=True)
+    action = models.ForeignKey(Action, on_delete=models.CASCADE, related_name='templates')
+    seq_json = models.JSONField(default=dict)  # {'T':int,'F':int,'data':[[...],...]}
+    length = models.IntegerField()  # T (time steps)
+    feature_dim = models.IntegerField()  # F (feature dimensions)
+    created_at = models.DateTimeField(auto_now_add=True)
+    
+    def __str__(self):
+        return f"Template for {self.action.name} - {self.length}T×{self.feature_dim}F"
+    
+    class Meta:
+        ordering = ['-created_at']
+
+
+class ActionSession(models.Model):
+    """
+    Real-time recognition/counting session results
+    """
+    id = models.AutoField(primary_key=True)
+    action = models.ForeignKey(Action, on_delete=models.CASCADE, related_name='sessions')
+    reps = models.IntegerField(default=0)
+    started_at = models.DateTimeField(auto_now_add=True)
+    metrics_json = models.JSONField(default=dict)  # accuracy, avg_distance, etc.
+    
+    def __str__(self):
+        return f"Session for {self.action.name} - {self.reps} reps"
+    
+    class Meta:
+        ordering = ['-started_at']

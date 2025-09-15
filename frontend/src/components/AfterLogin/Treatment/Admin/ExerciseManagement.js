@@ -106,14 +106,14 @@ const ExerciseManagement = () => {
 
   // Filter exercises
   const filteredExercises = exercises.filter(exercise => {
-    const matchesSearch = 
-      exercise.exercise_name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      (exercise.description && exercise.description.toLowerCase().includes(searchTerm.toLowerCase())) ||
-      (exercise.instructions && exercise.instructions.toLowerCase().includes(searchTerm.toLowerCase()));
-    
+    const name = (exercise?.exercise_name || '').toString().toLowerCase();
+    const description = (exercise?.description || '').toString().toLowerCase();
+    const instructions = (exercise?.instructions || '').toString().toLowerCase();
+    const query = (searchTerm || '').toString().toLowerCase();
+
+    const matchesSearch = name.includes(query) || description.includes(query) || instructions.includes(query);
     const matchesBodyPart = !bodyPartFilter || exercise.body_part === bodyPartFilter;
     const matchesCategory = !categoryFilter || exercise.category === categoryFilter;
-    
     return matchesSearch && matchesBodyPart && matchesCategory;
   });
 

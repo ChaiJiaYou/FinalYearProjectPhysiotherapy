@@ -35,6 +35,8 @@ import { formatLastLogin } from '../../utils/dateUtils';
 // formatLastLogin is now imported from dateUtils
 
 function HomeLayout() {
+  console.log('HomeLayout component rendered');
+  
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down("md"));
   const [role, setRole] = useState(null);
@@ -127,7 +129,7 @@ function HomeLayout() {
   const handleLogout = (e) => {
     e.stopPropagation();
     localStorage.clear();
-    navigate("/login");
+    navigate("/");
   };
 
   const getMenuItems = (role) => {
@@ -138,6 +140,7 @@ function HomeLayout() {
           { text: "User Management", icon: <Group />, path: "/users" },
           { text: "Appointment Overview", icon: <Event />, path: "/admin-appointments" },
           { text: "Treatment Admin", icon: <AdminPanelSettings />, path: "/admin-treatment" },
+          { text: "Exercise Management", icon: <FitnessCenter />, path: "/exercise-admin" },
           { text: "Reports & Analytics", icon: <Assignment />, path: "/reports" },
           { text: "Patient Information", icon: <HistoryEdu />, path : "/patients" },
           { text: "Profile", icon: <AccountCircle />, path: "/profile" },

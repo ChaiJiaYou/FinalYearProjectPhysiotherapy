@@ -16,38 +16,87 @@ import {
   IconButton,
   Chip,
   Tooltip,
+  Divider,
+  Stack,
+  Card,
+  CardContent,
+  Grid,
 } from "@mui/material";
 import SearchIcon from "@mui/icons-material/Search";
 import AddIcon from "@mui/icons-material/Add";
-import FilterListIcon from "@mui/icons-material/FilterList";
 import RefreshIcon from "@mui/icons-material/Refresh";
+import PersonIcon from "@mui/icons-material/Person";
+import ClearIcon from "@mui/icons-material/Clear";
+import GroupIcon from "@mui/icons-material/Group";
+import AdminPanelSettingsIcon from "@mui/icons-material/AdminPanelSettings";
 import CreateUserDialog from "../../CustomComponents/CreateUserDialog";
 import UserManagementTable from "./UserManagementTable";
+import { toast } from "react-toastify";
 import "react-toastify/dist/ReactToastify.css";
 import { alpha } from "@mui/material/styles";
 
 const UserAccountManagementHome = () => {
+  console.log('UserAccountManagementHome component rendered');
+  
   const navigate = useNavigate();
-  const [users, setUsers] = useState([]);
+  const [allUsers, setAllUsers] = useState([]); // 存储所有用户数据
+  const [users, setUsers] = useState([]); // 显示的用户数据（筛选后）
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState("");
   const [page, setPage] = useState(0);
   const [rowsPerPage, setRowsPerPage] = useState(10);
   const [roleFilter, setRoleFilter] = useState("all");
-  const [statusFilter, setStatusFilter] = useState("all");
+  const [statusFilter, setStatusFilter] = useState("active");
   const [openCreateDialog, setOpenCreateDialog] = useState(false);
-  const [totalUsers, setTotalUsers] = useState(0);
-  const [activeUsers, setActiveUsers] = useState(0);
-  const [showFilters, setShowFilters] = useState(false);
 
   const fetchUsers = async () => {
     try {
       setLoading(true);
-      const response = await fetch("http://127.0.0.1:8000/api/list-users/");
+      console.log('Fetching users...');
+      const response = await fetch("http://127.0.0.1:8000/api/list-users/", {
+        headers: {
+          'X-User-ID': localStorage.getItem('userId'),
+          'Content-Type': 'application/json',
+        },
+        credentials: 'include'
+      });
+      console.log('Users response status:', response.status);
       const data = await response.json();
-      setUsers(data);
-      setTotalUsers(data.length);
-      setActiveUsers(data.filter(user => user.status).length);
+      console.log('Users data:', data);
+      console.log('Data type:', typeof data);
+      console.log('Is array:', Array.isArray(data));
+      
+      // 检查数据格式，可能是 { value: [...] } 格式
+      const usersArray = Array.isArray(data) ? data : (data.value || []);
+      console.log('Users array:', usersArray);
+      
+      setAllUsers(usersArray); // 存储所有用户数据
+      // 直接使用usersArray进行筛选，不依赖allUsers状态
+      let filteredUsers = [...usersArray];
+      
+      // Apply search filter
+      if (searchTerm) {
+        filteredUsers = filteredUsers.filter(user => 
+          user.username.toLowerCase().includes(searchTerm.toLowerCase()) ||
+          user.email.toLowerCase().includes(searchTerm.toLowerCase()) ||
+          (user.contact_number && user.contact_number.includes(searchTerm))
+        );
+      }
+      
+      // Apply role filter
+      if (roleFilter !== "all") {
+        filteredUsers = filteredUsers.filter(user => user.role === roleFilter);
+      }
+      
+      // Apply status filter
+      if (statusFilter !== "all") {
+        const isActive = statusFilter === "active";
+        filteredUsers = filteredUsers.filter(user => {
+          return user.status === isActive;
+        });
+      }
+      
+      setUsers(filteredUsers);
     } catch (error) {
       console.error("Error fetching users:", error);
     } finally {
@@ -55,9 +104,121 @@ const UserAccountManagementHome = () => {
     }
   };
 
+
+  const applyFilters = (userData = allUsers) => {
+    let filteredUsers = [...userData];
+    
+    // Apply search filter
+    if (searchTerm) {
+      filteredUsers = filteredUsers.filter(user => 
+        user.username.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        user.email.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        (user.contact_number && user.contact_number.includes(searchTerm))
+      );
+    }
+    
+    // Apply role filter
+    if (roleFilter !== "all") {
+      filteredUsers = filteredUsers.filter(user => user.role === roleFilter);
+    }
+    
+    // Apply status filter
+    if (statusFilter !== "all") {
+      const isActive = statusFilter === "active";
+      filteredUsers = filteredUsers.filter(user => {
+        return user.status === isActive;
+      });
+    }
+    
+    setUsers(filteredUsers);
+  };
+
   useEffect(() => {
     fetchUsers();
-  }, []);
+  }, []); // 只在组件挂载时获取数据
+
+  useEffect(() => {
+    if (allUsers.length > 0) {
+      applyFilters(); // 筛选条件变化时应用筛选
+    }
+  }, [searchTerm, roleFilter, statusFilter]); // 筛选条件变化时重新筛选
+
+  const handleSearch = (e) => {
+    setSearchTerm(e.target.value);
+    setPage(0);
+  };
+
+  const handleRoleFilter = (e) => {
+    setRoleFilter(e.target.value);
+    setPage(0);
+  };
+
+  const handleStatusFilter = (e) => {
+    setStatusFilter(e.target.value);
+    setPage(0);
+  };
+
+  const handleRefresh = () => {
+    fetchUsers(); // 重新获取所有数据
+  };
+
+  const handleToggleStatus = async (userId, currentStatus) => {
+    try {
+      // currentStatus is boolean from user.status, convert to opposite
+      const newStatus = !currentStatus;
+      
+      const response = await fetch(`http://127.0.0.1:8000/api/update-user-status/${userId}/`, {
+        method: "PUT",
+        headers: {
+          "Content-Type": "application/json",
+          "X-User-ID": localStorage.getItem("id"),
+        },
+        body: JSON.stringify({ status: newStatus }),
+      });
+      
+      if (response.ok) {
+        // 更新所有用户数据
+        const updatedAllUsers = allUsers.map(user => 
+          user.id === userId ? { ...user, status: newStatus } : user
+        );
+        setAllUsers(updatedAllUsers);
+        
+        // 重新应用筛选
+        applyFilters(updatedAllUsers);
+        
+        toast.success(`User ${newStatus ? "enabled" : "disabled"} successfully`);
+      } else {
+        const errorData = await response.json();
+        toast.error(`Failed to update user: ${errorData.error || "Unknown error"}`);
+      }
+    } catch (error) {
+      if (error.message.includes("Failed to fetch")) {
+        toast.error("Cannot connect to server. Please make sure the backend server is running on http://127.0.0.1:8000");
+      } else {
+        toast.error(`Error updating user: ${error.message}`);
+      }
+    }
+  };
+
+  const handleViewProfile = (userId) => {
+    navigate(`/home/users/view/${userId}`);
+  };
+
+  const clearFilters = () => {
+    setSearchTerm("");
+    setRoleFilter("all");
+    setStatusFilter("all");
+    setPage(0);
+    // 筛选条件变化会自动触发useEffect重新筛选
+  };
+
+  // 筛选逻辑现在在applyFilters函数中处理
+  const filteredUsers = users;
+
+  const paginatedUsers = filteredUsers.slice(
+    page * rowsPerPage,
+    page * rowsPerPage + rowsPerPage
+  );
 
   const handleChangePage = (event, newPage) => {
     setPage(newPage);
@@ -68,248 +229,181 @@ const UserAccountManagementHome = () => {
     setPage(0);
   };
 
-  const handleRefresh = () => {
-    fetchUsers();
-  };
-
-  const filteredUsers = users.filter((user) => {
-    const matchesSearchTerm =
-      (user?.username?.toLowerCase?.() || "").includes(searchTerm.toLowerCase()) ||
-      (user?.email?.toLowerCase?.() || "").includes(searchTerm.toLowerCase()) ||
-      (user?.contact_number?.toString?.() || "").includes(searchTerm) ||
-      (user?.id?.toString?.().toLowerCase() || "").includes(searchTerm.toLowerCase());
-
-    const matchesRole = roleFilter === "all" || user.role === roleFilter;
-    const matchesStatus = statusFilter === "all" || (statusFilter === "active" && user.status) || (statusFilter === "inactive" && !user.status);
-
-    return matchesSearchTerm && matchesRole && matchesStatus;
-  });
-
-  const paginatedUsers = filteredUsers.slice(page * rowsPerPage, page * rowsPerPage + rowsPerPage);
-
-  const handleToggleStatus = async (user) => {
-    try {
-      const response = await fetch(`http://127.0.0.1:8000/api/update-user-status/${user.id}/`, {
-        method: "PUT",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ status: !user.status }),
-      });
-
-      if (response.ok) {
-        fetchUsers(); // Refresh the user list
-      } else {
-        console.error("Failed to update user status");
-      }
-    } catch (error) {
-      console.error("Error updating user status:", error);
-    }
-  };
-
-  const handleViewProfile = (id) => {
-    navigate(`/home/users/view/${id}`);
-  };
-
+  console.log('Loading state:', loading);
+  
   if (loading) {
+    console.log('Showing loading skeleton');
     return (
       <Box sx={{ p: 3 }}>
-        <Skeleton variant="rectangular" width="100%" height={200} sx={{ mb: 2, borderRadius: 2 }} />
-        <Skeleton variant="rectangular" width="100%" height={400} sx={{ borderRadius: 2 }} />
+        <Skeleton variant="rectangular" width="100%" height={80} sx={{ mb: 2, borderRadius: 2 }} />
+        <Skeleton variant="rectangular" width="100%" height={500} sx={{ borderRadius: 2 }} />
       </Box>
     );
   }
+  
+  console.log('Rendering main content');
 
   return (
-    <Box sx={{ p: { xs: 2, md: 4 }, backgroundColor: "#f8fafc", minHeight: "100vh" }}>
-      {/* Statistics Cards */}
-      <Box sx={{ mb: 4, display: "flex", gap: 3 }}>
-        <Paper
-          elevation={0}
-          sx={{
-            p: 3,
-            flex: 1,
-            borderRadius: 2,
-            bgcolor: "white",
-            border: "1px solid",
-            borderColor: "grey.200",
-          }}>
-          <Typography variant="h6" color="text.secondary" gutterBottom>
-            Total Users
-          </Typography>
-          <Typography variant="h3" color="text.primary">
-            {totalUsers}
-          </Typography>
-          <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
-            Registered accounts
-          </Typography>
-        </Paper>
+    <Box sx={{ backgroundColor: "#f8fafc", minHeight: "100vh" }}>
 
-        <Paper
-          elevation={0}
-          sx={{
-            p: 3,
-            flex: 1,
-            borderRadius: 2,
-            bgcolor: "white",
-            border: "1px solid",
-            borderColor: "grey.200",
-          }}>
-          <Typography variant="h6" color="text.secondary" gutterBottom>
-            Active Users
-          </Typography>
-          <Typography variant="h3" color="success.main">
-            {activeUsers}
-          </Typography>
-          <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
-            Currently active
-          </Typography>
-        </Paper>
-
-        <Paper
-          elevation={0}
-          sx={{
-            p: 3,
-            flex: 1,
-            borderRadius: 2,
-            bgcolor: "white",
-            border: "1px solid",
-            borderColor: "grey.200",
-          }}>
-          <Typography variant="h6" color="text.secondary" gutterBottom>
-            Inactive Users
-          </Typography>
-          <Typography variant="h3" color="error.main">
-            {totalUsers - activeUsers}
-          </Typography>
-          <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
-            Currently inactive
-          </Typography>
-        </Paper>
-      </Box>
-
-      {/* Main Content */}
-      <Paper
-        elevation={0}
+      {/* Page Header */}
+      <Box
         sx={{
-          p: 3,
-          borderRadius: 2,
-          bgcolor: "white",
-          border: "1px solid",
-          borderColor: "grey.200",
+          background: `linear-gradient(135deg, #3b82f6 0%, ${alpha("#3b82f6", 0.8)} 100%)`,
+          p: 1.5,
+          color: "white",
         }}>
-        {/* Header */}
-        <Box sx={{ mb: 3 }}>
-          <Box display="flex" justifyContent="space-between" alignItems="center" mb={3}>
-            <Typography variant="h4" fontWeight="bold" color="text.primary">
-              User Management
-            </Typography>
-            <Box display="flex" gap={1}>
-              <Tooltip title="Refresh list">
-                <IconButton onClick={handleRefresh} sx={{ bgcolor: "grey.100" }}>
-                  <RefreshIcon />
-                </IconButton>
-              </Tooltip>
-              <Button
-                variant="contained"
-                startIcon={<AddIcon />}
-                onClick={() => setOpenCreateDialog(true)}
-                sx={{
-                  bgcolor: "primary.main",
+        <Box display="flex" alignItems="center" justifyContent="space-between">
+          <Box display="flex" alignItems="center" gap={2}>
+            <Box
+              sx={{
+                p: 1.5,
+                borderRadius: 2,
+                bgcolor: alpha("#ffffff", 0.2),
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+              }}
+            >
+              <GroupIcon sx={{ fontSize: 28, color: "white" }} />
+            </Box>
+            <Box>
+              <Typography variant="h4" fontWeight="bold">
+                User Management
+              </Typography>
+              <Typography variant="body1" sx={{ opacity: 0.9 }}>
+                Manage all user accounts in the system
+              </Typography>
+            </Box>
+          </Box>
+          <Stack direction="row" spacing={2}>
+            <Tooltip title="Refresh list">
+              <IconButton 
+                onClick={handleRefresh} 
+                sx={{ 
+                  bgcolor: alpha("#ffffff", 0.2),
                   color: "white",
                   "&:hover": {
-                    bgcolor: "primary.dark",
+                    bgcolor: alpha("#ffffff", 0.3),
                   },
-                }}>
-                Create User
-              </Button>
-            </Box>
-          </Box>
-
-          {/* Search and Filters */}
-          <Box sx={{ display: "flex", gap: 2, flexWrap: "wrap" }}>
-            <TextField
-              placeholder="Search users..."
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              sx={{ flex: 1, minWidth: 300 }}
-              InputProps={{
-                startAdornment: (
-                  <InputAdornment position="start">
-                    <SearchIcon color="action" />
-                  </InputAdornment>
-                ),
-              }}
-            />
+                }}
+              >
+                <RefreshIcon />
+              </IconButton>
+            </Tooltip>
             <Button
-              variant="outlined"
-              startIcon={<FilterListIcon />}
-              onClick={() => setShowFilters(!showFilters)}
+              variant="contained"
+              startIcon={<AddIcon />}
+              onClick={() => setOpenCreateDialog(true)}
               sx={{
-                borderColor: "grey.300",
-                color: "text.secondary",
+                bgcolor: "white",
+                color: "#3b82f6",
+                textTransform: "uppercase",
+                fontWeight: 600,
+                px: 3,
+                borderRadius: 2,
                 "&:hover": {
-                  bgcolor: "grey.50",
+                  bgcolor: alpha("#ffffff", 0.9),
                 },
               }}>
-              Filters
+              Create User
             </Button>
-          </Box>
+          </Stack>
+        </Box>
+      </Box>
 
-          {/* Filter Options */}
-          {showFilters && (
-            <Box sx={{ mt: 2, display: "flex", gap: 2, flexWrap: "wrap" }}>
-              <FormControl sx={{ minWidth: 120 }}>
-                <InputLabel>Role</InputLabel>
-                <Select value={roleFilter} onChange={(e) => setRoleFilter(e.target.value)} label="Role">
-                  <MenuItem value="all">All Roles</MenuItem>
-                  <MenuItem value="admin">Admin</MenuItem>
-                  <MenuItem value="patient">Patient</MenuItem>
-                  <MenuItem value="therapist">Therapist</MenuItem>
-                </Select>
-              </FormControl>
 
-              <FormControl sx={{ minWidth: 120 }}>
-                <InputLabel>Status</InputLabel>
-                <Select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} label="Status">
-                  <MenuItem value="all">All Status</MenuItem>
-                  <MenuItem value="active">Active</MenuItem>
-                  <MenuItem value="inactive">Inactive</MenuItem>
-                </Select>
-              </FormControl>
-
-              {(roleFilter !== "all" || statusFilter !== "all") && (
-                <Box sx={{ display: "flex", gap: 1, alignItems: "center" }}>
-                  <Typography variant="body2" color="text.secondary">
-                    Active filters:
-                  </Typography>
-                  {roleFilter !== "all" && (
-                    <Chip
-                      label={`Role: ${roleFilter}`}
-                      onDelete={() => setRoleFilter("all")}
-                      size="small"
-                      sx={{ bgcolor: alpha("#2196f3", 0.1) }}
-                    />
-                  )}
-                  {statusFilter !== "all" && (
-                    <Chip
-                      label={`Status: ${statusFilter}`}
-                      onDelete={() => setStatusFilter("all")}
-                      size="small"
-                      sx={{ bgcolor: alpha("#2196f3", 0.1) }}
-                    />
-                  )}
-                </Box>
-              )}
-            </Box>
-          )}
+      {/* Search & Filter Section */}
+      <Box sx={{ p: 1.5, backgroundColor: "white", borderBottom: "1px solid", borderColor: "grey.200" }}>
+        <Box display="flex" alignItems="center" justifyContent="space-between" mb={1}>
+          <Typography variant="h6" fontWeight="600" color="text.primary">
+            Search & Filter Users
+          </Typography>
+          <Button
+            size="small"
+            onClick={clearFilters}
+            startIcon={<ClearIcon />}
+            variant="outlined"
+            disabled={roleFilter === "all" && statusFilter === "all" && searchTerm === ""}
+            sx={{ 
+              textTransform: "none",
+              borderRadius: 2,
+              fontWeight: 600,
+              px: 3,
+              py: 1,
+              borderColor: "grey.300",
+              color: "text.secondary",
+              "&:hover": {
+                borderColor: "grey.400",
+                backgroundColor: "grey.50",
+              },
+              "&:disabled": {
+                borderColor: "grey.200",
+                color: "grey.400",
+              }
+            }}
+          >
+            Clear Filter
+          </Button>
         </Box>
 
-        {/* User Table */}
-        <UserManagementTable users={paginatedUsers} handleToggleStatus={handleToggleStatus} onViewProfile={handleViewProfile} />
+        <Box sx={{ display: "flex", gap: 2, alignItems: "center", flexWrap: "wrap" }}>
+          <TextField
+            placeholder="Search by username, email, or contact..."
+            value={searchTerm}
+            onChange={handleSearch}
+            InputProps={{
+              startAdornment: (
+                <InputAdornment position="start">
+                  <SearchIcon sx={{ color: "action.active" }} />
+                </InputAdornment>
+              ),
+            }}
+            sx={{ flexGrow: 1, minWidth: 300 }}
+          />
+          
+          <FormControl sx={{ minWidth: 150 }}>
+            <InputLabel>User Role</InputLabel>
+            <Select 
+              value={roleFilter} 
+              onChange={handleRoleFilter} 
+              label="User Role"
+            >
+              <MenuItem value="all">All Roles</MenuItem>
+              <MenuItem value="admin">Admin</MenuItem>
+              <MenuItem value="therapist">Therapist</MenuItem>
+              <MenuItem value="patient">Patient</MenuItem>
+            </Select>
+          </FormControl>
 
-        {/* Pagination */}
-        <Box sx={{ mt: 2, display: "flex", justifyContent: "flex-end" }}>
+          <FormControl sx={{ minWidth: 150 }}>
+            <InputLabel>Status</InputLabel>
+            <Select 
+              value={statusFilter} 
+              onChange={handleStatusFilter} 
+              label="Status"
+            >
+              <MenuItem value="all">All Status</MenuItem>
+              <MenuItem value="active">Active</MenuItem>
+              <MenuItem value="inactive">Inactive</MenuItem>
+            </Select>
+          </FormControl>
+
+        </Box>
+
+
+      </Box>
+
+      {/* User Table Section */}
+      <Box sx={{ backgroundColor: "white" }}>
+        <UserManagementTable 
+          users={paginatedUsers} 
+          handleToggleStatus={handleToggleStatus} 
+          onViewProfile={handleViewProfile} 
+        />
+        
+          {/* Pagination */}
+          <Box sx={{ p: 1, borderTop: "1px solid", borderColor: "grey.200" }}>
           <TablePagination
             component="div"
             count={filteredUsers.length}
@@ -318,9 +412,20 @@ const UserAccountManagementHome = () => {
             rowsPerPage={rowsPerPage}
             onRowsPerPageChange={handleChangeRowsPerPage}
             rowsPerPageOptions={[5, 10, 25, 50]}
+            sx={{
+              "& .MuiTablePagination-toolbar": {
+                paddingLeft: 0,
+                paddingRight: 0,
+                minHeight: "auto",
+                paddingLeft: 0,
+              },
+              "& .MuiTablePagination-selectLabel, & .MuiTablePagination-displayedRows": {
+                fontWeight: 500,
+              },
+            }}
           />
         </Box>
-      </Paper>
+      </Box>
 
       {/* Create User Dialog */}
       <CreateUserDialog

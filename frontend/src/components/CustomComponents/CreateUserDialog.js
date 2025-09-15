@@ -15,7 +15,7 @@ import PhotoCamera from "@mui/icons-material/PhotoCamera";
 import { alpha } from "@mui/material/styles";
 
 const CreateUserDialog = ({ open, onClose, onSubmit, isSubmitting = false }) => {
-  const [newUser, setNewUser] = useState({
+  const initialUserState = {
     username: "",
     email: "",
     role: "",
@@ -29,11 +29,30 @@ const CreateUserDialog = ({ open, onClose, onSubmit, isSubmitting = false }) => 
     employment_date: "", // for therapist
     emergency_contact: "", // for patient
     admin_role: "", // for admin
-  });
+  };
+
+  const [newUser, setNewUser] = useState(initialUserState);
   const [errors, setErrors] = useState({});
   const [avatarPreview, setAvatarPreview] = useState(null);
   const [avatarFile, setAvatarFile] = useState(null);
   const [loading, setLoading] = useState(false);
+
+  // Reset form when dialog opens/closes
+  React.useEffect(() => {
+    if (open) {
+      // Reset form when dialog opens
+      resetForm();
+    }
+  }, [open]);
+
+  // Function to reset form to initial state
+  const resetForm = () => {
+    setNewUser(initialUserState);
+    setErrors({});
+    setAvatarPreview(null);
+    setAvatarFile(null);
+    setLoading(false);
+  };
 
   const handleInputChange = (e) => {
     const { name, value } = e.target;
@@ -236,6 +255,8 @@ const CreateUserDialog = ({ open, onClose, onSubmit, isSubmitting = false }) => 
           autoClose: 2000,
           closeOnClick: true,
         });
+        // Reset form after successful creation
+        resetForm();
         if (typeof onClose === "function") onClose();
         if (typeof onSubmit === "function") onSubmit(data);
       } else {
@@ -253,17 +274,6 @@ const CreateUserDialog = ({ open, onClose, onSubmit, isSubmitting = false }) => 
     } finally {
       setLoading(false);
     }
-  };
-
-  const resetForm = () => {
-    setNewUser({
-      username: "",
-      email: "",
-      password: "",
-      role: "",
-      avatar: null,
-    });
-    handleRemoveAvatar();
   };
 
   const renderBasicInfo = () => (
@@ -319,12 +329,18 @@ const CreateUserDialog = ({ open, onClose, onSubmit, isSubmitting = false }) => 
             value={newUser.ic}
             onChange={handleInputChange}
             error={!!errors.ic}
-            helperText={errors.ic || (newUser.dob ? `Expected format: ${new Date(newUser.dob).toLocaleDateString('en-GB', {day: '2-digit', month: '2-digit', year: '2-digit'}).replace(/\//g, '')}XXXXXX` : "Enter 12 digits (YYMMDDXXXXXXX)")}
+            helperText={errors.ic || (newUser.dob ? (() => {
+              const dobDate = new Date(newUser.dob);
+              const year = dobDate.getFullYear().toString().slice(-2);
+              const month = (dobDate.getMonth() + 1).toString().padStart(2, '0');
+              const day = dobDate.getDate().toString().padStart(2, '0');
+              return `Expected format: ${year}${month}${day}XXXXXX`;
+            })() : "Enter 12 digits (YYMMDDXXXXXX)")}
             inputProps={{
               inputMode: "numeric",
               pattern: "[0-9]*",
               maxLength: 12,
-              placeholder: "e.g., 950115024567"
+              placeholder: "e.g., 040503024567"
             }}
             sx={{
               '& .MuiFormHelperText-root': {
@@ -648,7 +664,15 @@ const CreateUserDialog = ({ open, onClose, onSubmit, isSubmitting = false }) => 
       </DialogContent>
 
       <DialogActions sx={{ p: 3, justifyContent: "space-between" }}>
-        <Button onClick={onClose} variant="outlined" sx={{ minWidth: 100 }} disabled={loading}>
+        <Button 
+          onClick={() => {
+            resetForm();
+            onClose();
+          }} 
+          variant="outlined" 
+          sx={{ minWidth: 100 }} 
+          disabled={loading}
+        >
           Cancel
         </Button>
 

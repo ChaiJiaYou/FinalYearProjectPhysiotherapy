@@ -10,6 +10,8 @@ from django.middleware.csrf import get_token
 from django.shortcuts import get_object_or_404
 from django.utils.timezone import localtime, now, make_aware
 from .models import CustomUser, Admin, Patient, Therapist, Appointment, Notification, TreatmentTemplate, TemplateExercise, Treatment, TreatmentExercise, Exercise
+import time
+import json
 from .serializers import CustomUserSerializer, AppointmentSerializer, PatientHistorySerializer, NotificationSerializer
 from django.utils.dateparse import parse_datetime
 from django.db import transaction
@@ -25,10 +27,36 @@ def login_view(request):
     user_id = data.get('id')
     password = data.get('password')
 
+    print(f"Login attempt - User ID: {user_id}, Password length: {len(password) if password else 0}")
+
     if not user_id or not password:
+        print("Missing user ID or password")
         return JsonResponse({'success': False, 'error': 'User ID and password are required.'}, status=400)
 
     user = CustomUser.objects.filter(id=user_id).first()
+    print(f"User found: {user is not None}")
+    
+    # List all users for debugging
+    all_users = CustomUser.objects.all()
+    print(f"Total users in database: {all_users.count()}")
+    for u in all_users[:5]:  # Show first 5 users
+        print(f"  - ID: {u.id}, Username: {u.username}, Role: {u.role}, Status: {u.status}")
+    
+    # Check specifically for A0001
+    specific_user = CustomUser.objects.filter(id='A0001').first()
+    if specific_user:
+        print(f"Found A0001 user: {specific_user.username}, Status: {specific_user.status}")
+        password_test = specific_user.check_password('chai030513')
+        print(f"Password test for A0001: {password_test}")
+    else:
+        print("A0001 user not found in database")
+    
+    if user:
+        print(f"User status: {user.status}")
+        password_check = user.check_password(password)
+        print(f"Password check: {password_check}")
+        print(f"User details: ID={user.id}, Username={user.username}, Email={user.email}")
+    
     if user and user.check_password(password):
         if not user.status:
             return JsonResponse({'success': False, 'error': 'Your account is deactivated. Please contact staff.'}, status=403)
@@ -67,6 +95,11 @@ def login_view(request):
         return response
 
     else:
+        print(f"Login failed - User ID: {user_id}, User exists: {user is not None}")
+        if user:
+            print(f"Password incorrect for user: {user.username}")
+        else:
+            print(f"User not found with ID: {user_id}")
         return JsonResponse({'success': False, 'error': 'Invalid user ID or password'}, status=401)
 
    
@@ -248,7 +281,13 @@ def update_user(request, user_id):
 
         return Response(serializer.data, status=status.HTTP_200_OK)
     
-    return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+    # Print detailed error information for debugging
+    print(f"Serializer errors: {serializer.errors}")
+    print(f"Request data: {request.data}")
+    return Response({
+        "error": "Validation failed",
+        "details": serializer.errors
+    }, status=status.HTTP_400_BAD_REQUEST)
 
 
 
@@ -751,7 +790,8 @@ def treatment_templates(request):
     """Get all treatment templates or create a new one"""
     try:
         if request.method == 'GET':
-            templates = TreatmentTemplate.objects.filter(is_active=True).prefetch_related('template_exercises__exercise_id')
+            # Return all templates for admin management (active + inactive)
+            templates = TreatmentTemplate.objects.all().prefetch_related('template_exercises__exercise_id')
             
             data = []
             for template in templates:
@@ -1159,7 +1199,8 @@ def list_exercises(request):
                 'demo_video_url': exercise.demo_video_url,
                 'created_at': exercise.created_at,
                 'created_by_name': exercise.created_by.username if exercise.created_by else 'System',
-                'is_active': exercise.is_active,  # Include is_active field
+                'is_active': exercise.is_active,
+                'detection_rules': exercise.detection_rules or {},
             })
         
         return Response(data, status=status.HTTP_200_OK)
@@ -1219,6 +1260,7 @@ def exercise_detail(request, exercise_id):
                 'is_active': exercise.is_active,
                 'created_at': exercise.created_at,
                 'created_by_name': exercise.created_by.username if exercise.created_by else 'System',
+                'detection_rules': exercise.detection_rules or {},
             }
             return Response(data, status=status.HTTP_200_OK)
             
@@ -1244,6 +1286,8 @@ def exercise_detail(request, exercise_id):
                 exercise.demo_video_url = data['demo_video_url']
             if 'is_active' in data:
                 exercise.is_active = data['is_active']
+            if 'detection_rules' in data:
+                exercise.detection_rules = data['detection_rules'] or {}
                 
             exercise.save()
             
@@ -1256,5 +1300,515 @@ def exercise_detail(request, exercise_id):
             
     except Exercise.DoesNotExist:
         return Response({'error': 'Exercise not found'}, status=status.HTTP_404_NOT_FOUND)
+    except Exception as e:
+        return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+    
+
+from rest_framework.decorators import api_view, parser_classes
+from rest_framework.parsers import MultiPartParser
+from rest_framework.response import Response
+
+import numpy as np
+import cv2
+
+from .yolo_model import predict_pose_opencv
+from .movement_counter import MovementCounter
+
+counter = MovementCounter()
+
+@api_view(['POST'])
+@parser_classes([MultiPartParser])
+def detect_pose(request):
+    try:
+        frame = request.FILES.get("frame")
+        if not frame:
+            return Response({"error": "Missing frame"}, status=400)
+
+        img_array = np.frombuffer(frame.read(), np.uint8)
+        image = cv2.imdecode(img_array, cv2.IMREAD_COLOR)
+        
+        print(f"Processing image of shape: {image.shape}")
+
+        keypoints = predict_pose_opencv(image)
+        if keypoints is None:
+            print("No person detected")
+            return Response({"message": "No person detected", "count": counter.count})
+
+        print(f"Keypoints detected: {keypoints.shape}")
+        
+        # Print some keypoint values for debugging
+        if keypoints.shape[0] >= 17:
+            left_shoulder = keypoints[5]
+            right_shoulder = keypoints[6]
+            left_elbow = keypoints[7]
+            right_elbow = keypoints[8]
+            print(f"Left shoulder: {left_shoulder}, Right shoulder: {right_shoulder}")
+            print(f"Left elbow: {left_elbow}, Right elbow: {right_elbow}")
+        
+        count = counter.update(keypoints)
+        print(f"Current count: {count}")
+        
+        return Response({
+            "message": "OK", 
+            "count": count,
+            "keypoints_shape": keypoints.shape if keypoints is not None else None,
+            "keypoints": keypoints.tolist() if keypoints is not None else None,
+            "debug_info": {
+                "left_shoulder": keypoints[5].tolist() if keypoints is not None and len(keypoints) > 5 else None,
+                "right_shoulder": keypoints[6].tolist() if keypoints is not None and len(keypoints) > 6 else None,
+                "left_elbow": keypoints[7].tolist() if keypoints is not None and len(keypoints) > 7 else None,
+                "right_elbow": keypoints[8].tolist() if keypoints is not None and len(keypoints) > 8 else None,
+            }
+        })
+        
+    except Exception as e:
+        print(f"Error in detect_pose: {e}")
+        return Response({"error": str(e)}, status=500)
+
+
+# ==================== NEW ACTION LEARNING API VIEWS ====================
+
+from .models import Action, ActionSample, ActionTemplate, ActionSession
+from .services.pipeline import (
+    finalize_action_from_video, 
+    dtw_infer_update, 
+    setup_action_for_inference,
+    process_realtime_frame
+)
+from .services.dtw_recognition import reset_recognizer, get_recognizer_status
+
+
+@api_view(['POST'])
+def create_action(request):
+    """Create new action for video-based learning"""
+    try:
+        name = request.data.get('name')
+        description = request.data.get('description', '')
+        created_by = request.data.get('created_by')
+        
+        if not name:
+            return JsonResponse({'error': 'Action name is required'}, status=400)
+        
+        action = Action.objects.create(
+            name=name,
+            description=description,
+            created_by=created_by,
+            mode='dtw'  # Default to DTW mode
+        )
+        
+        return JsonResponse({
+            'id': action.id,
+            'name': action.name,
+            'description': action.description,
+            'mode': action.mode,
+            'created_at': action.created_at.isoformat()
+        })
+        
+    except Exception as e:
+        return JsonResponse({'error': str(e)}, status=500)
+
+
+@api_view(['GET'])
+def list_actions(request):
+    """List all actions"""
+    try:
+        actions = Action.objects.all().order_by('-created_at')
+        
+        data = []
+        for action in actions:
+            # Count templates and samples
+            template_count = ActionTemplate.objects.filter(action=action).count()
+            sample_count = ActionSample.objects.filter(action=action).count()
+            
+            data.append({
+                'id': action.id,
+                'name': action.name,
+                'description': action.description,
+                'mode': action.mode,
+                'template_count': template_count,
+                'sample_count': sample_count,
+                'params': action.params_json,
+                'created_at': action.created_at.isoformat()
+            })
+        
+        return JsonResponse({'actions': data})
+        
+    except Exception as e:
+        return JsonResponse({'error': str(e)}, status=500)
+
+
+@api_view(['POST'])
+@parser_classes([MultiPartParser, FormParser])
+def upload_record(request, action_id):
+    """Upload demo video or keypoints data for action learning"""
+    try:
+        action = Action.objects.get(id=action_id)
+        
+        # Handle video file upload
+        video_file = request.FILES.get('video')
+        keypoints_data = request.data.get('keypoints')
+        fps = int(request.data.get('fps', 30))
+        
+        if video_file:
+            # Save video file
+            import os
+            from django.conf import settings
+            
+            # Create media directory if it doesn't exist
+            media_dir = os.path.join(settings.BASE_DIR, 'media', 'action_videos')
+            os.makedirs(media_dir, exist_ok=True)
+            
+            # Save video with unique filename
+            video_filename = f"action_{action_id}_{int(time.time())}.mp4"
+            video_path = os.path.join(media_dir, video_filename)
+            
+            with open(video_path, 'wb') as f:
+                for chunk in video_file.chunks():
+                    f.write(chunk)
+            
+            # Create sample record
+            sample = ActionSample.objects.create(
+                action=action,
+                video_url=video_path,
+                fps=fps
+            )
+            
+            return JsonResponse({
+                'sample_id': sample.id,
+                'video_saved': True,
+                'video_path': video_path
+            })
+        
+        elif keypoints_data:
+            # Handle direct keypoints upload
+            try:
+                if isinstance(keypoints_data, str):
+                    keypoints_json = json.loads(keypoints_data)
+                else:
+                    keypoints_json = keypoints_data
+            except json.JSONDecodeError:
+                return JsonResponse({'error': 'Invalid keypoints JSON format'}, status=400)
+            
+            sample = ActionSample.objects.create(
+                action=action,
+                keypoints_json=keypoints_json,
+                fps=fps
+            )
+            
+            return JsonResponse({
+                'sample_id': sample.id,
+                'keypoints_saved': True,
+                'frame_count': len(keypoints_json)
+            })
+        
+        else:
+            return JsonResponse({'error': 'No video file or keypoints data provided'}, status=400)
+        
+    except Action.DoesNotExist:
+        return JsonResponse({'error': 'Action not found'}, status=404)
+    except Exception as e:
+        return JsonResponse({'error': str(e)}, status=500)
+
+
+@api_view(['POST'])
+def finalize_action(request, action_id):
+    """Finalize action: extract features, segment, create templates, estimate thresholds"""
+    try:
+        result = finalize_action_from_video(action_id)
+        
+        if result['success']:
+            return JsonResponse(result)
+        else:
+            return JsonResponse(result, status=400)
+        
+    except Exception as e:
+        return JsonResponse({'error': str(e)}, status=500)
+
+
+@api_view(['POST'])
+def infer_stream(request):
+    """Real-time inference endpoint for DTW-based action recognition"""
+    try:
+        print(f"DEBUG infer_stream: content_type = {request.content_type}")
+        features = None
+        update_thresholds = None
+        
+        # Handle different input formats
+        if request.content_type.startswith('multipart/form-data'):
+            # Image frame upload
+            frame_file = request.FILES.get('frame')
+            if frame_file:
+                # Read image
+                img_array = np.frombuffer(frame_file.read(), np.uint8)
+                image = cv2.imdecode(img_array, cv2.IMREAD_COLOR)
+                
+                # Process frame
+                frame_result = process_realtime_frame(image)
+                if not frame_result['success']:
+                    return JsonResponse(frame_result, status=400)
+                
+                features = frame_result['features']
+                print(f"DEBUG infer_stream: Extracted features from image, shape: {np.array(features).shape if features else 'None'}")
+                
+                # Check for threshold updates in form data
+                thr_in = request.POST.get('thr_in')
+                thr_out = request.POST.get('thr_out')
+                if thr_in and thr_out:
+                    update_thresholds = {
+                        'thr_in': float(thr_in),
+                        'thr_out': float(thr_out)
+                    }
+                    print(f"DEBUG infer_stream: Threshold updates from form: {update_thresholds}")
+                else:
+                    update_thresholds = None
+            else:
+                return JsonResponse({'error': 'No frame data provided'}, status=400)
+        
+        else:
+            # JSON payload with features or keypoints
+            payload = request.data if hasattr(request, 'data') else json.loads(request.body)
+            
+            if 'features' in payload:
+                # Direct features input
+                features = payload['features']
+            elif 'keypoints' in payload:
+                # Process keypoints to features
+                frame_result = process_realtime_frame(payload['keypoints'])
+                if not frame_result['success']:
+                    return JsonResponse(frame_result, status=400)
+                features = frame_result['features']
+            else:
+                return JsonResponse({'error': 'No features or keypoints provided'}, status=400)
+            
+            # Extract threshold updates if present
+            update_thresholds = payload.get('update_thresholds')
+        
+        # Run DTW inference
+        print(f"DEBUG infer_stream: About to call dtw_infer_update with features type: {type(features)}, update_thresholds: {update_thresholds}")
+        print(f"DEBUG infer_stream: features is None: {features is None}")
+        print(f"DEBUG infer_stream: features length: {len(features) if features else 'N/A'}")
+        
+        inference_payload = {
+            'features': features,
+            'update_thresholds': update_thresholds
+        }
+        print(f"DEBUG infer_stream: inference_payload: {inference_payload}")
+        
+        result = dtw_infer_update(inference_payload)
+        # Ensure debug observability fields
+        if isinstance(result, dict):
+            dbg = result.get('debug', {}) or {}
+            # Attach reason_code if recognizer provided it (present in dtw_recognition debug or pipeline state machine)
+            # If missing, keep 'OK' as default
+            dbg.setdefault('reason_code', 'OK')
+            result['debug'] = dbg
+        print(f"DEBUG infer_stream: Got result from dtw_infer_update: {result}")
+        return JsonResponse(result)
+        
+    except Exception as e:
+        print(f"DEBUG infer_stream: Exception occurred: {e}")
+        import traceback
+        traceback.print_exc()
+        return JsonResponse({'error': str(e)}, status=500)
+
+
+@api_view(['POST'])
+def setup_action_inference(request, action_id):
+    """Setup DTW recognizer for a specific action"""
+    try:
+        result = setup_action_for_inference(action_id)
+        
+        if result['success']:
+            return JsonResponse(result)
+        else:
+            return JsonResponse(result, status=400)
+        
+    except Exception as e:
+        return JsonResponse({'error': str(e)}, status=500)
+
+
+@api_view(['POST'])
+def reset_inference(request):
+    """Reset DTW recognizer state"""
+    try:
+        result = reset_recognizer()
+        return JsonResponse(result)
+        
+    except Exception as e:
+        return JsonResponse({'error': str(e)}, status=500)
+
+
+@api_view(['GET'])
+def inference_status(request):
+    """Get current DTW recognizer status"""
+    try:
+        result = get_recognizer_status()
+        return JsonResponse(result)
+        
+    except Exception as e:
+        return JsonResponse({'error': str(e)}, status=500)
+
+
+@api_view(['GET'])
+def action_detail(request, action_id):
+    """Get detailed information about an action"""
+    try:
+        action = Action.objects.get(id=action_id)
+        
+        # Get related data
+        templates = ActionTemplate.objects.filter(action=action)
+        samples = ActionSample.objects.filter(action=action)
+        sessions = ActionSession.objects.filter(action=action).order_by('-started_at')[:10]
+        
+        template_data = []
+        for template in templates:
+            template_data.append({
+                'id': template.id,
+                'length': template.length,
+                'feature_dim': template.feature_dim,
+                'created_at': template.created_at.isoformat()
+            })
+        
+        sample_data = []
+        for sample in samples:
+            sample_data.append({
+                'id': sample.id,
+                'has_video': bool(sample.video_url),
+                'has_keypoints': bool(sample.keypoints_json),
+                'fps': sample.fps,
+                'created_at': sample.created_at.isoformat()
+            })
+        
+        session_data = []
+        for session in sessions:
+            session_data.append({
+                'id': session.id,
+                'reps': session.reps,
+                'started_at': session.started_at.isoformat(),
+                'metrics': session.metrics_json
+            })
+        
+        return JsonResponse({
+            'action': {
+                'id': action.id,
+                'name': action.name,
+                'description': action.description,
+                'mode': action.mode,
+                'params': action.params_json,
+                'created_at': action.created_at.isoformat()
+            },
+            'templates': template_data,
+            'samples': sample_data,
+            'recent_sessions': session_data
+        })
+        
+    except Action.DoesNotExist:
+        return JsonResponse({'error': 'Action not found'}, status=404)
+    except Exception as e:
+        return JsonResponse({'error': str(e)}, status=500)
+
+
+# ==================== LEGACY MODE SUPPORT ====================
+
+@api_view(['GET'])
+def legacy_mode_status(request):
+    """Check if legacy mode is enabled"""
+    # For now, always return available but disabled by default
+    return JsonResponse({
+        'legacy_mode_available': True,
+        'legacy_mode_enabled': False,
+        'legacy_endpoints': [
+            '/api/legacy/detect-pose/',
+            '/api/legacy/exercises/',
+        ]
+    })
+
+
+# Legacy endpoint aliases for backward compatibility
+@api_view(['POST'])
+@parser_classes([MultiPartParser])
+def legacy_detect_pose(request):
+    """Legacy pose detection endpoint - identical to original detect_pose"""
+    return detect_pose(request)
+
+@api_view(['POST'])
+def change_password(request):
+    """Change user password"""
+    try:
+        data = request.data
+        current_password = data.get('current_password')
+        new_password = data.get('new_password')
+        
+        if not current_password or not new_password:
+            return Response({'error': 'Current password and new password are required.'}, status=status.HTTP_400_BAD_REQUEST)
+        
+        # Get user ID from request headers or session
+        user_id = request.headers.get('User-ID')
+        if not user_id:
+            return Response({'error': 'User ID not found in request.'}, status=status.HTTP_400_BAD_REQUEST)
+        
+        try:
+            user = CustomUser.objects.get(id=user_id)
+        except CustomUser.DoesNotExist:
+            return Response({'error': 'User not found.'}, status=status.HTTP_404_NOT_FOUND)
+        
+        # Verify current password
+        if not user.check_password(current_password):
+            return Response({'error': 'Current password is incorrect.'}, status=status.HTTP_400_BAD_REQUEST)
+        
+        # Validate new password
+        if len(new_password) < 8:
+            return Response({'error': 'New password must be at least 8 characters long.'}, status=status.HTTP_400_BAD_REQUEST)
+        
+        # Set new password
+        user.set_password(new_password)
+        user.save()
+        
+        return Response({'message': 'Password changed successfully.'}, status=status.HTTP_200_OK)
+        
+    except Exception as e:
+        return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+@api_view(['POST'])
+def change_user_password(request, user_id):
+    """Change password for a specific user (admin only)"""
+    try:
+        data = request.data
+        current_password = data.get('current_password')
+        new_password = data.get('new_password')
+        
+        if not current_password or not new_password:
+            return Response({'error': 'Current password and new password are required.'}, status=status.HTTP_400_BAD_REQUEST)
+        
+        # Get admin user ID from request headers
+        admin_id = request.headers.get('X-User-ID')
+        if not admin_id:
+            return Response({'error': 'Admin user ID not found in request.'}, status=status.HTTP_400_BAD_REQUEST)
+        
+        try:
+            admin_user = CustomUser.objects.get(id=admin_id)
+        except CustomUser.DoesNotExist:
+            return Response({'error': 'Admin user not found.'}, status=status.HTTP_404_NOT_FOUND)
+        
+        # Verify admin's current password
+        if not admin_user.check_password(current_password):
+            return Response({'error': 'Current admin password is incorrect.'}, status=status.HTTP_400_BAD_REQUEST)
+        
+        # Get target user
+        try:
+            target_user = CustomUser.objects.get(id=user_id)
+        except CustomUser.DoesNotExist:
+            return Response({'error': 'Target user not found.'}, status=status.HTTP_404_NOT_FOUND)
+        
+        # Validate new password
+        if len(new_password) < 8:
+            return Response({'error': 'New password must be at least 8 characters long.'}, status=status.HTTP_400_BAD_REQUEST)
+        
+        # Set new password for target user
+        target_user.set_password(new_password)
+        target_user.save()
+        
+        return Response({'message': f'Password changed successfully for user {target_user.username}.'}, status=status.HTTP_200_OK)
+        
     except Exception as e:
         return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)

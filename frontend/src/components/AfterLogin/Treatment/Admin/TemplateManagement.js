@@ -97,11 +97,13 @@ const TemplateManagement = () => {
   };
 
   // Filter templates based on search term
-  const filteredTemplates = templates.filter(template =>
-    template.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    template.description.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    template.condition.toLowerCase().includes(searchTerm.toLowerCase())
-  );
+  const filteredTemplates = templates.filter(template => {
+    const name = (template?.name || '').toString().toLowerCase();
+    const description = (template?.description || '').toString().toLowerCase();
+    const condition = (template?.condition || '').toString().toLowerCase();
+    const query = (searchTerm || '').toString().toLowerCase();
+    return name.includes(query) || description.includes(query) || condition.includes(query);
+  });
 
   if (loading) {
     return (

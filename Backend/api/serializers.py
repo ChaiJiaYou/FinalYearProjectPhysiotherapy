@@ -133,20 +133,23 @@ class CustomUserSerializer(serializers.ModelSerializer):
         return instance
 
     def validate_ic(self, value):
-        if not value.isdigit() or len(value) != 12:
-            raise serializers.ValidationError("IC must be exactly 12 digits.")
+        if value and value.strip():  # Only validate if value is not empty
+            if not value.isdigit() or len(value) != 12:
+                raise serializers.ValidationError("IC must be exactly 12 digits.")
         return value
 
     def validate_contact_number(self, value):
-        if not value.isdigit():
-            raise serializers.ValidationError("Contact number must contain only digits.")
-        if len(value) < 10:
-            raise serializers.ValidationError("Contact number must be at least 10 digits long.")
+        if value and value.strip():  # Only validate if value is not empty
+            if not value.isdigit():
+                raise serializers.ValidationError("Contact number must contain only digits.")
+            if len(value) < 10:
+                raise serializers.ValidationError("Contact number must be at least 10 digits long.")
         return value
 
     def validate_email(self, value):
-        if not "@" in value or not "." in value:
-            raise serializers.ValidationError("Invalid email format.")
+        if value and value.strip():  # Only validate if value is not empty
+            if not "@" in value or not "." in value:
+                raise serializers.ValidationError("Invalid email format.")
         return value
     
 
@@ -264,7 +267,8 @@ class ExerciseSerializer(serializers.ModelSerializer):
         fields = [
             'exercise_id', 'name', 'body_part', 'category', 'difficulty', 
             'default_metrics', 'instructions', 'demo_video_url', 
-            'created_at', 'created_by', 'created_by_name', 'is_active'
+            'created_at', 'created_by', 'created_by_name', 'is_active',
+            'detection_rules'
         ]
         
     def get_created_by_name(self, obj):
