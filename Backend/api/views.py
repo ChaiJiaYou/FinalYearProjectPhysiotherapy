@@ -3,6 +3,7 @@ from rest_framework.response import Response
 from rest_framework import status, generics, permissions
 from rest_framework.parsers import MultiPartParser, FormParser, JSONParser
 from datetime import timedelta, datetime, time
+from django.utils import timezone
 from django.core.exceptions import ValidationError
 from django.http import JsonResponse
 from django.views.decorators.csrf import csrf_exempt
@@ -353,13 +354,23 @@ def create_appointment(request):
                 "error": "This time slot conflicts with another appointment."
             }, status=status.HTTP_400_BAD_REQUEST)
 
+        # Determine status based on who is creating the appointment
+        # If patient is creating, status should be Pending
+        # If therapist is creating, status should be Scheduled
+        current_user = request.user
+        if hasattr(current_user, 'role') and current_user.role == 'patient':
+            appointment_status = "Pending"
+        else:
+            appointment_status = "Scheduled"  # 默认为治疗师创建
+        
         # Create appointment
         appointment = Appointment.objects.create(
             patientId=patient,
             therapistId=therapist,
             appointmentDateTime=appointmentDateTime,
             duration=duration,
-            notes=notes
+            notes=notes,
+            status=appointment_status
         )
 
         # Create notification for the patient
@@ -368,7 +379,7 @@ def create_appointment(request):
             title="New Appointment Scheduled",
             message=f"You have a new appointment scheduled with {therapist.username} on {appointmentDateTime.strftime('%d/%b/%Y at %I:%M %p')}",
             notification_type='appointment',
-            related_id=str(appointment.appointmentId)
+            related_id=str(appointment.appointment_code)
         )
 
         # Create notification for the therapist
@@ -377,7 +388,7 @@ def create_appointment(request):
             title="New Appointment Created",
             message=f"New appointment scheduled with {patient.username} on {appointmentDateTime.strftime('%d/%b/%Y at %I:%M %p')}",
             notification_type='appointment',
-            related_id=str(appointment.appointmentId)
+            related_id=str(appointment.appointment_code)
         )
 
         serializer = AppointmentSerializer(appointment)
@@ -397,18 +408,30 @@ def list_therapists(request):
         therapists = Therapist.objects.all()
         
         # Serialize the therapist data
-        data = [
-            {
+        data = []
+        for therapist in therapists:
+            avatar_data = None
+            if therapist.user.avatar:
+                try:
+                    # 如果是BinaryField，转换为base64
+                    import base64
+                    avatar_data = f"data:image/jpeg;base64,{base64.b64encode(therapist.user.avatar).decode('utf-8')}"
+                except Exception as e:
+                    print(f"Error processing avatar for {therapist.user.username}: {e}")
+                    avatar_data = None
+            
+            data.append({
                 "id": therapist.user.id,  # Therapist's unique user ID
                 "username": therapist.user.username,
-            }
-            for therapist in therapists
-        ]
+                "email": therapist.user.email,
+                "avatar": avatar_data,
+            })
 
         return Response(data, status=status.HTTP_200_OK)
 
     except Exception as e:
         return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
     
 @api_view(['GET'])
 def list_appointments(request):
@@ -416,16 +439,16 @@ def list_appointments(request):
         appointments = Appointment.objects.all()
         data = [
             {
-                "appointmentId": appt.appointmentId,
+                "appointmentId": appt.appointment_code,
                 "patient": {
-                    "id": appt.patientId.id,
-                    "username": appt.patientId.username,
+                    "id": appt.patient_id.id if appt.patient_id else None,
+                    "username": appt.patient_id.username if appt.patient_id else appt.contact_name,
                 },
                 "therapist": {
-                    "id": appt.therapistId.id,
-                    "username": appt.therapistId.username,
+                    "id": appt.therapist_id.id,
+                    "username": appt.therapist_id.username,
                 },
-                "appointmentDateTime": appt.appointmentDateTime,
+                "appointmentDateTime": appt.start_at,
                 "status": appt.status,
             }
             for appt in appointments
@@ -446,9 +469,9 @@ def therapist_available_slots(request):
     try:
         # 获取指定日期的所有预约
         appointments = Appointment.objects.filter(
-            therapistId__id=therapist_id,
-            appointmentDateTime__date=date
-        ).order_by('appointmentDateTime')
+            therapist_id__id=therapist_id,
+            start_at__date=date
+        ).order_by('start_at')
 
         # 序列化预约数据
         serializer = AppointmentSerializer(appointments, many=True)
@@ -534,7 +557,7 @@ def get_patient_appointments(request):
 def update_appointment_status(request, appointment_id):
     try:
         # Get the appointment by ID
-        appointment = get_object_or_404(Appointment, appointmentId=appointment_id)
+        appointment = get_object_or_404(Appointment, appointment_code=appointment_id)
 
         # Get the new status and notes from request
         data = request.data
@@ -560,7 +583,7 @@ def update_appointment_status(request, appointment_id):
                     title="Appointment Cancelled",
                     message=f"Your appointment with {appointment.therapistId.username} scheduled for {appointment.appointmentDateTime.strftime('%d/%b/%Y at %I:%M %p')} has been cancelled.",
                     notification_type='appointment',
-                    related_id=appointment.appointmentId
+                    related_id=appointment.appointment_code
                 )
                 # Notify therapist
                 Notification.objects.create(
@@ -568,7 +591,7 @@ def update_appointment_status(request, appointment_id):
                     title="Appointment Cancelled",
                     message=f"The appointment with {appointment.patientId.username} scheduled for {appointment.appointmentDateTime.strftime('%d/%b/%Y at %I:%M %p')} has been cancelled.",
                     notification_type='appointment',
-                    related_id=appointment.appointmentId
+                    related_id=appointment.appointment_code
                 )
             elif new_status == "Completed":
                 # Notify patient
@@ -577,7 +600,7 @@ def update_appointment_status(request, appointment_id):
                     title="Appointment Completed",
                     message=f"Your appointment with {appointment.therapistId.username} has been marked as completed.",
                     notification_type='appointment',
-                    related_id=appointment.appointmentId
+                    related_id=appointment.appointment_code
                 )
                 # Notify therapist
                 Notification.objects.create(
@@ -585,7 +608,7 @@ def update_appointment_status(request, appointment_id):
                     title="Appointment Completed",
                     message=f"The appointment with {appointment.patientId.username} has been marked as completed.",
                     notification_type='appointment',
-                    related_id=appointment.appointmentId
+                    related_id=appointment.appointment_code
                 )
 
         serializer = AppointmentSerializer(appointment)
@@ -1743,7 +1766,7 @@ def change_password(request):
             return Response({'error': 'Current password and new password are required.'}, status=status.HTTP_400_BAD_REQUEST)
         
         # Get user ID from request headers or session
-        user_id = request.headers.get('User-ID')
+        user_id = request.headers.get('X-User-ID')
         if not user_id:
             return Response({'error': 'User ID not found in request.'}, status=status.HTTP_400_BAD_REQUEST)
         
@@ -1812,3 +1835,95 @@ def change_user_password(request, user_id):
         
     except Exception as e:
         return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+# Admin Force Complete Appointment
+@api_view(['PUT'])
+def admin_force_complete_appointment(request, appointment_id):
+    try:
+        appointment = get_object_or_404(Appointment, appointment_code=appointment_id)
+        
+        # Only allow completing Pending or Scheduled appointments
+        if appointment.status not in ["Pending", "Scheduled"]:
+            return Response({"error": "Can only complete Pending or Scheduled appointments"}, status=status.HTTP_400_BAD_REQUEST)
+        
+        old_status = appointment.status
+        appointment.status = "Completed"
+        appointment.completed_at = timezone.now()
+        appointment.save()
+        
+        # Create notification for patient
+        if appointment.patient_id:
+            Notification.objects.create(
+                user=appointment.patient_id,
+                title="Appointment Completed",
+                message=f"Your appointment with {appointment.therapist_id.username} scheduled for {appointment.start_at.strftime('%d/%b/%Y at %I:%M %p')} has been completed by admin.",
+                notification_type='appointment',
+                related_id=appointment.appointment_code
+            )
+        
+        # Create notification for therapist
+        Notification.objects.create(
+            user=appointment.therapist_id,
+            title="Appointment Completed by Admin",
+            message=f"Your appointment with {appointment.patient_id.username if appointment.patient_id else appointment.contact_name} scheduled for {appointment.start_at.strftime('%d/%b/%Y at %I:%M %p')} has been completed by admin.",
+            notification_type='appointment',
+            related_id=appointment.appointment_code
+        )
+        
+        return Response({
+            "message": "Appointment completed successfully",
+            "appointment_id": appointment.appointment_code,
+            "status": appointment.status
+        })
+        
+    except Exception as e:
+        return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+# Admin Force Reject Appointment
+@api_view(['PUT'])
+def admin_force_reject_appointment(request, appointment_id):
+    try:
+        appointment = get_object_or_404(Appointment, appointment_code=appointment_id)
+        
+        # Only allow rejecting Pending or Scheduled appointments
+        if appointment.status not in ["Pending", "Scheduled"]:
+            return Response({"error": "Can only reject Pending or Scheduled appointments"}, status=status.HTTP_400_BAD_REQUEST)
+        
+        old_status = appointment.status
+        appointment.status = "Cancelled"
+        appointment.cancelled_at = timezone.now()
+        appointment.cancel_reason = "Admin force reject" if old_status == "Pending" else "Admin force cancel"
+        appointment.save()
+        
+        # Create notification for patient
+        if appointment.patient_id:
+            action_text = "rejected" if old_status == "Pending" else "cancelled"
+            Notification.objects.create(
+                user=appointment.patient_id,
+                title=f"Appointment {action_text.title()}",
+                message=f"Your appointment with {appointment.therapist_id.username} scheduled for {appointment.start_at.strftime('%d/%b/%Y at %I:%M %p')} has been {action_text} by admin.",
+                notification_type='appointment',
+                related_id=appointment.appointment_code
+            )
+        
+        # Create notification for therapist
+        action_text = "rejected" if old_status == "Pending" else "cancelled"
+        Notification.objects.create(
+            user=appointment.therapist_id,
+            title=f"Appointment {action_text.title()} by Admin",
+            message=f"Your appointment with {appointment.patient_id.username if appointment.patient_id else appointment.contact_name} scheduled for {appointment.start_at.strftime('%d/%b/%Y at %I:%M %p')} has been {action_text} by admin.",
+            notification_type='appointment',
+            related_id=appointment.appointment_code
+        )
+        
+        action_text = "rejected" if old_status == "Pending" else "cancelled"
+        return Response({
+            "message": f"Appointment {action_text} successfully",
+            "appointment_id": appointment.appointment_code,
+            "status": appointment.status
+        })
+        
+    except Exception as e:
+        return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)

@@ -36,7 +36,7 @@ const AppointmentHistoryModal = ({ open, onClose, appointments }) => {
     if (open) {
       // Filter past appointments
       const pastAppointments = appointments.filter((appointment) => {
-        const appointmentDate = new Date(appointment.appointmentDateTime);
+        const appointmentDate = new Date(appointment.start_at);
         return appointmentDate <= new Date() || appointment.status !== "Scheduled";
       });
       setHistoryAppointments(pastAppointments);
@@ -74,7 +74,7 @@ const AppointmentHistoryModal = ({ open, onClose, appointments }) => {
       lastMonth.setMonth(lastMonth.getMonth() - 1);
 
       filtered = filtered.filter((appointment) => {
-        const appointmentDate = new Date(appointment.appointmentDateTime);
+        const appointmentDate = new Date(appointment.start_at);
         switch (dateFilter) {
           case "today":
             return appointmentDate >= today;
@@ -203,7 +203,7 @@ const AppointmentHistoryModal = ({ open, onClose, appointments }) => {
         ) : (
           <Grid container spacing={3}>
             {filteredAppointments.map((appointment) => (
-              <Grid item xs={12} key={appointment.appointmentId}>
+              <Grid item xs={12} key={appointment.id}>
                 <Paper
                   elevation={0}
                   sx={{
@@ -220,7 +220,7 @@ const AppointmentHistoryModal = ({ open, onClose, appointments }) => {
                   <InfoItem
                     icon={<EventIcon />}
                     label="Date & Time"
-                    value={formatDateTime(appointment.appointmentDateTime)}
+                    value={formatDateTime(appointment.start_at)}
                   />
                   <InfoItem
                     icon={<PersonIcon />}

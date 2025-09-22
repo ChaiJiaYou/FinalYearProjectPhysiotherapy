@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { useParams, useNavigate } from "react-router-dom";
+import { useParams, useNavigate, useLocation } from "react-router-dom";
 import { 
   Box, 
   Button, 
@@ -31,12 +31,12 @@ import AddIcon from "@mui/icons-material/Add";
 import { toast } from "react-toastify";
 import "react-toastify/dist/ReactToastify.css";
 import ConfirmationDialog from "../../CustomComponents/ConfirmationDialog";
-import ChangeUserPasswordDialog from "../../CustomComponents/ChangeUserPasswordDialog";
 import { alpha } from "@mui/material/styles";
 
 const EditUserPage = () => {
   const { id: userId } = useParams();
   const navigate = useNavigate();
+  const location = useLocation();
   const [user, setUser] = useState(null);
   const [formValues, setFormValues] = useState({
     username: "",
@@ -47,12 +47,16 @@ const EditUserPage = () => {
   const [patientDetails, setPatientDetails] = useState({
     emergency_contact: "",
   });
+  const [therapistDetails, setTherapistDetails] = useState({
+    specialization: "",
+  });
   const [avatarFile, setAvatarFile] = useState(null);
   const [avatarPreview, setAvatarPreview] = useState("");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [showConfirmDialog, setShowConfirmDialog] = useState(false);
-  const [changePasswordOpen, setChangePasswordOpen] = useState(false);
+  const [validationErrors, setValidationErrors] = useState({});
+  const [fieldErrors, setFieldErrors] = useState({});
 
   const getRoleColor = (role) => {
     const roleColors = {
@@ -70,6 +74,12 @@ const EditUserPage = () => {
       patient: <LocalHospitalIcon />,
     };
     return roleIcons[role] || <PersonIcon />;
+  };
+
+  // Check if we came from profile page
+  const isFromProfile = () => {
+    const searchParams = new URLSearchParams(location.search);
+    return searchParams.get('from') === 'profile';
   };
 
   useEffect(() => {
@@ -93,6 +103,12 @@ const EditUserPage = () => {
         if (data.patient_profile) {
           setPatientDetails({
             emergency_contact: data.patient_profile.emergency_contact || "",
+          });
+        }
+
+        if (data.therapist_profile) {
+          setTherapistDetails({
+            specialization: data.therapist_profile.specialization || "",
           });
         }
 
@@ -127,13 +143,46 @@ const EditUserPage = () => {
       ...prev,
       [field]: value
     }));
+    
+    // Clear field error when user starts typing
+    if (fieldErrors[field]) {
+      setFieldErrors(prev => ({
+        ...prev,
+        [field]: ''
+      }));
+    }
   };
 
   const handlePatientDetailsChange = (field, value) => {
+    console.log('Patient details change:', field, value);
     setPatientDetails(prev => ({
       ...prev,
       [field]: value
     }));
+    
+    // Clear field error when user starts typing
+    if (fieldErrors[field]) {
+      setFieldErrors(prev => ({
+        ...prev,
+        [field]: ''
+      }));
+    }
+  };
+
+  const handleTherapistDetailsChange = (field, value) => {
+    console.log('Therapist details change:', field, value);
+    setTherapistDetails(prev => ({
+      ...prev,
+      [field]: value
+    }));
+    
+    // Clear field error when user starts typing
+    if (fieldErrors[field]) {
+      setFieldErrors(prev => ({
+        ...prev,
+        [field]: ''
+      }));
+    }
   };
 
   const handleAvatarChange = (event) => {
@@ -145,20 +194,114 @@ const EditUserPage = () => {
     }
   };
 
+  // Validation functions
+  const validateField = (field, value) => {
+    const errors = {};
+    
+    switch (field) {
+      case 'username':
+        if (!value.trim()) {
+          errors[field] = 'Username is required';
+        }
+        break;
+      case 'email':
+        if (!value.trim()) {
+          errors[field] = 'Email is required';
+        } else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)) {
+          errors[field] = 'Please enter a valid email address (e.g., user@example.com)';
+        }
+        break;
+      case 'ic':
+        // IC number validation removed as it's read-only
+        break;
+      case 'contact_number':
+        if (!value.trim()) {
+          errors[field] = 'Contact number is required';
+        } else if (!/^\d{10,11}$/.test(value.replace(/\D/g, ''))) {
+          errors[field] = 'Contact number must be 10-11 digits';
+        }
+        break;
+      case 'emergency_contact':
+        if (!value.trim()) {
+          errors[field] = 'Emergency contact is required';
+        } else if (!/^\d{10,11}$/.test(value.replace(/\D/g, ''))) {
+          errors[field] = 'Emergency contact must be 10-11 digits';
+        }
+        break;
+      case 'specialization':
+        if (!value.trim()) {
+          errors[field] = 'Specialization is required';
+        }
+        break;
+    }
+    
+    return errors;
+  };
+
+  const validateAllFields = () => {
+    const errors = {};
+    
+    // Validate basic information
+    Object.keys(formValues).forEach(key => {
+      const fieldErrors = validateField(key, formValues[key]);
+      Object.assign(errors, fieldErrors);
+    });
+    
+    // Validate patient details if user is a patient
+    if (user.role === 'patient') {
+      Object.keys(patientDetails).forEach(key => {
+        const fieldErrors = validateField(key, patientDetails[key]);
+        Object.assign(errors, fieldErrors);
+      });
+    }
+
+    // Validate therapist details if user is a therapist
+    if (user.role === 'therapist') {
+      Object.keys(therapistDetails).forEach(key => {
+        const fieldErrors = validateField(key, therapistDetails[key]);
+        Object.assign(errors, fieldErrors);
+      });
+    }
+    
+    return errors;
+  };
+
   const handleSave = async () => {
     try {
       setSaving(true);
+      setValidationErrors({});
+      setFieldErrors({});
+      
+      // Validate all fields
+      const validationErrors = validateAllFields();
+      if (Object.keys(validationErrors).length > 0) {
+        setFieldErrors(validationErrors);
+        toast.error("Please fix the validation errors before saving");
+        return;
+      }
+      
       const formData = new FormData();
       
-      // Add basic information
+      // Add basic information (exclude IC number as it cannot be modified)
       Object.keys(formValues).forEach(key => {
-        formData.append(key, formValues[key]);
+        if (key !== 'ic') {  // Exclude IC number from updates
+          formData.append(key, formValues[key]);
+        }
       });
 
       // Add patient details if user is a patient
       if (user.role === 'patient') {
+        console.log('Adding patient details:', patientDetails);
         Object.keys(patientDetails).forEach(key => {
-          formData.append(key, patientDetails[key]);
+          formData.append(`patient_profile.${key}`, patientDetails[key]);
+        });
+      }
+
+      // Add therapist details if user is a therapist
+      if (user.role === 'therapist') {
+        console.log('Adding therapist details:', therapistDetails);
+        Object.keys(therapistDetails).forEach(key => {
+          formData.append(`therapist_profile.${key}`, therapistDetails[key]);
         });
       }
 
@@ -173,15 +316,30 @@ const EditUserPage = () => {
       });
 
       if (response.ok) {
-        toast.success("User updated successfully");
-        navigate(`/home/users/view/${userId}`);
+        toast.success("User profile updated successfully!");
+        if (isFromProfile()) {
+          navigate('/home/profile');
+        } else {
+          navigate(`/home/users/view/${userId}`);
+        }
       } else {
         const errorData = await response.json();
-        throw new Error(errorData.error || "Failed to update user");
+        
+        // Handle field-specific errors from backend
+        if (errorData.errors) {
+          setFieldErrors(errorData.errors);
+          toast.error("Please fix the validation errors");
+        } else {
+          throw new Error(errorData.error || "Failed to update user profile");
+        }
       }
     } catch (error) {
       console.error("Error updating user:", error);
-      toast.error(error.message || "Failed to update user");
+      if (error.message.includes("Failed to fetch")) {
+        toast.error("Cannot connect to server. Please check your connection and try again.");
+      } else {
+        toast.error(error.message || "An unexpected error occurred. Please try again.");
+      }
     } finally {
       setSaving(false);
     }
@@ -192,7 +350,11 @@ const EditUserPage = () => {
   };
 
   const confirmCancel = () => {
-    navigate(`/home/users/view/${userId}`);
+    if (isFromProfile()) {
+      navigate('/home/profile');
+    } else {
+      navigate(`/home/users/view/${userId}`);
+    }
   };
 
   if (loading) {
@@ -214,94 +376,79 @@ const EditUserPage = () => {
   }
 
   return (
-    <Box sx={{ backgroundColor: "#f8fafc", minHeight: "100vh" }}>
-      {/* Header Section */}
-      <Box
-        sx={{
-          background: `linear-gradient(135deg, ${getRoleColor(user?.role)} 0%, ${alpha(getRoleColor(user?.role), 0.8)} 100%)`,
-          p: 3,
-          color: "white",
-        }}>
-        <Box display="flex" alignItems="center" justifyContent="space-between">
+    <Box sx={{ bgcolor: '#f8fafc', minHeight: '100vh', p: { xs: 2, md: 4 } }}>
+      <Box sx={{ maxWidth: 'xl', mx: 'auto' }}>
+        {/* 页面头部 - 遵循设计系统 */}
+        <Box display="flex" justifyContent="space-between" alignItems="center" mb={4}>
           <Box display="flex" alignItems="center" gap={2}>
             <IconButton
-              onClick={() => navigate(-1)}
+              onClick={() => {
+                if (isFromProfile()) {
+                  navigate('/home/profile');
+                } else {
+                  navigate(`/home/users/view/${userId}`);
+                }
+              }}
               sx={{
-                color: "white",
-                backgroundColor: alpha("#ffffff", 0.2),
-                "&:hover": {
-                  backgroundColor: alpha("#ffffff", 0.3),
+                color: '#3b82f6',
+                backgroundColor: 'rgba(59, 130, 246, 0.1)',
+                '&:hover': {
+                  backgroundColor: 'rgba(59, 130, 246, 0.2)',
                 },
               }}>
               <ArrowBackIcon />
             </IconButton>
-            <Typography variant="h4" sx={{ fontWeight: "bold" }}>
-              Edit User Profile
-            </Typography>
+            <Box>
+              <Typography variant="h4" gutterBottom sx={{ color: '#000000', fontWeight: 600 }}>
+                Edit User Profile
+              </Typography>
+              <Typography variant="body1" color="text.secondary">
+                Update user account information and settings
+              </Typography>
+            </Box>
           </Box>
-          <Stack direction="row" spacing={2}>
+          <Box display="flex" gap={2}>
             <Button
               variant="outlined"
               startIcon={<SaveIcon />}
               onClick={handleSave}
               disabled={saving}
               sx={{
-                borderColor: "white",
-                color: "white",
-                textTransform: "uppercase",
+                borderRadius: 2,
+                textTransform: 'uppercase',
                 fontWeight: 600,
                 px: 3,
-                borderRadius: 2,
-                "&:hover": {
-                  borderColor: "white",
-                  bgcolor: alpha("#ffffff", 0.1),
+                borderColor: '#3b82f6',
+                color: '#3b82f6',
+                '&:hover': {
+                  borderColor: '#2563eb',
+                  bgcolor: 'rgba(59, 130, 246, 0.04)',
                 },
-                "&:disabled": {
-                  borderColor: alpha("#ffffff", 0.5),
-                  color: alpha("#ffffff", 0.5),
+                '&:disabled': {
+                  borderColor: 'grey.300',
+                  color: 'grey.500',
                 },
               }}>
               Save Changes
             </Button>
             <Button
-              variant="outlined"
-              startIcon={<SecurityIcon />}
-              onClick={() => setChangePasswordOpen(true)}
-              sx={{
-                borderColor: "white",
-                color: "white",
-                textTransform: "uppercase",
-                fontWeight: 600,
-                px: 3,
-                borderRadius: 2,
-                "&:hover": {
-                  borderColor: "white",
-                  bgcolor: alpha("#ffffff", 0.1),
-                },
-              }}>
-              Change Password
-            </Button>
-            <Button
-              variant="outlined"
+              variant="contained"
               startIcon={<CancelIcon />}
               onClick={handleCancel}
               sx={{
-                borderColor: "white",
-                color: "white",
-                textTransform: "uppercase",
+                borderRadius: 2,
+                textTransform: 'uppercase',
                 fontWeight: 600,
                 px: 3,
-                borderRadius: 2,
-                "&:hover": {
-                  borderColor: "white",
-                  bgcolor: alpha("#ffffff", 0.1),
-                },
+                bgcolor: '#6b7280',
+                '&:hover': {
+                  bgcolor: '#4b5563',
+                }
               }}>
               Cancel
             </Button>
-          </Stack>
+          </Box>
         </Box>
-      </Box>
 
       {/* User Profile Header Section */}
       <Box sx={{ p: 3, backgroundColor: "white", mb: 2 }}>
@@ -407,8 +554,18 @@ const EditUserPage = () => {
               <TextField
                 label="Username"
                 value={formValues.username}
-                onChange={(e) => handleInputChange('username', e.target.value)}
+                onChange={(e) => {
+                  const value = e.target.value;
+                  if (value.length <= 50) {
+                    handleInputChange('username', value);
+                  }
+                }}
                 fullWidth
+                error={!!fieldErrors.username}
+                helperText={fieldErrors.username || "Enter user's full name (max 50 characters)"}
+                inputProps={{
+                  maxLength: 50
+                }}
                 InputProps={{
                   startAdornment: (
                     <InputAdornment position="start">
@@ -426,8 +583,18 @@ const EditUserPage = () => {
                 label="Email"
                 type="email"
                 value={formValues.email}
-                onChange={(e) => handleInputChange('email', e.target.value)}
+                onChange={(e) => {
+                  const value = e.target.value;
+                  if (value.length <= 100) {
+                    handleInputChange('email', value);
+                  }
+                }}
                 fullWidth
+                error={!!fieldErrors.email}
+                helperText={fieldErrors.email || "Enter valid email address"}
+                inputProps={{
+                  maxLength: 100
+                }}
                 InputProps={{
                   startAdornment: (
                     <InputAdornment position="start">
@@ -444,8 +611,9 @@ const EditUserPage = () => {
               <TextField
                 label="IC Number"
                 value={formValues.ic}
-                onChange={(e) => handleInputChange('ic', e.target.value)}
                 fullWidth
+                disabled
+                helperText="IC Number cannot be modified"
                 InputProps={{
                   startAdornment: (
                     <InputAdornment position="start">
@@ -457,13 +625,26 @@ const EditUserPage = () => {
                   "& .MuiOutlinedInput-root": {
                     borderRadius: 2,
                   },
+                  "& .MuiInputBase-input.Mui-disabled": {
+                    color: "text.primary",
+                    fontWeight: 500,
+                  },
                 }}
               />
               <TextField
                 label="Contact Number"
                 value={formValues.contact_number}
-                onChange={(e) => handleInputChange('contact_number', e.target.value)}
+                onChange={(e) => {
+                  // Only allow numbers and limit to 11 digits
+                  const value = e.target.value.replace(/\D/g, '').slice(0, 11);
+                  handleInputChange('contact_number', value);
+                }}
                 fullWidth
+                error={!!fieldErrors.contact_number}
+                helperText={fieldErrors.contact_number || "Enter 10-11 digit phone number"}
+                inputProps={{
+                  maxLength: 11
+                }}
                 InputProps={{
                   startAdornment: (
                     <InputAdornment position="start">
@@ -511,8 +692,17 @@ const EditUserPage = () => {
                 <TextField
                   label="Emergency Contact"
                   value={patientDetails.emergency_contact}
-                  onChange={(e) => handlePatientDetailsChange('emergency_contact', e.target.value)}
+                  onChange={(e) => {
+                    // Only allow numbers and limit to 11 digits
+                    const value = e.target.value.replace(/\D/g, '').slice(0, 11);
+                    handlePatientDetailsChange('emergency_contact', value);
+                  }}
                   fullWidth
+                  error={!!fieldErrors.emergency_contact}
+                  helperText={fieldErrors.emergency_contact || "Enter 10-11 digit phone number"}
+                  inputProps={{
+                    maxLength: 11
+                  }}
                   InputProps={{
                     startAdornment: (
                       <InputAdornment position="start">
@@ -530,9 +720,14 @@ const EditUserPage = () => {
               {user?.role === 'therapist' && (
                 <TextField
                   label="Specialization"
-                  value=""
+                  value={therapistDetails.specialization}
+                  onChange={(e) => handleTherapistDetailsChange('specialization', e.target.value)}
                   fullWidth
-                  disabled
+                  error={!!fieldErrors.specialization}
+                  helperText={fieldErrors.specialization || "Enter specialization area"}
+                  inputProps={{
+                    maxLength: 100
+                  }}
                   InputProps={{
                     startAdornment: (
                       <InputAdornment position="start">
@@ -572,21 +767,15 @@ const EditUserPage = () => {
         </Grid>
       </Grid>
 
-      {/* Confirmation Dialog */}
-      <ConfirmationDialog
-        open={showConfirmDialog}
-        onClose={() => setShowConfirmDialog(false)}
-        onConfirm={confirmCancel}
-        title="Discard Changes"
-        message="Are you sure you want to discard all changes? This action cannot be undone."
-      />
-
-      {/* Change Password Dialog */}
-      <ChangeUserPasswordDialog
-        open={changePasswordOpen}
-        onClose={() => setChangePasswordOpen(false)}
-        userId={userId}
-      />
+        {/* Confirmation Dialog */}
+        <ConfirmationDialog
+          open={showConfirmDialog}
+          onClose={() => setShowConfirmDialog(false)}
+          onConfirm={confirmCancel}
+          title="Discard Changes"
+          message="Are you sure you want to discard all changes? This action cannot be undone."
+        />
+      </Box>
     </Box>
   );
 };

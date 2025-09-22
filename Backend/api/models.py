@@ -70,7 +70,7 @@ class CustomUser(AbstractUser):
         year_month = current_date.strftime('%y%m')  # YYMM format
         
         if self.role.lower() == "admin":
-            # Admin: A + 4 increment digits (A0001)
+            # Admin: A + 4 increment digits (A0001, A0002, etc.)
             prefix = "A"
             last_user = CustomUser.objects.filter(id__startswith=prefix).order_by('-id').first()
             
@@ -82,7 +82,7 @@ class CustomUser(AbstractUser):
             return f"{prefix}{last_number + 1:04d}"  # A0001, A0002, etc.
             
         elif self.role.lower() == "therapist":
-            # Therapist: D + YYMM + 3 increment digits (D2501001)
+            # Therapist: D + 7 digits (D2506001, D2506002, etc.)
             prefix = f"D{year_month}"
             last_user = CustomUser.objects.filter(id__startswith=prefix).order_by('-id').first()
             
@@ -91,10 +91,10 @@ class CustomUser(AbstractUser):
             else:
                 last_number = 0
                 
-            return f"{prefix}{last_number + 1:03d}"  # D2501001, D2501002, etc.
+            return f"{prefix}{last_number + 1:03d}"  # D2506001, D2506002, etc.
             
         elif self.role.lower() == "patient":
-            # Patient: P + YYMM + 3 increment digits (P2501001)
+            # Patient: P + 7 digits (P2506001, P2506002, etc.)
             prefix = f"P{year_month}"
             last_user = CustomUser.objects.filter(id__startswith=prefix).order_by('-id').first()
             
@@ -103,7 +103,7 @@ class CustomUser(AbstractUser):
             else:
                 last_number = 0
                 
-            return f"{prefix}{last_number + 1:03d}"  # P2501001, P2501002, etc.
+            return f"{prefix}{last_number + 1:03d}"  # P2506001, P2506002, etc.
             
         else:
             # Default fallback for unknown roles
@@ -135,6 +135,7 @@ class Patient(models.Model):
     
 class Appointment(models.Model):
     STATUS_CHOICES = [
+        ("Pending", "Pending"),
         ("Scheduled", "Scheduled"),
         ("Cancelled", "Cancelled"),
         ("Completed", "Completed"),
@@ -146,27 +147,133 @@ class Appointment(models.Model):
         (60, "60 minutes"),
     ]
 
-    appointmentId = models.CharField(max_length=50, unique=True, editable=False)
-    patientId = models.ForeignKey(CustomUser, on_delete=models.CASCADE, related_name="patient_appointments", limit_choices_to={'role': 'patient'})
-    therapistId = models.ForeignKey(CustomUser, on_delete=models.CASCADE, related_name="therapist_appointments", limit_choices_to={'role': 'therapist'})
-    treatment_id = models.ForeignKey('Treatment', on_delete=models.SET_NULL, null=True, blank=True, related_name="appointments")  # Link to treatment (nullable)
-    appointmentDateTime = models.DateTimeField()
-    duration = models.IntegerField(choices=DURATION_CHOICES, default=30)  # Duration in minutes
-    creationDate = models.DateTimeField(auto_now_add=True)
+    MODE_CHOICES = [
+        ("onsite", "On-site"),
+        ("tele", "Telemedicine"),
+        ("home", "Home visit"),
+    ]
+
+    # 预约编号 - 并发安全生成
+    appointment_code = models.CharField(max_length=20, unique=True, editable=False)
+    
+    # 治疗师 - 必填
+    therapist_id = models.ForeignKey(
+        CustomUser, 
+        on_delete=models.CASCADE, 
+        related_name="therapist_appointments", 
+        limit_choices_to={'role': 'therapist'}
+    )
+    
+    # 患者 - 可为空（新患者占位模式）
+    patient_id = models.ForeignKey(
+        CustomUser, 
+        on_delete=models.CASCADE, 
+        related_name="patient_appointments", 
+        limit_choices_to={'role': 'patient'},
+        null=True, 
+        blank=True
+    )
+    
+    # 新患者占位字段
+    contact_name = models.CharField(max_length=100, blank=True, null=True)
+    contact_phone = models.CharField(max_length=20, blank=True, null=True)
+    
+    # 时间相关
+    start_at = models.DateTimeField()
+    end_at = models.DateTimeField()
+    duration_min = models.IntegerField(choices=DURATION_CHOICES, default=30)
+    
+    # 预约模式
+    mode = models.CharField(max_length=10, choices=MODE_CHOICES, default="onsite")
+    
+    # 状态管理
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default="Scheduled")
-    notes = models.TextField(blank=True, null=True)  # 预约备注
-    sessionNotes = models.TextField(blank=True, null=True)  # 诊疗记录
+    
+    # 备注和记录
+    notes = models.TextField(blank=True, null=True)
+    patient_message = models.TextField(blank=True, null=True, help_text="Message from patient to therapist")
+    session_notes = models.TextField(blank=True, null=True)
+    cancel_reason = models.TextField(blank=True, null=True, help_text="Reason for cancellation")
+    
+    # 状态时间戳
+    completed_at = models.DateTimeField(blank=True, null=True, help_text="When appointment was completed")
+    cancelled_at = models.DateTimeField(blank=True, null=True, help_text="When appointment was cancelled")
+    
+    # 时间戳
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    
+    # 关联治疗计划（保留）
+    treatment_id = models.ForeignKey(
+        'Treatment', 
+        on_delete=models.SET_NULL, 
+        null=True, 
+        blank=True, 
+        related_name="appointments"
+    )
+
+    class Meta:
+        ordering = ['start_at']
+        indexes = [
+            models.Index(fields=['therapist_id', 'start_at']),
+            models.Index(fields=['patient_id', 'start_at']),
+        ]
 
     def __str__(self):
-        return f"Appointment {self.appointmentId} - {self.status} ({self.therapistId.username})"
+        return f"Appointment {self.appointment_code} - {self.status} ({self.therapist_id.username})"
 
     def save(self, *args, **kwargs):
-        if not self.appointmentId:
-            # Count existing appointments today to generate a simple incremental ID
-            today_str = now().strftime('%Y%m%d')  # Format: YYYYMMDD
-            existing_count = Appointment.objects.filter(appointmentId__startswith=f"APT-{today_str}").count()
-            self.appointmentId = f"APT-{today_str}-{existing_count + 1:03d}"  # APT-20250219-001
+        if not self.appointment_code:
+            self.appointment_code = self._generate_appointment_code()
         super().save(*args, **kwargs)
+
+    def _generate_appointment_code(self):
+        """并发安全的预约编号生成"""
+        from django.db import transaction
+        from django.utils import timezone
+        
+        with transaction.atomic():
+            today_str = timezone.now().strftime('%Y%m%d')
+            prefix = f"APT-{today_str}-"
+            
+            # 使用 SELECT FOR UPDATE 锁定
+            last_appointment = Appointment.objects.filter(
+                appointment_code__startswith=prefix
+            ).select_for_update().order_by('-appointment_code').first()
+            
+            if last_appointment:
+                # 提取最后三位数字并自增
+                last_number = int(last_appointment.appointment_code[-3:])
+                new_number = last_number + 1
+            else:
+                new_number = 1
+            
+            return f"{prefix}{new_number:03d}"
+
+
+class UnavailableSlot(models.Model):
+    """治疗师不可用时间段"""
+    
+    therapist_id = models.ForeignKey(
+        CustomUser, 
+        on_delete=models.CASCADE, 
+        related_name="unavailable_slots",
+        limit_choices_to={'role': 'therapist'}
+    )
+    start_at = models.DateTimeField()
+    end_at = models.DateTimeField()
+    description = models.CharField(max_length=200, blank=True, null=True, help_text="Additional details")
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['start_at']
+        indexes = [
+            models.Index(fields=['therapist_id', 'start_at']),
+        ]
+
+    def __str__(self):
+        return f"Unavailable {self.therapist_id.username} - {self.start_at} to {self.end_at}"
 
 class MedicalHistory(models.Model):
     patient = models.ForeignKey(CustomUser, on_delete=models.CASCADE, related_name="medical_histories",  limit_choices_to={'role': 'patient'} )

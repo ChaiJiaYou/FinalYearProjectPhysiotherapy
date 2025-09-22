@@ -63,10 +63,10 @@ const TherapistAppointments = () => {
       // 确保使用本地时区的日期
       const dateStr = selectedDate.toLocaleDateString('en-CA'); // 使用 en-CA 格式获取 YYYY-MM-DD 格式
       const response = await fetch(
-        `http://127.0.0.1:8000/api/therapist-today-appointments/?therapist_id=${therapistId}&date=${dateStr}`
+        `http://127.0.0.1:8000/api/appointments/list/?scope=therapist&user_id=${therapistId}&from=${dateStr}&to=${dateStr}`
       );
       const data = await response.json();
-      setAppointments(data);
+      setAppointments(data.appointments || []);
       setLoading(false);
     } catch (error) {
       setError("Failed to fetch appointments");
@@ -77,14 +77,15 @@ const TherapistAppointments = () => {
 
   const updateAppointmentStatus = async (appointmentId, newStatus) => {
     try {
+      const action = newStatus === 'Completed' ? 'complete' : 'cancel';
       const response = await fetch(
-        `http://127.0.0.1:8000/api/update-appointment-status/${appointmentId}/`,
+        `http://127.0.0.1:8000/api/appointments/${appointmentId}/`,
         {
-          method: "PUT",
+          method: "PATCH",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ 
-            status: newStatus,
-            sessionNotes: selectedAppointment.sessionNotes 
+            action: action,
+            session_notes: selectedAppointment?.session_notes 
           }),
         }
       );
@@ -94,16 +95,16 @@ const TherapistAppointments = () => {
         toast.success(`Appointment ${newStatus.toLowerCase()} successfully`);
         setAppointments((prev) =>
           prev.map((appt) =>
-            appt.appointmentId === appointmentId
-              ? { ...appt, status: newStatus, sessionNotes: selectedAppointment.sessionNotes }
+            appt.appointment_code === appointmentId
+              ? { ...appt, status: newStatus, session_notes: selectedAppointment?.session_notes }
               : appt
           )
         );
-        if (selectedAppointment?.appointmentId === appointmentId) {
+        if (selectedAppointment?.appointment_code === appointmentId) {
           setSelectedAppointment((prev) => ({ 
             ...prev, 
             status: newStatus,
-            sessionNotes: selectedAppointment.sessionNotes
+            session_notes: selectedAppointment.session_notes
           }));
         }
       } else {
@@ -300,7 +301,7 @@ const TherapistAppointments = () => {
               ) : (
                 appointments.map((appointment) => (
                   <Card
-                    key={appointment.appointmentId}
+                    key={appointment.appointment_code}
                     sx={{
                       cursor: "pointer",
                       "&:hover": {
@@ -309,8 +310,8 @@ const TherapistAppointments = () => {
                         transition: "all 0.2s",
                       },
                       bgcolor:
-                        selectedAppointment?.appointmentId ===
-                        appointment.appointmentId
+                        selectedAppointment?.appointment_code ===
+                        appointment.appointment_code
                           ? "action.selected"
                           : "background.paper",
                     }}
@@ -321,8 +322,16 @@ const TherapistAppointments = () => {
                         <Box display="flex" alignItems="center" gap={1}>
                           <PersonIcon color="action" />
                           <Typography variant="h6">
-                            {appointment.patient?.username || "No patient name"}
+                            {appointment.patient?.username || appointment.contact_name || "No patient name"}
                           </Typography>
+                          {appointment.contact_name && (
+                            <Chip 
+                              label="New Patient" 
+                              size="small" 
+                              color="warning" 
+                              variant="outlined"
+                            />
+                          )}
                         </Box>
                         <Chip
                           label={appointment.status}
@@ -336,7 +345,7 @@ const TherapistAppointments = () => {
                           <AccessTimeIcon fontSize="small" color="action" />
                           <Typography variant="body2">
                             {new Date(
-                              appointment.appointmentDateTime
+                              appointment.start_at
                             ).toLocaleTimeString([], {
                               hour: "2-digit",
                               minute: "2-digit",
@@ -385,11 +394,17 @@ const TherapistAppointments = () => {
                   Patient Information
                 </Typography>
                 <Typography>
-                  Name: {selectedAppointment.patient?.username || "N/A"}
+                  Name: {selectedAppointment.patient?.username || selectedAppointment.contact_name || "N/A"}
                 </Typography>
-                <Typography>
-                  Gender: {selectedAppointment.patient?.gender || "N/A"}
-                </Typography>
+                {selectedAppointment.contact_name ? (
+                  <Typography>
+                    Phone: {selectedAppointment.contact_phone || "N/A"}
+                  </Typography>
+                ) : (
+                  <Typography>
+                    Gender: {selectedAppointment.patient?.gender || "N/A"}
+                  </Typography>
+                )}
               </Box>
               <Box>
                 <Typography variant="h6" gutterBottom>
@@ -398,7 +413,7 @@ const TherapistAppointments = () => {
                 <Typography>
                   Time:{" "}
                   {new Date(
-                    selectedAppointment.appointmentDateTime
+                    selectedAppointment.start_at
                   ).toLocaleTimeString()}
                 </Typography>
                 <Typography>Status: {selectedAppointment.status}</Typography>
@@ -420,11 +435,11 @@ const TherapistAppointments = () => {
                       rows={4}
                       label="Session Notes"
                       variant="outlined"
-                      value={selectedAppointment.sessionNotes || ""}
+                      value={selectedAppointment.session_notes || ""}
                       onChange={(e) => {
                         setSelectedAppointment({
                           ...selectedAppointment,
-                          sessionNotes: e.target.value
+                          session_notes: e.target.value
                         });
                       }}
                     />
@@ -432,14 +447,14 @@ const TherapistAppointments = () => {
                       <Button
                         variant="contained"
                         color="success"
-                        onClick={() => updateAppointmentStatus(selectedAppointment.appointmentId, "Completed")}
+                        onClick={() => updateAppointmentStatus(selectedAppointment.appointment_code, "Completed")}
                       >
                         Complete
                       </Button>
                       <Button
                         variant="contained"
                         color="error"
-                        onClick={() => updateAppointmentStatus(selectedAppointment.appointmentId, "Cancelled")}
+                        onClick={() => updateAppointmentStatus(selectedAppointment.appointment_code, "Cancelled")}
                       >
                         Cancel
                       </Button>
@@ -461,7 +476,7 @@ const TherapistAppointments = () => {
                     }}
                   >
                     <Typography>
-                      {selectedAppointment.sessionNotes || "No session notes recorded."}
+                      {selectedAppointment.session_notes || "No session notes recorded."}
                     </Typography>
                   </Paper>
                 </Box>
@@ -480,7 +495,7 @@ const TherapistAppointments = () => {
                     }}
                   >
                     <Typography>
-                      {selectedAppointment.sessionNotes || "No cancellation note recorded."}
+                      {selectedAppointment.session_notes || "No cancellation note recorded."}
                     </Typography>
                   </Paper>
                 </Box>

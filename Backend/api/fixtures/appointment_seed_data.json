@@ -1,0 +1,163 @@
+[
+  {
+    "model": "api.customuser",
+    "pk": "T0001",
+    "fields": {
+      "username": "dr_smith",
+      "email": "dr.smith@clinic.com",
+      "first_name": "John",
+      "last_name": "Smith",
+      "role": "therapist",
+      "is_active": true,
+      "date_joined": "2025-01-01T00:00:00Z"
+    }
+  },
+  {
+    "model": "api.customuser",
+    "pk": "T0002",
+    "fields": {
+      "username": "dr_jones",
+      "email": "dr.jones@clinic.com",
+      "first_name": "Sarah",
+      "last_name": "Jones",
+      "role": "therapist",
+      "is_active": true,
+      "date_joined": "2025-01-01T00:00:00Z"
+    }
+  },
+  {
+    "model": "api.customuser",
+    "pk": "P0001",
+    "fields": {
+      "username": "patient_alice",
+      "email": "alice@email.com",
+      "first_name": "Alice",
+      "last_name": "Johnson",
+      "role": "patient",
+      "is_active": true,
+      "date_joined": "2025-01-01T00:00:00Z"
+    }
+  },
+  {
+    "model": "api.customuser",
+    "pk": "P0002",
+    "fields": {
+      "username": "patient_bob",
+      "email": "bob@email.com",
+      "first_name": "Bob",
+      "last_name": "Wilson",
+      "role": "patient",
+      "is_active": true,
+      "date_joined": "2025-01-01T00:00:00Z"
+    }
+  },
+  {
+    "model": "api.customuser",
+    "pk": "P0003",
+    "fields": {
+      "username": "patient_carol",
+      "email": "carol@email.com",
+      "first_name": "Carol",
+      "last_name": "Davis",
+      "role": "patient",
+      "is_active": true,
+      "date_joined": "2025-01-01T00:00:00Z"
+    }
+  },
+  {
+    "model": "api.availabilityslot",
+    "pk": 1,
+    "fields": {
+      "therapist_id": "T0001",
+      "start_at": "2025-02-20T09:00:00Z",
+      "end_at": "2025-02-20T17:00:00Z",
+      "buffer_min": 15,
+      "status": "open"
+    }
+  },
+  {
+    "model": "api.availabilityslot",
+    "pk": 2,
+    "fields": {
+      "therapist_id": "T0001",
+      "start_at": "2025-02-21T09:00:00Z",
+      "end_at": "2025-02-21T17:00:00Z",
+      "buffer_min": 15,
+      "status": "open"
+    }
+  },
+  {
+    "model": "api.availabilityslot",
+    "pk": 3,
+    "fields": {
+      "therapist_id": "T0002",
+      "start_at": "2025-02-20T10:00:00Z",
+      "end_at": "2025-02-20T16:00:00Z",
+      "buffer_min": 10,
+      "status": "open"
+    }
+  },
+  {
+    "model": "api.appointment",
+    "pk": 1,
+    "fields": {
+      "appointment_code": "APT-20250220-001",
+      "therapist_id": "T0001",
+      "patient_id": "P0001",
+      "start_at": "2025-02-20T10:00:00Z",
+      "end_at": "2025-02-20T11:00:00Z",
+      "duration_min": 60,
+      "mode": "onsite",
+      "status": "Scheduled",
+      "notes": "Regular checkup appointment"
+    }
+  },
+  {
+    "model": "api.appointment",
+    "pk": 2,
+    "fields": {
+      "appointment_code": "APT-20250220-002",
+      "therapist_id": "T0001",
+      "patient_id": "P0002",
+      "start_at": "2025-02-20T14:00:00Z",
+      "end_at": "2025-02-20T14:30:00Z",
+      "duration_min": 30,
+      "mode": "tele",
+      "status": "Scheduled",
+      "notes": "Follow-up consultation"
+    }
+  },
+  {
+    "model": "api.appointment",
+    "pk": 3,
+    "fields": {
+      "appointment_code": "APT-20250220-003",
+      "therapist_id": "T0002",
+      "patient_id": null,
+      "contact_name": "New Patient",
+      "contact_phone": "012-3456789",
+      "start_at": "2025-02-20T11:00:00Z",
+      "end_at": "2025-02-20T12:00:00Z",
+      "duration_min": 60,
+      "mode": "onsite",
+      "status": "Scheduled",
+      "notes": "New patient placeholder appointment"
+    }
+  },
+  {
+    "model": "api.appointment",
+    "pk": 4,
+    "fields": {
+      "appointment_code": "APT-20250219-001",
+      "therapist_id": "T0001",
+      "patient_id": "P0003",
+      "start_at": "2025-02-19T15:00:00Z",
+      "end_at": "2025-02-19T16:00:00Z",
+      "duration_min": 60,
+      "mode": "onsite",
+      "status": "Completed",
+      "notes": "Completed therapy session",
+      "session_notes": "Patient showed good progress. Recommended continuation of current treatment plan."
+    }
+  }
+]

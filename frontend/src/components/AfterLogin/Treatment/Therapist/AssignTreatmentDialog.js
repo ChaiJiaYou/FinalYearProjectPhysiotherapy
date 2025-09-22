@@ -153,8 +153,13 @@ const AssignTreatmentDialog = ({ open, onClose, onSuccess, selectedTreatment }) 
       return false;
     }
 
-    // Check for conflicts with existing appointments
+    // Check for conflicts with existing appointments (including Pending status)
     return !existingAppointments.some(apt => {
+      // 检查Scheduled、Completed和Pending状态的预约，Cancelled预约不占用时间段
+      if (!['Scheduled', 'Completed', 'Pending'].includes(apt.status)) {
+        return false;
+      }
+      
       const aptTime = new Date(apt.appointmentDateTime);
       const aptEnd = new Date(aptTime.getTime() + apt.duration * 60000);
       

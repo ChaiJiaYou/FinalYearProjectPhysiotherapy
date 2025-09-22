@@ -80,11 +80,19 @@ const ChangePasswordDialog = ({ open, onClose, onSuccess }) => {
     setLoading(true);
     try {
       const userId = localStorage.getItem('id');
+      console.log('User ID from localStorage:', userId); // Debug log
+      
+      if (!userId) {
+        setErrors({ currentPassword: "User ID not found. Please log in again." });
+        setLoading(false);
+        return;
+      }
+
       const response = await fetch("http://127.0.0.1:8000/api/change-password/", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          "User-ID": userId,
+          "X-User-ID": userId,
         },
         body: JSON.stringify({
           current_password: formData.currentPassword,
@@ -92,15 +100,19 @@ const ChangePasswordDialog = ({ open, onClose, onSuccess }) => {
         }),
       });
 
+      console.log('Response status:', response.status); // Debug log
+
       if (response.ok) {
         onSuccess("Password changed successfully!");
         handleClose();
       } else {
         const errorData = await response.json();
-        setErrors({ currentPassword: errorData.message || "Failed to change password" });
+        console.log('Error response:', errorData); // Debug log
+        setErrors({ currentPassword: errorData.error || errorData.message || "Failed to change password" });
       }
     } catch (error) {
-      setErrors({ currentPassword: "Network error. Please try again." });
+      console.error('Network error:', error); // Debug log
+      setErrors({ currentPassword: `Network error: ${error.message}. Please check if the server is running.` });
     } finally {
       setLoading(false);
     }
@@ -164,17 +176,14 @@ const ChangePasswordDialog = ({ open, onClose, onSuccess }) => {
           <TextField
             fullWidth
             label="Current Password"
+            name="currentPassword"
             type={showPasswords.current ? "text" : "password"}
             value={formData.currentPassword}
             onChange={handleInputChange("currentPassword")}
             error={!!errors.currentPassword}
             helperText={errors.currentPassword}
             InputProps={{
-              startAdornment: (
-                <InputAdornment position="start">
-                  <Lock sx={{ color: "text.secondary" }} />
-                </InputAdornment>
-              ),
+              startAdornment: <Lock sx={{ mr: 1, color: "text.secondary" }} />,
               endAdornment: (
                 <InputAdornment position="end">
                   <IconButton
@@ -186,28 +195,21 @@ const ChangePasswordDialog = ({ open, onClose, onSuccess }) => {
                 </InputAdornment>
               ),
             }}
-            sx={{
-              "& .MuiOutlinedInput-root": {
-                borderRadius: 2,
-              }
-            }}
+            sx={{ mt: 1 }}
           />
 
           {/* New Password */}
           <TextField
             fullWidth
             label="New Password"
+            name="newPassword"
             type={showPasswords.new ? "text" : "password"}
             value={formData.newPassword}
             onChange={handleInputChange("newPassword")}
             error={!!errors.newPassword}
-            helperText={errors.newPassword || "Must be at least 8 characters"}
+            helperText={errors.newPassword || "Minimum 8 characters"}
             InputProps={{
-              startAdornment: (
-                <InputAdornment position="start">
-                  <LockOpen sx={{ color: "text.secondary" }} />
-                </InputAdornment>
-              ),
+              startAdornment: <LockOpen sx={{ mr: 1, color: "text.secondary" }} />,
               endAdornment: (
                 <InputAdornment position="end">
                   <IconButton
@@ -219,28 +221,20 @@ const ChangePasswordDialog = ({ open, onClose, onSuccess }) => {
                 </InputAdornment>
               ),
             }}
-            sx={{
-              "& .MuiOutlinedInput-root": {
-                borderRadius: 2,
-              }
-            }}
           />
 
           {/* Confirm Password */}
           <TextField
             fullWidth
             label="Confirm New Password"
+            name="confirmPassword"
             type={showPasswords.confirm ? "text" : "password"}
             value={formData.confirmPassword}
             onChange={handleInputChange("confirmPassword")}
             error={!!errors.confirmPassword}
             helperText={errors.confirmPassword}
             InputProps={{
-              startAdornment: (
-                <InputAdornment position="start">
-                  <LockOpen sx={{ color: "text.secondary" }} />
-                </InputAdornment>
-              ),
+              startAdornment: <LockOpen sx={{ mr: 1, color: "text.secondary" }} />,
               endAdornment: (
                 <InputAdornment position="end">
                   <IconButton
@@ -251,11 +245,6 @@ const ChangePasswordDialog = ({ open, onClose, onSuccess }) => {
                   </IconButton>
                 </InputAdornment>
               ),
-            }}
-            sx={{
-              "& .MuiOutlinedInput-root": {
-                borderRadius: 2,
-              }
             }}
           />
         </Box>

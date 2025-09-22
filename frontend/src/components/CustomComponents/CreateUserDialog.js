@@ -56,9 +56,39 @@ const CreateUserDialog = ({ open, onClose, onSubmit, isSubmitting = false }) => 
 
   const handleInputChange = (e) => {
     const { name, value } = e.target;
+    
+    // Apply length limits based on field type
+    let processedValue = value;
+    switch (name) {
+      case 'username':
+        // No length limit for username
+        processedValue = value;
+        break;
+      case 'email':
+        processedValue = value.slice(0, 100);
+        break;
+      case 'ic':
+        // Only allow numbers and limit to 12 digits
+        processedValue = value.replace(/\D/g, '').slice(0, 12);
+        break;
+      case 'contact_number':
+        // Only allow numbers and limit to 11 digits
+        processedValue = value.replace(/\D/g, '').slice(0, 11);
+        break;
+      case 'emergency_contact':
+        // Only allow numbers and limit to 11 digits
+        processedValue = value.replace(/\D/g, '').slice(0, 11);
+        break;
+      case 'password':
+        processedValue = value.slice(0, 128);
+        break;
+      default:
+        processedValue = value;
+    }
+    
     setNewUser((prevUser) => ({
       ...prevUser,
-      [name]: value,
+      [name]: processedValue,
     }));
     
     // Clear specific field error when user starts typing
@@ -81,18 +111,53 @@ const CreateUserDialog = ({ open, onClose, onSubmit, isSubmitting = false }) => 
   const validateForm = () => {
     let tempErrors = {};
 
-    // Common required fields
-    if (!newUser.username) tempErrors.username = "Username is required";
-    if (!newUser.email) tempErrors.email = "Email is required";
-    if (!newUser.ic) tempErrors.ic = "IC Number is required";
-    if (!newUser.gender) tempErrors.gender = "Gender is required";
-    if (!newUser.role) tempErrors.role = "Role is required";
-    if (!newUser.contact_number) tempErrors.contact_number = "Contact Number is required";
-    if (!newUser.password) tempErrors.password = "Password is required";
+    // Username validation - only required
+    if (!newUser.username.trim()) {
+      tempErrors.username = "Username is required";
+    }
+
+    // Email validation
+    if (!newUser.email.trim()) {
+      tempErrors.email = "Email is required";
+      } else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(newUser.email)) {
+        tempErrors.email = "Please enter a valid email address (e.g., user@example.com)";
+    }
+
+    // IC Number validation
+    if (!newUser.ic.trim()) {
+      tempErrors.ic = "IC Number is required";
+    } else if (!/^\d{12}$/.test(newUser.ic)) {
+      tempErrors.ic = "IC Number must be exactly 12 digits";
+    }
+
+    // Contact Number validation
+    if (!newUser.contact_number.trim()) {
+      tempErrors.contact_number = "Contact Number is required";
+    } else if (!/^\d{10,11}$/.test(newUser.contact_number)) {
+      tempErrors.contact_number = "Contact Number must be 10-11 digits";
+    }
+
+    // Password validation
+    if (!newUser.password.trim()) {
+      tempErrors.password = "Password is required";
+    } else if (newUser.password.length < 8) {
+      tempErrors.password = "Password must be at least 8 characters";
+    }
+
+    // Gender validation
+    if (!newUser.gender) {
+      tempErrors.gender = "Gender is required";
+    }
+
+    // Role validation
+    if (!newUser.role) {
+      tempErrors.role = "Role is required";
+    }
+
+    // Date of Birth validation
     if (!newUser.dob) {
       tempErrors.dob = "Date of Birth is required";
     } else {
-      // Validate age (must be at least 1 year old and not more than 120 years old)
       const dobDate = new Date(newUser.dob);
       const today = new Date();
       const age = today.getFullYear() - dobDate.getFullYear();
@@ -114,31 +179,46 @@ const CreateUserDialog = ({ open, onClose, onSubmit, isSubmitting = false }) => 
       }
     }
 
+    // Role-specific validations
     if (newUser.role === "admin") {
-      if (!newUser.admin_role) tempErrors.admin_role = "Admin Role is required";
+      if (!newUser.admin_role) {
+        tempErrors.admin_role = "Admin Role is required";
+      }
     }
+    
     if (newUser.role === "patient") {
-      if (!newUser.emergency_contact) tempErrors.emergency_contact = "Emergency Contact is required";
+      if (!newUser.emergency_contact.trim()) {
+        tempErrors.emergency_contact = "Emergency Contact is required";
+      } else if (!/^\d{10,11}$/.test(newUser.emergency_contact)) {
+        tempErrors.emergency_contact = "Emergency Contact must be 10-11 digits";
+      }
     }
 
-    // IC validation (must be 12 digits and match DOB)
-    const icPattern = /^\d{12}$/;
-    if (newUser.ic && newUser.dob) {
-      if (!icPattern.test(newUser.ic)) {
-        tempErrors.ic = "IC Number must be exactly 12 digits";
-      } else {
-        const dobDate = new Date(newUser.dob);
-        const year = dobDate.getFullYear().toString().slice(-2);
-        const month = (dobDate.getMonth() + 1).toString().padStart(2, "0");
-        const day = dobDate.getDate().toString().padStart(2, "0");
+    // IC and DOB matching validation
+    if (newUser.ic && newUser.dob && !tempErrors.ic && !tempErrors.dob) {
+      const dobDate = new Date(newUser.dob);
+      const year = dobDate.getFullYear().toString().slice(-2);
+      const month = (dobDate.getMonth() + 1).toString().padStart(2, "0");
+      const day = dobDate.getDate().toString().padStart(2, "0");
 
-        const icYear = newUser.ic.slice(0, 2);
-        const icMonth = newUser.ic.slice(2, 4);
-        const icDay = newUser.ic.slice(4, 6);
+      const icYear = newUser.ic.slice(0, 2);
+      const icMonth = newUser.ic.slice(2, 4);
+      const icDay = newUser.ic.slice(4, 6);
 
-        if (icYear !== year || icMonth !== month || icDay !== day) {
-          tempErrors.ic = `IC Number does not match Date of Birth (Expected: ${day}${month}${year}...)`;
-        }
+      if (icYear !== year || icMonth !== month || icDay !== day) {
+        tempErrors.ic = `IC Number does not match Date of Birth (Expected: ${year}${month}${day}...)`;
+      }
+    }
+
+    // IC Gender validation - check if last digit matches selected gender
+    if (newUser.ic && newUser.gender && !tempErrors.ic) {
+      const lastDigit = parseInt(newUser.ic.slice(-1));
+      const isOdd = lastDigit % 2 === 1;
+      
+      if (newUser.gender === 'male' && !isOdd) {
+        tempErrors.gender = "Gender does not match IC number (Last digit should be odd for male)";
+      } else if (newUser.gender === 'female' && isOdd) {
+        tempErrors.gender = "Gender does not match IC number (Last digit should be even for female)";
       }
     }
 
@@ -293,18 +373,46 @@ const CreateUserDialog = ({ open, onClose, onSubmit, isSubmitting = false }) => 
             value={newUser.username}
             onChange={handleInputChange}
             error={!!errors.username}
-            helperText={errors.username}
+            helperText={errors.username || "Enter user's full name"}
             placeholder="Michael"
+            autoComplete="off"
             InputProps={{
               startAdornment: <PersonIcon color="action" sx={{ mr: 1, opacity: 0.6 }} />,
             }}
           />
         </Grid>
         <Grid item xs={12}>
-          <TextField fullWidth label="Email" name="email" type="email" value={newUser.email} onChange={handleInputChange} error={!!errors.email} helperText={errors.email} placeholder="michael@gmail.com" />
+          <TextField 
+            fullWidth 
+            label="Email" 
+            name="email" 
+            type="email" 
+            value={newUser.email} 
+            onChange={handleInputChange} 
+            error={!!errors.email} 
+            helperText={errors.email || "Enter valid email address"} 
+            placeholder="michael@gmail.com"
+            autoComplete="off"
+            inputProps={{
+              maxLength: 100
+            }}
+          />
         </Grid>
         <Grid item xs={12}>
-          <TextField fullWidth label="Password" name="password" type="password" value={newUser.password} onChange={handleInputChange} error={!!errors.password} helperText={errors.password || "Password must be at least 8 characters"} />
+          <TextField 
+            fullWidth 
+            label="Password" 
+            name="password" 
+            type="password" 
+            value={newUser.password} 
+            onChange={handleInputChange} 
+            error={!!errors.password} 
+            helperText={errors.password || "Minimum 8 characters"} 
+            autoComplete="new-password"
+            inputProps={{
+              maxLength: 128
+            }}
+          />
         </Grid>
       </Grid>
     </Paper>
@@ -336,6 +444,7 @@ const CreateUserDialog = ({ open, onClose, onSubmit, isSubmitting = false }) => 
               const day = dobDate.getDate().toString().padStart(2, '0');
               return `Expected format: ${year}${month}${day}XXXXXX`;
             })() : "Enter 12 digits (YYMMDDXXXXXX)")}
+            autoComplete="off"
             inputProps={{
               inputMode: "numeric",
               pattern: "[0-9]*",
@@ -356,7 +465,6 @@ const CreateUserDialog = ({ open, onClose, onSubmit, isSubmitting = false }) => 
             <Select name="gender" value={newUser.gender} onChange={handleInputChange} label="Gender">
               <MenuItem value="male">Male</MenuItem>
               <MenuItem value="female">Female</MenuItem>
-              <MenuItem value="other">Other</MenuItem>
             </Select>
             {errors.gender && (
               <Typography variant="caption" color="error">
@@ -378,6 +486,7 @@ const CreateUserDialog = ({ open, onClose, onSubmit, isSubmitting = false }) => 
             InputLabelProps={{ shrink: true }} 
             error={!!errors.dob} 
             helperText={errors.dob || "Select your date of birth"}
+            autoComplete="off"
             inputProps={{
               max: new Date().toISOString().split('T')[0], // Prevent future dates
               pattern: "\\d{4}-\\d{2}-\\d{2}"
@@ -401,11 +510,12 @@ const CreateUserDialog = ({ open, onClose, onSubmit, isSubmitting = false }) => 
             value={newUser.contact_number}
             onChange={handleInputChange}
             error={!!errors.contact_number}
-            helperText={errors.contact_number || "Enter 10-15 digits (e.g., 0123456789)"}
+            helperText={errors.contact_number || "Enter 10-11 digits (e.g., 0123456789)"}
+            autoComplete="off"
             inputProps={{
               inputMode: "numeric",
               pattern: "[0-9]*",
-              maxLength: 15,
+              maxLength: 11,
               placeholder: "e.g., 0123456789"
             }}
             sx={{
@@ -502,7 +612,6 @@ const CreateUserDialog = ({ open, onClose, onSubmit, isSubmitting = false }) => 
                 InputLabelProps={{ shrink: true }}
                 helperText="Select the employment start date"
                 inputProps={{
-                  max: new Date().toISOString().split('T')[0], // Prevent future dates for employment
                   pattern: "\\d{4}-\\d{2}-\\d{2}"
                 }}
                 sx={{
@@ -528,10 +637,13 @@ const CreateUserDialog = ({ open, onClose, onSubmit, isSubmitting = false }) => 
               value={newUser.emergency_contact}
               onChange={handleRoleSpecificChange}
               error={!!errors.emergency_contact}
-              helperText={errors.emergency_contact}
+              helperText={errors.emergency_contact || "Enter 10-11 digits (e.g., 0123456789)"}
+              autoComplete="off"
               inputProps={{
                 inputMode: "numeric",
                 pattern: "[0-9]*",
+                maxLength: 11,
+                placeholder: "e.g., 0123456789"
               }}
             />
           </Grid>

@@ -48,7 +48,7 @@ const UserManagementTable = ({ users, handleToggleStatus, onViewProfile }) => {
               fontSize: "0.875rem",
               textTransform: "uppercase",
               letterSpacing: "0.5px",
-              width: "30%"
+              width: "25%"
             }}>
               User Information
             </TableCell>
@@ -59,7 +59,18 @@ const UserManagementTable = ({ users, handleToggleStatus, onViewProfile }) => {
               fontSize: "0.875rem",
               textTransform: "uppercase",
               letterSpacing: "0.5px",
-              width: "15%"
+              width: "10%"
+            }}>
+              User ID
+            </TableCell>
+            <TableCell sx={{ 
+              fontWeight: 700, 
+              color: "text.primary", 
+              py: 3,
+              fontSize: "0.875rem",
+              textTransform: "uppercase",
+              letterSpacing: "0.5px",
+              width: "12%"
             }}>
               Contact
             </TableCell>
@@ -70,7 +81,7 @@ const UserManagementTable = ({ users, handleToggleStatus, onViewProfile }) => {
               fontSize: "0.875rem",
               textTransform: "uppercase",
               letterSpacing: "0.5px",
-              width: "10%"
+              width: "8%"
             }}>
               Role
             </TableCell>
@@ -81,7 +92,7 @@ const UserManagementTable = ({ users, handleToggleStatus, onViewProfile }) => {
               fontSize: "0.875rem",
               textTransform: "uppercase",
               letterSpacing: "0.5px",
-              width: "10%"
+              width: "8%"
             }}>
               Status
             </TableCell>
@@ -92,7 +103,7 @@ const UserManagementTable = ({ users, handleToggleStatus, onViewProfile }) => {
               fontSize: "0.875rem",
               textTransform: "uppercase",
               letterSpacing: "0.5px",
-              width: "15%"
+              width: "12%"
             }}>
               Created By
             </TableCell>
@@ -168,6 +179,13 @@ const UserManagementTable = ({ users, handleToggleStatus, onViewProfile }) => {
                     </Typography>
                   </Box>
                 </Box>
+              </TableCell>
+
+              {/* User ID */}
+              <TableCell sx={{ py: 1.5 }}>
+                <Typography variant="body2" color="text.primary" fontWeight="600" sx={{ fontFamily: 'monospace' }}>
+                  {user.id}
+                </Typography>
               </TableCell>
 
               {/* Contact */}

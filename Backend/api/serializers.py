@@ -169,36 +169,76 @@ class AppointmentSerializer(serializers.ModelSerializer):
     latest_medical_history = serializers.SerializerMethodField()
 
     def get_patient(self, obj):
+        if obj.patient_id:
+            return {
+                'id': obj.patient_id.id,
+                'username': obj.patient_id.username,
+                'email': obj.patient_id.email,
+                'avatar': base64.b64encode(obj.patient_id.avatar).decode('utf-8') if obj.patient_id.avatar else None
+            }
         return {
-            'id': obj.patientId.id,
-            'username': obj.patientId.username
+            'contact_name': obj.contact_name,
+            'contact_phone': obj.contact_phone,
+            'is_placeholder': True
         }
 
     def get_therapist(self, obj):
         return {
-            'id': obj.therapistId.id,
-            'username': obj.therapistId.username
+            'id': obj.therapist_id.id,
+            'username': obj.therapist_id.username
         }
 
     def get_latest_medical_history(self, obj):
-        history = obj.patientId.medical_histories.order_by('-session_date').first()
-        if history:
-            return MedicalHistorySerializer(history).data
+        if obj.patient_id:
+            history = obj.patient_id.medical_histories.order_by('-session_date').first()
+            if history:
+                return MedicalHistorySerializer(history).data
         return None
 
     class Meta:
         model = Appointment
         fields = [
-            "appointmentId",
-            "patient",
-            "therapist",
-            "appointmentDateTime",
-            "duration",
+            "id",
+            "appointment_code",
+            "therapist_id",
+            "patient_id",
+            "contact_name",
+            "contact_phone",
+            "start_at",
+            "end_at",
+            "duration_min",
+            "mode",
             "status",
             "notes",
-            "sessionNotes",
+            "patient_message",
+            "session_notes",
+            "cancel_reason",
+            "completed_at",
+            "cancelled_at",
+            "created_at",
+            "updated_at",
+            "patient",
+            "therapist",
             "latest_medical_history"
         ]
+
+
+class UnavailableSlotSerializer(serializers.ModelSerializer):
+    class Meta:
+        fields = [
+            "id",
+            "therapist_id",
+            "start_at",
+            "end_at",
+            "description",
+            "created_at",
+            "updated_at"
+        ]
+    
+    def __init__(self, *args, **kwargs):
+        from .models import UnavailableSlot
+        self.Meta.model = UnavailableSlot
+        super().__init__(*args, **kwargs)
  
         
 class MedicalHistorySerializer(serializers.ModelSerializer):

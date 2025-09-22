@@ -1,4 +1,5 @@
 from . import views
+from . import appointment_views
 from django.urls import path
 from django.conf import settings
 from django.conf.urls.static import static
@@ -19,7 +20,20 @@ urlpatterns = [
     path('change-user-password/<str:user_id>/', views.change_user_password, name='change-user-password'),
     path('list-patients/', views.list_patients, name='list-patients'),
 
-    #Appointment
+    # 新的预约管理API
+    path('appointments/', appointment_views.create_appointment, name='create_appointment_new'),
+    path('appointments/list/', appointment_views.list_appointments, name='list_appointments_new'),
+    path('appointments/<str:appointment_id>/', appointment_views.update_appointment_status, name='update_appointment_status_new'),
+    path('appointments/<str:appointment_id>/respond/', appointment_views.respond_to_appointment, name='respond_to_appointment'),
+    path('appointments/<str:appointment_id>/complete/', appointment_views.complete_appointment, name='complete_appointment'),
+    path('appointments/<str:appointment_id>/cancel/', appointment_views.cancel_appointment, name='cancel_appointment'),
+    path('appointments/<str:appointment_id>/admin-complete/', views.admin_force_complete_appointment, name='admin_force_complete_appointment'),
+    path('appointments/<str:appointment_id>/admin-reject/', views.admin_force_reject_appointment, name='admin_force_reject_appointment'),
+    path('availability/', appointment_views.get_availability_slots, name='get_availability_slots'),
+    path('availability/create/', appointment_views.create_availability_slot, name='create_availability_slot'),
+    path('availability/<int:slot_id>/', appointment_views.delete_availability_slot, name='delete_availability_slot'),
+    
+    # 保留的旧API（向后兼容）
     path('create-appointment/', views.create_appointment, name='create_appointment'),
     path("list-therapists/", views.list_therapists, name="list_therapists"),
     path('list-appointments/', views.list_appointments, name="list-appointments"),

@@ -7,8 +7,9 @@ import UserAccountManagementHome from "./components/AfterLogin/UserAccountManage
 import UserAccountManagementAccountPage from "./components/AfterLogin/UserAccountManagement/UserAccountManagementAccountPage";
 import EditUserPage from "./components/AfterLogin/UserAccountManagement/EdittUserPage";
 import UserProfilePage from "./components/AfterLogin/Profile/UserProfilePage";
-import PatientAppointments from './components/AfterLogin/Appointment/Patient/PatientAppointments';
+import PatientAppointmentPage from './components/AfterLogin/Appointment/Patient/PatientAppointmentPage';
 import TherapistAppointments from './components/AfterLogin/Appointment/Therapist/TherapistAppointments';
+import TherapistAppointmentPage from './components/AfterLogin/Appointment/Therapist/TherapistAppointmentPage';
 import AdminTherapistAppointments from './components/AfterLogin/Appointment/Admin/AdminTherapistAppointments';
 import TherapistSchedule from './components/Therapist/TherapistSchedule';
 import { TreatmentManagement } from './components/AfterLogin/Treatment/Therapist';
@@ -32,8 +33,8 @@ function App() {
         <Route path="users/view/:id" element={<UserAccountManagementAccountPage />} />
         <Route path="users/edit/:id" element={<EditUserPage />} />
         <Route path="profile" element={<UserProfilePage />} />
-        <Route path="appointments" element={<PatientAppointments />} />
-        <Route path="therapist-appointments" element={<TherapistAppointments />} />
+        <Route path="appointments" element={<PatientAppointmentPage />} />
+        <Route path="therapist-appointments" element={<TherapistAppointmentPage />} />
         <Route path="admin-appointments" element={<AdminTherapistAppointments />} />
         <Route path="schedule" element={<TherapistSchedule />} />
         <Route path="treatment" element={<TreatmentManagement />} />

@@ -244,198 +244,205 @@ const UserAccountManagementHome = () => {
   console.log('Rendering main content');
 
   return (
-    <Box sx={{ backgroundColor: "#f8fafc", minHeight: "100vh" }}>
-
-      {/* Page Header */}
-      <Box
-        sx={{
-          background: `linear-gradient(135deg, #3b82f6 0%, ${alpha("#3b82f6", 0.8)} 100%)`,
-          p: 1.5,
-          color: "white",
-        }}>
-        <Box display="flex" alignItems="center" justifyContent="space-between">
-          <Box display="flex" alignItems="center" gap={2}>
-            <Box
+    <Box sx={{ bgcolor: '#f8fafc', minHeight: '100vh', p: { xs: 2, md: 4 } }}>
+      <Box sx={{ maxWidth: 'xl', mx: 'auto' }}>
+        {/* 页面头部 - 遵循设计系统 */}
+        <Box display="flex" justifyContent="space-between" alignItems="center" mb={4}>
+          <Box>
+            <Typography variant="h4" gutterBottom sx={{ color: '#000000', fontWeight: 600 }}>
+              User Management
+            </Typography>
+            <Typography variant="body1" color="text.secondary">
+              Manage all user accounts in the system
+            </Typography>
+          </Box>
+          <Box display="flex" gap={2}>
+            <Button
+              variant="outlined"
+              startIcon={<RefreshIcon />}
+              onClick={handleRefresh}
+              disabled={loading}
               sx={{
-                p: 1.5,
                 borderRadius: 2,
-                bgcolor: alpha("#ffffff", 0.2),
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
+                textTransform: 'uppercase',
+                fontWeight: 600,
+                px: 3,
+                borderColor: '#3b82f6',
+                color: '#3b82f6',
+                '&:hover': {
+                  borderColor: '#2563eb',
+                  bgcolor: 'rgba(59, 130, 246, 0.04)',
+                }
               }}
             >
-              <GroupIcon sx={{ fontSize: 28, color: "white" }} />
-            </Box>
-            <Box>
-              <Typography variant="h4" fontWeight="bold">
-                User Management
-              </Typography>
-              <Typography variant="body1" sx={{ opacity: 0.9 }}>
-                Manage all user accounts in the system
-              </Typography>
-            </Box>
-          </Box>
-          <Stack direction="row" spacing={2}>
-            <Tooltip title="Refresh list">
-              <IconButton 
-                onClick={handleRefresh} 
-                sx={{ 
-                  bgcolor: alpha("#ffffff", 0.2),
-                  color: "white",
-                  "&:hover": {
-                    bgcolor: alpha("#ffffff", 0.3),
-                  },
-                }}
-              >
-                <RefreshIcon />
-              </IconButton>
-            </Tooltip>
+              Refresh
+            </Button>
             <Button
               variant="contained"
               startIcon={<AddIcon />}
               onClick={() => setOpenCreateDialog(true)}
               sx={{
-                bgcolor: "white",
-                color: "#3b82f6",
-                textTransform: "uppercase",
+                borderRadius: 2,
+                textTransform: 'uppercase',
                 fontWeight: 600,
                 px: 3,
-                borderRadius: 2,
-                "&:hover": {
-                  bgcolor: alpha("#ffffff", 0.9),
-                },
-              }}>
+                bgcolor: '#3b82f6',
+                '&:hover': {
+                  bgcolor: '#2563eb',
+                }
+              }}
+            >
               Create User
             </Button>
-          </Stack>
-        </Box>
-      </Box>
-
-
-      {/* Search & Filter Section */}
-      <Box sx={{ p: 1.5, backgroundColor: "white", borderBottom: "1px solid", borderColor: "grey.200" }}>
-        <Box display="flex" alignItems="center" justifyContent="space-between" mb={1}>
-          <Typography variant="h6" fontWeight="600" color="text.primary">
-            Search & Filter Users
-          </Typography>
-          <Button
-            size="small"
-            onClick={clearFilters}
-            startIcon={<ClearIcon />}
-            variant="outlined"
-            disabled={roleFilter === "all" && statusFilter === "all" && searchTerm === ""}
-            sx={{ 
-              textTransform: "none",
-              borderRadius: 2,
-              fontWeight: 600,
-              px: 3,
-              py: 1,
-              borderColor: "grey.300",
-              color: "text.secondary",
-              "&:hover": {
-                borderColor: "grey.400",
-                backgroundColor: "grey.50",
-              },
-              "&:disabled": {
-                borderColor: "grey.200",
-                color: "grey.400",
-              }
-            }}
-          >
-            Clear Filter
-          </Button>
+          </Box>
         </Box>
 
-        <Box sx={{ display: "flex", gap: 2, alignItems: "center", flexWrap: "wrap" }}>
-          <TextField
-            placeholder="Search by username, email, or contact..."
-            value={searchTerm}
-            onChange={handleSearch}
-            InputProps={{
-              startAdornment: (
-                <InputAdornment position="start">
-                  <SearchIcon sx={{ color: "action.active" }} />
-                </InputAdornment>
-              ),
-            }}
-            sx={{ flexGrow: 1, minWidth: 300 }}
+
+        {/* 搜索和过滤 - 遵循设计系统 */}
+        <Card sx={{ mb: 3, borderRadius: 3, border: '1px solid', borderColor: 'grey.200', elevation: 0 }}>
+          <CardContent sx={{ p: 3 }}>
+            <Box display="flex" alignItems="center" justifyContent="space-between" mb={2}>
+              <Typography variant="h6" sx={{ fontWeight: 600 }}>
+                Search & Filter Users
+              </Typography>
+              <Button
+                size="small"
+                onClick={clearFilters}
+                startIcon={<ClearIcon />}
+                variant="outlined"
+                disabled={roleFilter === "all" && statusFilter === "all" && searchTerm === ""}
+                sx={{ 
+                  borderRadius: 2,
+                  textTransform: 'uppercase',
+                  fontWeight: 600,
+                  px: 3,
+                  borderColor: '#3b82f6',
+                  color: '#3b82f6',
+                  '&:hover': {
+                    borderColor: '#2563eb',
+                    bgcolor: 'rgba(59, 130, 246, 0.04)',
+                  },
+                  '&:disabled': {
+                    borderColor: 'grey.200',
+                    color: 'grey.400',
+                  }
+                }}
+              >
+                Clear Filters
+              </Button>
+            </Box>
+
+            <Box sx={{ display: "flex", gap: 2, alignItems: "center", flexWrap: "wrap" }}>
+              <TextField
+                placeholder="Search by username, email, or contact..."
+                value={searchTerm}
+                onChange={handleSearch}
+                InputProps={{
+                  startAdornment: (
+                    <Box sx={{ 
+                      width: 40, 
+                      height: 40, 
+                      borderRadius: 2, 
+                      bgcolor: 'grey.50', 
+                      display: 'flex', 
+                      alignItems: 'center', 
+                      justifyContent: 'center',
+                      mr: 1
+                    }}>
+                      <SearchIcon sx={{ color: '#3b82f6', fontSize: 20 }} />
+                    </Box>
+                  ),
+                }}
+                sx={{ 
+                  flexGrow: 1, 
+                  minWidth: 300,
+                  '& .MuiOutlinedInput-root': {
+                    borderRadius: 2,
+                  }
+                }}
+              />
+          
+              <FormControl sx={{ minWidth: 150 }}>
+                <InputLabel>User Role</InputLabel>
+                <Select 
+                  value={roleFilter} 
+                  onChange={handleRoleFilter} 
+                  label="User Role"
+                  sx={{
+                    borderRadius: 2,
+                  }}
+                >
+                  <MenuItem value="all">All Roles</MenuItem>
+                  <MenuItem value="admin">Admin</MenuItem>
+                  <MenuItem value="therapist">Therapist</MenuItem>
+                  <MenuItem value="patient">Patient</MenuItem>
+                </Select>
+              </FormControl>
+
+              <FormControl sx={{ minWidth: 150 }}>
+                <InputLabel>Status</InputLabel>
+                <Select 
+                  value={statusFilter} 
+                  onChange={handleStatusFilter} 
+                  label="Status"
+                  sx={{
+                    borderRadius: 2,
+                  }}
+                >
+                  <MenuItem value="all">All Status</MenuItem>
+                  <MenuItem value="active">Active</MenuItem>
+                  <MenuItem value="inactive">Inactive</MenuItem>
+                </Select>
+              </FormControl>
+            </Box>
+          </CardContent>
+        </Card>
+
+        {/* 用户表格 - 遵循设计系统 */}
+        <Card sx={{ borderRadius: 3, border: '1px solid', borderColor: 'grey.200', elevation: 0 }}>
+          <UserManagementTable 
+            users={paginatedUsers} 
+            handleToggleStatus={handleToggleStatus} 
+            onViewProfile={handleViewProfile} 
           />
           
-          <FormControl sx={{ minWidth: 150 }}>
-            <InputLabel>User Role</InputLabel>
-            <Select 
-              value={roleFilter} 
-              onChange={handleRoleFilter} 
-              label="User Role"
-            >
-              <MenuItem value="all">All Roles</MenuItem>
-              <MenuItem value="admin">Admin</MenuItem>
-              <MenuItem value="therapist">Therapist</MenuItem>
-              <MenuItem value="patient">Patient</MenuItem>
-            </Select>
-          </FormControl>
-
-          <FormControl sx={{ minWidth: 150 }}>
-            <InputLabel>Status</InputLabel>
-            <Select 
-              value={statusFilter} 
-              onChange={handleStatusFilter} 
-              label="Status"
-            >
-              <MenuItem value="all">All Status</MenuItem>
-              <MenuItem value="active">Active</MenuItem>
-              <MenuItem value="inactive">Inactive</MenuItem>
-            </Select>
-          </FormControl>
-
-        </Box>
-
-
-      </Box>
-
-      {/* User Table Section */}
-      <Box sx={{ backgroundColor: "white" }}>
-        <UserManagementTable 
-          users={paginatedUsers} 
-          handleToggleStatus={handleToggleStatus} 
-          onViewProfile={handleViewProfile} 
-        />
-        
           {/* Pagination */}
-          <Box sx={{ p: 1, borderTop: "1px solid", borderColor: "grey.200" }}>
-          <TablePagination
-            component="div"
-            count={filteredUsers.length}
-            page={page}
-            onPageChange={handleChangePage}
-            rowsPerPage={rowsPerPage}
-            onRowsPerPageChange={handleChangeRowsPerPage}
-            rowsPerPageOptions={[5, 10, 25, 50]}
-            sx={{
-              "& .MuiTablePagination-toolbar": {
-                paddingLeft: 0,
-                paddingRight: 0,
-                minHeight: "auto",
-                paddingLeft: 0,
-              },
-              "& .MuiTablePagination-selectLabel, & .MuiTablePagination-displayedRows": {
-                fontWeight: 500,
-              },
-            }}
-          />
-        </Box>
-      </Box>
+          <Box sx={{ p: 3, borderTop: "1px solid", borderColor: "grey.200" }}>
+            <TablePagination
+              component="div"
+              count={filteredUsers.length}
+              page={page}
+              onPageChange={handleChangePage}
+              rowsPerPage={rowsPerPage}
+              onRowsPerPageChange={handleChangeRowsPerPage}
+              rowsPerPageOptions={[5, 10, 25, 50]}
+              sx={{
+                "& .MuiTablePagination-toolbar": {
+                  paddingLeft: 0,
+                  paddingRight: 0,
+                  minHeight: "auto",
+                },
+                "& .MuiTablePagination-selectLabel, & .MuiTablePagination-displayedRows": {
+                  fontWeight: 500,
+                },
+              }}
+            />
+          </Box>
+        </Card>
 
-      {/* Create User Dialog */}
-      <CreateUserDialog
-        open={openCreateDialog}
-        onClose={() => setOpenCreateDialog(false)}
-        onSuccess={(newUser) => {
-          setUsers([newUser, ...users]);
-          setOpenCreateDialog(false);
-        }}
-      />
+        {/* Create User Dialog */}
+        <CreateUserDialog
+          open={openCreateDialog}
+          onClose={() => setOpenCreateDialog(false)}
+          onSubmit={(newUser) => {
+            // Add new user to both allUsers and users lists
+            setAllUsers(prev => [newUser, ...prev]);
+            setUsers(prev => [newUser, ...prev]);
+            setOpenCreateDialog(false);
+            toast.success("User created successfully!");
+          }}
+        />
+      </Box>
     </Box>
   );
 };

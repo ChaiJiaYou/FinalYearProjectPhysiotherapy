@@ -44,13 +44,13 @@ INSTALLED_APPS = [
 
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
+    'corsheaders.middleware.CorsMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
     'django.contrib.auth.middleware.AuthenticationMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
-    'corsheaders.middleware.CorsMiddleware',
 ]
 
 SESSION_COOKIE_SECURE = False
@@ -64,6 +64,10 @@ CORS_ALLOWED_ORIGINS = [
 
 CORS_ALLOW_CREDENTIALS = True
 CORS_ORIGIN_ALLOW_ALL = False
+
+# 禁用CSRF检查用于API
+CSRF_TRUSTED_ORIGINS = ['http://localhost:3000', 'http://127.0.0.1:3000']
+CSRF_COOKIE_SAMESITE = 'Lax'
 CORS_ALLOWED_ORIGIN_REGEXES = [
     r'^http://localhost:\d+$',
 ]
@@ -168,6 +172,10 @@ TIME_ZONE = 'Asia/Kuala_Lumpur'
 USE_I18N = True
 
 USE_TZ = True
+
+# 确保Django使用正确的时区
+import os
+os.environ['TZ'] = 'Asia/Kuala_Lumpur'
 
 
 # Static files (CSS, JavaScript, Images)

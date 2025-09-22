@@ -18,35 +18,50 @@ import {
   Chip,
 } from "@mui/material";
 import { toast } from "react-toastify";
-import { AccessTime as AccessTimeIcon, Add as AddIcon } from "@mui/icons-material";
+import { 
+  AccessTime as AccessTimeIcon, 
+  Add as AddIcon,
+  Person as PersonIcon,
+  Notes as NotesIcon,
+  CalendarMonth as CalendarMonthIcon,
+} from "@mui/icons-material";
 
-const DURATION_OPTIONS = [
-  { value: 30, label: "30 minutes" },
-  { value: 45, label: "45 minutes" },
-  { value: 60, label: "60 minutes" },
-];
-
-const TIME_SLOTS = Array.from({ length: 17 }, (_, i) => {
-  const hour = 9 + Math.floor(i / 2);
-  const minute = i % 2 === 0 ? "00" : "30";
-  return `${hour.toString().padStart(2, "0")}:${minute}`;
+// 生成小时时间槽 (09:00-17:00)
+const TIME_SLOTS = Array.from({ length: 8 }, (_, i) => {
+  const hour = 9 + i;
+  return `${hour.toString().padStart(2, '0')}:00`;
 });
 
-const CreateAppointmentDialog = ({ open, onClose, onSuccess }) => {
+const CreateAppointmentDialog = ({ open, onClose, onSuccess, initialDate }) => {
   const [patients, setPatients] = useState([]);
   const [selectedPatient, setSelectedPatient] = useState("");
   const [selectedDate, setSelectedDate] = useState(() => {
+    if (initialDate) {
+      // 使用本地时区获取日期字符串
+      const year = initialDate.getFullYear();
+      const month = String(initialDate.getMonth() + 1).padStart(2, '0');
+      const day = String(initialDate.getDate()).padStart(2, '0');
+      return `${year}-${month}-${day}`;
+    }
     const now = new Date();
-    now.setHours(now.getHours() + 8); // 调整为 UTC+8
-    return now.toISOString().split('T')[0];
+    // 使用本地时区获取日期字符串
+    const year = now.getFullYear();
+    const month = String(now.getMonth() + 1).padStart(2, '0');
+    const day = String(now.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
   });
   const [selectedTime, setSelectedTime] = useState("");
-  const [duration, setDuration] = useState(30);
   const [notes, setNotes] = useState("");
+  const [unavailableSlots, setUnavailableSlots] = useState([]);
   const [loading, setLoading] = useState(false);
   const [existingAppointments, setExistingAppointments] = useState([]);
   const therapistId = localStorage.getItem("id");
   const [showCreateDialog, setShowCreateDialog] = useState(false);
+  
+  // 新增：占位预约相关状态
+  const [isNewPatient, setIsNewPatient] = useState(false);
+  const [contactName, setContactName] = useState("");
+  const [contactPhone, setContactPhone] = useState("");
 
   // 获取病人列表
   useEffect(() => {
@@ -60,7 +75,6 @@ const CreateAppointmentDialog = ({ open, onClose, onSuccess }) => {
 
   const fetchAppointments = async () => {
     if (selectedDate && therapistId) {
-      console.log('Fetching appointments for:', selectedDate, 'therapistId:', therapistId);
       
       try {
         const res = await fetch(`http://127.0.0.1:8000/api/therapist-available-slots/?therapist_id=${therapistId}&date=${selectedDate}`);
@@ -68,7 +82,6 @@ const CreateAppointmentDialog = ({ open, onClose, onSuccess }) => {
         
         if (data.appointments && Array.isArray(data.appointments)) {
           setExistingAppointments(data.appointments);
-          console.log('Updated appointments:', data.appointments);
         } else {
           console.error('Unexpected data format:', data);
           setExistingAppointments([]);
@@ -81,17 +94,56 @@ const CreateAppointmentDialog = ({ open, onClose, onSuccess }) => {
     }
   };
 
-  // 获取选定日期的预约
+  // 获取不可用时间段
+  const fetchUnavailableSlots = async () => {
+    if (selectedDate && therapistId) {
+      try {
+        const response = await fetch(
+          `http://127.0.0.1:8000/api/availability/?therapist_id=${therapistId}&date=${selectedDate}`
+        );
+        
+        if (response.ok) {
+          const data = await response.json();
+          setUnavailableSlots(data.slots || []);
+        }
+      } catch (error) {
+        console.error('Error fetching unavailable slots:', error);
+      }
+    }
+  };
+
+  // 同步外部传入的日期
   useEffect(() => {
-    fetchAppointments();
-  }, [selectedDate, therapistId]);
+    if (initialDate) {
+      // 使用本地时区获取日期字符串
+      const year = initialDate.getFullYear();
+      const month = String(initialDate.getMonth() + 1).padStart(2, '0');
+      const day = String(initialDate.getDate()).padStart(2, '0');
+      setSelectedDate(`${year}-${month}-${day}`);
+    }
+  }, [initialDate]);
+
+  // 获取选定日期的预约和不可用时间段
+  useEffect(() => {
+    if (open) {
+      fetchAppointments();
+      fetchUnavailableSlots();
+    }
+  }, [selectedDate, therapistId, open]);
 
   const resetForm = () => {
     setSelectedPatient("");
-    setSelectedDate(new Date().toISOString().split("T")[0]);
+    // 使用本地时区获取日期字符串
+    const now = new Date();
+    const year = now.getFullYear();
+    const month = String(now.getMonth() + 1).padStart(2, '0');
+    const day = String(now.getDate()).padStart(2, '0');
+    setSelectedDate(`${year}-${month}-${day}`);
     setSelectedTime("");
-    setDuration(30);
     setNotes("");
+    setIsNewPatient(false);
+    setContactName("");
+    setContactPhone("");
   };
 
   const handleClose = () => {
@@ -100,8 +152,12 @@ const CreateAppointmentDialog = ({ open, onClose, onSuccess }) => {
   };
 
   const handleSubmit = async () => {
-    if (!selectedPatient) {
+    if (!isNewPatient && !selectedPatient) {
       toast.warn("Please select a patient");
+      return;
+    }
+    if (isNewPatient && (!contactName || !contactPhone)) {
+      toast.warn("Please provide contact name and phone for new patient");
       return;
     }
     if (!selectedDate) {
@@ -115,20 +171,28 @@ const CreateAppointmentDialog = ({ open, onClose, onSuccess }) => {
 
     try {
       setLoading(true);
-      // 创建一个新的日期对象，并设置为 UTC+8
-      const appointmentDate = new Date(`${selectedDate}T${selectedTime}`);
-      appointmentDate.setHours(appointmentDate.getHours() + 8);
-      const appointmentDateTime = appointmentDate.toISOString();
+      // 创建正确的 ISO 格式日期字符串
+      const appointmentDate = new Date(`${selectedDate}T${selectedTime}:00`);
+      const start_at = appointmentDate.toISOString();
 
       const requestData = {
-        patient_id: selectedPatient,
         therapist_id: therapistId,
-        appointmentDateTime,
-        duration,
+        start_at,
+        duration_min: 60, // 固定1小时
         notes: notes || "",
+        therapist_created: true, // 标识这是治疗师创建的预约
       };
 
-      const res = await fetch("http://127.0.0.1:8000/api/create-appointment/", {
+      // 根据是否为新患者添加不同的字段
+      if (isNewPatient) {
+        requestData.contact_name = contactName;
+        requestData.contact_phone = contactPhone;
+      } else {
+        requestData.patient_id = selectedPatient;
+      }
+
+
+      const res = await fetch("http://127.0.0.1:8000/api/appointments/", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -158,31 +222,25 @@ const CreateAppointmentDialog = ({ open, onClose, onSuccess }) => {
   };
 
   const isTimeSlotAvailable = (time) => {
-    // 将选择的时间转换为日期对象
+    // 将选择的时间转换为日期对象（固定1小时）
     const slotTime = new Date(`${selectedDate}T${time}`);
-    const slotEnd = new Date(slotTime.getTime() + duration * 60000);
-
-    console.log('Checking availability for:', time);
-    console.log('Slot time:', slotTime);
-    console.log('Slot end:', slotEnd);
-    console.log('Duration:', duration);
-    console.log('Existing appointments:', existingAppointments);
+    const slotEnd = new Date(slotTime.getTime() + 60 * 60 * 1000); // 1小时
 
     // 检查是否超出工作时间（17:00）
     const workdayEnd = new Date(`${selectedDate}T17:00`);
     if (slotEnd > workdayEnd) {
-      console.log('Slot ends after work hours');
       return false;
     }
 
-    // 检查是否与现有预约冲突
+    // 检查是否与现有预约冲突（考虑所有活跃状态的预约，包括Pending）
     const isConflict = existingAppointments.some(apt => {
-      const aptTime = new Date(apt.appointmentDateTime);
-      const aptEnd = new Date(aptTime.getTime() + apt.duration * 60000);
+      // 检查Scheduled、Completed和Pending状态的预约，Cancelled预约不占用时间段
+      if (!['Scheduled', 'Completed', 'Pending'].includes(apt.status)) {
+        return false;
+      }
       
-      console.log('Checking against appointment:', apt);
-      console.log('Appointment time:', aptTime);
-      console.log('Appointment end:', aptEnd);
+      const aptTime = new Date(apt.start_at);
+      const aptEnd = new Date(aptTime.getTime() + apt.duration_min * 60000);
 
       // 检查是否有重叠
       const hasOverlap = (
@@ -194,15 +252,24 @@ const CreateAppointmentDialog = ({ open, onClose, onSuccess }) => {
         (slotTime <= aptTime && slotEnd >= aptEnd)
       );
 
-      if (hasOverlap) {
-        console.log('Conflict found with appointment:', apt);
-      }
-
       return hasOverlap;
     });
 
-    console.log('Time slot', time, 'is', isConflict ? 'not available' : 'available');
     return !isConflict;
+  };
+
+  // 检查时间槽是否被标记为不可用
+  const isTimeSlotUnavailable = (time) => {
+    const slotTime = new Date(`${selectedDate}T${time}`);
+    const slotEnd = new Date(slotTime.getTime() + 60 * 60 * 1000); // 1小时
+
+    return unavailableSlots.some(slot => {
+      const unavailableStart = new Date(slot.start_at);
+      const unavailableEnd = new Date(slot.end_at);
+      
+      // 检查是否有重叠
+      return slotTime < unavailableEnd && slotEnd > unavailableStart;
+    });
   };
 
   // 格式化时间显示
@@ -214,160 +281,277 @@ const CreateAppointmentDialog = ({ open, onClose, onSuccess }) => {
     });
   };
 
-  // 在duration更改时重新检查时间槽可用性
-  useEffect(() => {
-    if (selectedTime && !isTimeSlotAvailable(selectedTime)) {
-      setSelectedTime(""); // 如果当前选择的时间槽变得不可用，则清除选择
-    }
-  }, [duration]);
 
   return (
-    <Dialog open={open} onClose={handleClose} maxWidth="md" fullWidth>
-      <DialogTitle>Create New Appointment</DialogTitle>
-      <DialogContent>
-        <Box sx={{ mt: 2 }}>
-          {/* 病人选择区 */}
-          <Paper elevation={0} sx={{ p: 2, mb: 3, bgcolor: "grey.50" }}>
-            <Typography variant="h6" gutterBottom>
-              Select Patient
-            </Typography>
-            <FormControl fullWidth>
-              <InputLabel>Patient</InputLabel>
-              <Select
-                value={selectedPatient}
-                onChange={(e) => setSelectedPatient(e.target.value)}
-                label="Patient"
-              >
-                {patients.map((patient) => (
-                  <MenuItem key={patient.id} value={patient.id}>
-                    {patient.username}
-                  </MenuItem>
-                ))}
-              </Select>
-            </FormControl>
-          </Paper>
-
-          <Divider sx={{ my: 3 }} />
-
-          {/* 预约时间选择区 */}
-          <Grid container spacing={3}>
-            <Grid item xs={12} md={6}>
-              <Typography variant="h6" gutterBottom>
-                Select Date & Time
+    <Dialog open={open} onClose={handleClose} maxWidth="xl" fullWidth>
+      <DialogTitle sx={{ p: 2, pb: 1 }}>
+        <Box display="flex" alignItems="center" gap={1}>
+          <AddIcon color="primary" sx={{ fontSize: 20 }} />
+          <Typography variant="h6" sx={{ fontWeight: 600, color: '#000000' }}>
+            Create New Appointment
+          </Typography>
+        </Box>
+      </DialogTitle>
+      
+      <DialogContent sx={{ p: 2, pt: 1 }}>
+        <Grid container spacing={2}>
+          
+          {/* 左侧：患者信息和时间选择 */}
+          <Grid item xs={12} lg={12}>
+            
+            {/* 患者选择区域 */}
+            <Box sx={{ mb: 2, p: 2, bgcolor: 'grey.50', borderRadius: 1, border: '1px solid', borderColor: 'grey.200' }}>
+              <Typography variant="subtitle1" sx={{ fontWeight: 600, color: '#000000', mb: 2, display: 'flex', alignItems: 'center', gap: 1 }}>
+                <PersonIcon sx={{ fontSize: 16, color: '#3b82f6' }} />
+                Patient Information
               </Typography>
-              <TextField
-                type="date"
-                label="Date"
-                fullWidth
-                InputLabelProps={{ shrink: true }}
-                value={selectedDate}
-                onChange={(e) => {
-                  setSelectedDate(e.target.value);
-                  setSelectedTime(""); // 清除已选择的时间
-                }}
-                sx={{ mb: 2 }}
-              />
-
-              <Typography variant="subtitle1" gutterBottom>
+              
+              <Grid container spacing={1}>
+                <Grid item xs={12} sm={6}>
+                  <FormControl fullWidth size="small">
+                    <InputLabel>Patient Type</InputLabel>
+                    <Select
+                      value={isNewPatient ? "new" : "existing"}
+                      onChange={(e) => {
+                        const isNew = e.target.value === "new";
+                        setIsNewPatient(isNew);
+                        if (isNew) {
+                          setSelectedPatient("");
+                        } else {
+                          setContactName("");
+                          setContactPhone("");
+                        }
+                      }}
+                      label="Patient Type"
+                    >
+                      <MenuItem value="existing">Existing Patient</MenuItem>
+                      <MenuItem value="new">New Patient</MenuItem>
+                    </Select>
+                  </FormControl>
+                </Grid>
+                
+                {!isNewPatient && (
+                  <Grid item xs={12} sm={6}>
+                    <FormControl fullWidth size="small">
+                      <InputLabel>Select Patient</InputLabel>
+                      <Select
+                        value={selectedPatient}
+                        onChange={(e) => setSelectedPatient(e.target.value)}
+                        label="Select Patient"
+                      >
+                        {patients.map((patient) => (
+                          <MenuItem key={patient.id} value={patient.id}>
+                            {patient.username} ({patient.email})
+                          </MenuItem>
+                        ))}
+                      </Select>
+                    </FormControl>
+                  </Grid>
+                )}
+                
+                {isNewPatient && (
+                  <>
+                    <Grid item xs={12} sm={3}>
+                      <TextField
+                        fullWidth
+                        size="small"
+                        label="Contact Name"
+                        value={contactName}
+                        onChange={(e) => setContactName(e.target.value)}
+                        placeholder="Enter patient's name"
+                      />
+                    </Grid>
+                    <Grid item xs={12} sm={3}>
+                      <TextField
+                        fullWidth
+                        size="small"
+                        label="Contact Phone"
+                        value={contactPhone}
+                        onChange={(e) => setContactPhone(e.target.value)}
+                        placeholder="Enter phone number"
+                      />
+                    </Grid>
+                  </>
+                )}
+              </Grid>
+            </Box>
+            
+            {/* 时间选择区域 */}
+            <Box sx={{ mb: 2, p: 2, bgcolor: 'grey.50', borderRadius: 1, border: '1px solid', borderColor: 'grey.200' }}>
+              <Typography variant="subtitle1" sx={{ fontWeight: 600, color: '#000000', mb: 2, display: 'flex', alignItems: 'center', gap: 1 }}>
+                <AccessTimeIcon sx={{ fontSize: 16, color: '#3b82f6' }} />
+                Appointment Time
+              </Typography>
+              
+              <Grid container spacing={1} sx={{ mb: 2 }}>
+                <Grid item xs={12} sm={6}>
+                  <TextField
+                    type="date"
+                    label="Date"
+                    fullWidth
+                    size="small"
+                    InputLabelProps={{ shrink: true }}
+                    value={selectedDate}
+                    onChange={(e) => {
+                      setSelectedDate(e.target.value);
+                      setSelectedTime("");
+                    }}
+                    inputProps={{ 
+                      min: new Date(new Date().getTime() + 8 * 60 * 60 * 1000).toISOString().split('T')[0] // UTC+8 today
+                    }}
+                    onClick={(e) => {
+                      e.target.showPicker && e.target.showPicker();
+                    }}
+                    sx={{
+                      '& input': {
+                        cursor: 'pointer'
+                      }
+                    }}
+                  />
+                </Grid>
+                
+                <Grid item xs={12} sm={6}>
+                  <Box sx={{ 
+                    p: 1, 
+                    bgcolor: 'primary.light', 
+                    borderRadius: 1,
+                    textAlign: 'center',
+                    height: '40px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center'
+                  }}>
+                    <Typography variant="body2" color="primary.dark" fontWeight={600}>
+                      Duration: 1 Hour
+                    </Typography>
+                  </Box>
+                </Grid>
+              </Grid>
+              
+              <Typography variant="body2" sx={{ fontWeight: 600, mb: 1 }}>
                 Available Time Slots
               </Typography>
-              <Box sx={{ display: "flex", flexWrap: "wrap", gap: 1 }}>
-                {TIME_SLOTS.map((time) => (
-                  <Chip
-                    key={time}
-                    label={time}
-                    onClick={() => setSelectedTime(time)}
-                    color={selectedTime === time ? "primary" : "default"}
-                    variant={selectedTime === time ? "filled" : "outlined"}
-                    disabled={!isTimeSlotAvailable(time)}
-                  />
-                ))}
-              </Box>
-
-              <FormControl fullWidth sx={{ mt: 2 }}>
-                <InputLabel>Duration</InputLabel>
-                <Select
-                  value={duration}
-                  onChange={(e) => setDuration(e.target.value)}
-                  label="Duration"
-                >
-                  {DURATION_OPTIONS.map((option) => (
-                    <MenuItem key={option.value} value={option.value}>
-                      {option.label}
-                    </MenuItem>
-                  ))}
-                </Select>
-              </FormControl>
-            </Grid>
-
-            <Grid item xs={12} md={6}>
-              <Typography variant="h6" gutterBottom>
-                Existing Appointments
-              </Typography>
-              <Paper variant="outlined" sx={{ p: 2, bgcolor: "background.default", maxHeight: 300, overflow: 'auto' }}>
-                {existingAppointments.length > 0 ? (
-                  existingAppointments.map((apt) => (
+              
+              <Box sx={{ 
+                display: 'grid',
+                gridTemplateColumns: 'repeat(4, 1fr)',
+                gap: 1,
+                mb: 1
+              }}>
+                {TIME_SLOTS.map((time) => {
+                  const isAvailable = isTimeSlotAvailable(time);
+                  const isUnavailable = isTimeSlotUnavailable(time);
+                  const isBooked = !isAvailable && !isUnavailable;
+                  
+                  let status, color, bgColor, borderColor, cursor;
+                  
+                  if (isUnavailable) {
+                    status = 'Unavailable';
+                    color = 'error.dark';
+                    bgColor = 'error.light';
+                    borderColor = 'error.main';
+                    cursor = 'not-allowed';
+                  } else if (isBooked) {
+                    status = 'Booked';
+                    color = 'primary.dark';
+                    bgColor = 'primary.light';
+                    borderColor = 'primary.main';
+                    cursor = 'not-allowed';
+                  } else {
+                    status = 'Available';
+                    color = selectedTime === time ? 'primary.dark' : 'success.dark';
+                    bgColor = selectedTime === time ? 'primary.light' : 'success.light';
+                    borderColor = selectedTime === time ? 'primary.main' : 'success.main';
+                    cursor = 'pointer';
+                  }
+                  
+                  return (
                     <Box
-                      key={apt.appointmentId}
+                      key={time}
                       sx={{
-                        mb: 2,
-                        p: 2,
+                        p: 1.5,
                         borderRadius: 1,
-                        bgcolor: "background.paper",
-                        border: '1px solid',
-                        borderColor: 'divider',
+                        bgcolor: bgColor,
+                        border: '2px solid',
+                        borderColor: borderColor,
+                        cursor: cursor,
+                        opacity: (isUnavailable || isBooked) ? 0.7 : 1,
+                        textAlign: 'center',
+                        transition: 'all 0.2s ease-in-out',
+                        '&:hover': { 
+                          opacity: (isUnavailable || isBooked) ? 0.7 : 0.9,
+                          transform: (isUnavailable || isBooked) ? 'none' : 'translateY(-1px)',
+                          boxShadow: (isUnavailable || isBooked) ? 'none' : 2
+                        },
+                      }}
+                      onClick={() => {
+                        if (isAvailable) {
+                          setSelectedTime(time);
+                        }
                       }}
                     >
-                      <Box display="flex" justifyContent="space-between" alignItems="center" mb={1}>
-                        <Typography variant="subtitle1" fontWeight="bold">
-                          {apt.patient.username}
-                        </Typography>
-                        <Chip
-                          label={apt.status}
-                          color={apt.status === "Scheduled" ? "primary" : "default"}
-                          size="small"
-                        />
-                      </Box>
-                      <Box display="flex" alignItems="center" gap={1}>
-                        <AccessTimeIcon fontSize="small" color="action" />
-                        <Typography variant="body2">
-                          {formatTime(apt.appointmentDateTime)} - {formatTime(new Date(new Date(apt.appointmentDateTime).getTime() + apt.duration * 60000))}
-                          {" "}({apt.duration} mins)
-                        </Typography>
-                      </Box>
-                      {apt.notes && (
-                        <Typography variant="body2" color="text.secondary" mt={1}>
-                          Note: {apt.notes}
-                        </Typography>
-                      )}
+                      <Typography variant="body2" sx={{ fontWeight: 'bold', color: color, mb: 0.5 }}>
+                        {time}
+                      </Typography>
+                      <Typography variant="caption" sx={{ color: color, fontWeight: 600, fontSize: '0.7rem' }}>
+                        {status}
+                      </Typography>
                     </Box>
-                  ))
-                ) : (
-                  <Typography color="text.secondary">
-                    No appointments scheduled for this date
-                  </Typography>
-                )}
-              </Paper>
-            </Grid>
-
-            <Grid item xs={12}>
+                  );
+                })}
+              </Box>
+              
+              <Typography variant="caption" color="text.secondary" sx={{ textAlign: 'center', display: 'block' }}>
+                Click on available time slots to select
+              </Typography>
+            </Box>
+            
+            {/* 备注区域 */}
+            <Box sx={{ p: 2, bgcolor: 'grey.50', borderRadius: 1, border: '1px solid', borderColor: 'grey.200' }}>
+              <Typography variant="subtitle1" sx={{ fontWeight: 600, color: '#000000', mb: 1, display: 'flex', alignItems: 'center', gap: 1 }}>
+                <NotesIcon sx={{ fontSize: 16, color: '#3b82f6' }} />
+                Additional Notes
+              </Typography>
               <TextField
                 label="Notes (Optional)"
                 multiline
-                rows={3}
+                rows={2}
                 fullWidth
+                size="small"
                 value={notes}
                 onChange={(e) => setNotes(e.target.value)}
+                placeholder="Enter any additional notes..."
               />
-            </Grid>
+            </Box>
           </Grid>
-        </Box>
+        </Grid>
       </DialogContent>
-      <DialogActions>
-        <Button onClick={handleClose}>Cancel</Button>
-        <Button onClick={handleSubmit} variant="contained" disabled={loading}>
-          Create Appointment
-        </Button>
+      
+      <DialogActions sx={{ p: 2, bgcolor: 'grey.50', borderTop: '1px solid', borderColor: 'grey.200' }}>
+        <Box display="flex" justifyContent="space-between" width="100%">
+          <Typography variant="body2" color="text.secondary">
+            {selectedTime ? `Selected: ${selectedTime} - ${(parseInt(selectedTime.split(':')[0]) + 1).toString().padStart(2, '0')}:00` : 'Please select a time slot'}
+          </Typography>
+          <Box display="flex" gap={1}>
+            <Button 
+              onClick={handleClose} 
+              variant="outlined"
+              size="small"
+              sx={{ textTransform: 'uppercase', fontWeight: 600 }}
+            >
+              Cancel
+            </Button>
+            <Button 
+              onClick={handleSubmit} 
+              variant="contained" 
+              size="small"
+              disabled={loading || !selectedTime}
+              sx={{ textTransform: 'uppercase', fontWeight: 600 }}
+            >
+              {loading ? 'Creating...' : 'Create Appointment'}
+            </Button>
+          </Box>
+        </Box>
       </DialogActions>
     </Dialog>
   );

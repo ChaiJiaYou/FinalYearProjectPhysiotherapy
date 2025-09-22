@@ -11,6 +11,8 @@ import {
   CircularProgress,
   Alert,
   Stack,
+  Card,
+  CardContent,
 } from "@mui/material";
 import ArrowBackIcon from "@mui/icons-material/ArrowBack";
 import EditIcon from "@mui/icons-material/Edit";
@@ -28,8 +30,10 @@ import LocalHospitalIcon from "@mui/icons-material/LocalHospital";
 import WorkIcon from "@mui/icons-material/Work";
 import ContactEmergencyIcon from "@mui/icons-material/ContactEmergency";
 import AddIcon from "@mui/icons-material/Add";
+import SecurityIcon from "@mui/icons-material/Security";
 import { formatLastLogin } from "../../../utils/dateUtils";
 import { alpha } from "@mui/material/styles";
+import ChangeUserPasswordDialog from "../../CustomComponents/ChangeUserPasswordDialog";
 import { toast } from "react-toastify";
 
 const UserAccountManagementAccountPage = () => {
@@ -38,6 +42,7 @@ const UserAccountManagementAccountPage = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [avatarUrl, setAvatarUrl] = useState("");
+  const [changePasswordOpen, setChangePasswordOpen] = useState(false);
   const navigate = useNavigate();
 
   const getRoleColor = (role) => {
@@ -144,302 +149,340 @@ const UserAccountManagementAccountPage = () => {
   }
 
   return (
-    <Box sx={{ backgroundColor: "#f8fafc", minHeight: "100vh" }}>
-      {/* Header Section */}
-      <Box
-        sx={{
-          background: `linear-gradient(135deg, ${getRoleColor(user?.role)} 0%, ${alpha(getRoleColor(user?.role), 0.8)} 100%)`,
-          p: 3,
-          color: "white",
-        }}>
-        <Box display="flex" alignItems="center" justifyContent="space-between">
+    <Box sx={{ bgcolor: '#f8fafc', minHeight: '100vh', p: { xs: 2, md: 4 } }}>
+      <Box sx={{ maxWidth: 'xl', mx: 'auto' }}>
+        {/* 页面头部 - 遵循设计系统 */}
+        <Box display="flex" justifyContent="space-between" alignItems="center" mb={4}>
           <Box display="flex" alignItems="center" gap={2}>
             <IconButton
-              onClick={() => navigate(-1)}
+              onClick={() => navigate('/home/users')}
               sx={{
-                color: "white",
-                backgroundColor: alpha("#ffffff", 0.2),
-                "&:hover": {
-                  backgroundColor: alpha("#ffffff", 0.3),
+                color: '#3b82f6',
+                backgroundColor: 'rgba(59, 130, 246, 0.1)',
+                '&:hover': {
+                  backgroundColor: 'rgba(59, 130, 246, 0.2)',
                 },
               }}>
               <ArrowBackIcon />
             </IconButton>
-            <Typography variant="h4" sx={{ fontWeight: "bold" }}>
-              User Profile
-            </Typography>
+            <Box>
+              <Typography variant="h4" gutterBottom sx={{ color: '#000000', fontWeight: 600 }}>
+                User Profile
+              </Typography>
+              <Typography variant="body1" color="text.secondary">
+                View and manage user account details
+              </Typography>
+            </Box>
           </Box>
-          <Stack direction="row" spacing={2}>
+          <Box display="flex" gap={2}>
             <Button
               variant="outlined"
               startIcon={<EditIcon />}
               onClick={() => navigate(`/home/users/edit/${userId}`)}
               sx={{
-                borderColor: "white",
-                color: "white",
-                textTransform: "uppercase",
+                borderRadius: 2,
+                textTransform: 'uppercase',
                 fontWeight: 600,
                 px: 3,
-                borderRadius: 2,
-                "&:hover": {
-                  borderColor: "white",
-                  bgcolor: alpha("#ffffff", 0.1),
-                },
+                borderColor: '#3b82f6',
+                color: '#3b82f6',
+                '&:hover': {
+                  borderColor: '#2563eb',
+                  bgcolor: 'rgba(59, 130, 246, 0.04)',
+                }
               }}>
               Edit
             </Button>
             <Button
               variant="outlined"
+              startIcon={<SecurityIcon />}
+              onClick={() => setChangePasswordOpen(true)}
+              sx={{
+                borderRadius: 2,
+                textTransform: 'uppercase',
+                fontWeight: 600,
+                px: 3,
+                borderColor: '#3b82f6',
+                color: '#3b82f6',
+                '&:hover': {
+                  borderColor: '#2563eb',
+                  bgcolor: 'rgba(59, 130, 246, 0.04)',
+                }
+              }}>
+              Change Password
+            </Button>
+            <Button
+              variant="contained"
               startIcon={user?.status ? <BlockIcon /> : <CheckCircleIcon />}
               onClick={handleToggleStatus}
               sx={{
-                borderColor: "white",
-                color: "white",
-                textTransform: "uppercase",
+                borderRadius: 2,
+                textTransform: 'uppercase',
                 fontWeight: 600,
                 px: 3,
-                borderRadius: 2,
-                "&:hover": {
-                  borderColor: "white",
-                  bgcolor: alpha("#ffffff", 0.1),
-                },
+                bgcolor: user?.status ? '#ef4444' : '#10b981',
+                '&:hover': {
+                  bgcolor: user?.status ? '#dc2626' : '#059669',
+                }
               }}>
               {user?.status ? "Deactivate" : "Activate"}
             </Button>
-          </Stack>
-        </Box>
-      </Box>
-
-      {/* Main User Information Section */}
-      <Box sx={{ p: 3, backgroundColor: "white", mb: 2 }}>
-        <Box display="flex" alignItems="center" gap={3}>
-          <Avatar
-            src={avatarUrl || "/static/images/defaultAvatar.png"}
-            sx={{
-              width: 120,
-              height: 120,
-              border: "4px solid",
-              borderColor: alpha(getRoleColor(user?.role), 0.2),
-              backgroundColor: "grey.100",
-            }}>
-            {!avatarUrl && <AddIcon sx={{ fontSize: 40, color: "grey.400" }} />}
-          </Avatar>
-          <Box sx={{ flex: 1 }}>
-            <Typography variant="h3" sx={{ fontWeight: "bold", color: "text.primary", mb: 2 }}>
-              {user?.username}
-            </Typography>
-            <Stack direction="row" spacing={1} sx={{ mb: 2 }}>
-              <Chip
-                icon={getRoleIcon(user?.role)}
-                label={user?.role?.charAt(0).toUpperCase() + user?.role?.slice(1)}
-                sx={{
-                  height: 32,
-                  fontSize: "0.8rem",
-                  fontWeight: 600,
-                  backgroundColor: alpha(getRoleColor(user?.role), 0.1),
-                  color: getRoleColor(user?.role),
-                  borderRadius: 2,
-                }}
-              />
-              <Chip
-                icon={<WorkIcon />}
-                label={user?.id}
-                sx={{
-                  height: 32,
-                  fontSize: "0.8rem",
-                  fontWeight: 600,
-                  backgroundColor: alpha(getRoleColor(user?.role), 0.1),
-                  color: getRoleColor(user?.role),
-                  borderRadius: 2,
-                }}
-              />
-              <Chip
-                icon={user?.status ? <CheckCircleIcon /> : <BlockIcon />}
-                label={user?.status ? "Active" : "Inactive"}
-                sx={{
-                  height: 32,
-                  fontSize: "0.8rem",
-                  fontWeight: 600,
-                  backgroundColor: user?.status ? alpha("#2e7d32", 0.1) : alpha("#d32f2f", 0.1),
-                  color: user?.status ? "#2e7d32" : "#d32f2f",
-                  borderRadius: 2,
-                }}
-              />
-            </Stack>
-            <Box display="flex" alignItems="center" gap={3} flexWrap="wrap">
-              <Box display="flex" alignItems="center" gap={1}>
-                <EmailIcon sx={{ color: "text.secondary", fontSize: 20 }} />
-                <Typography variant="body1" sx={{ color: "text.secondary" }}>
-                  {user?.email}
-                </Typography>
-              </Box>
-              <Box display="flex" alignItems="center" gap={1}>
-                <PhoneIcon sx={{ color: "text.secondary", fontSize: 20 }} />
-                <Typography variant="body1" sx={{ color: "text.secondary" }}>
-                  {user?.contact_number}
-                </Typography>
-              </Box>
-              <Box display="flex" alignItems="center" gap={1}>
-                <BadgeIcon sx={{ color: "text.secondary", fontSize: 20 }} />
-                <Typography variant="body1" sx={{ color: "text.secondary" }}>
-                  {user?.ic}
-                </Typography>
-              </Box>
-            </Box>
           </Box>
         </Box>
+
+        {/* 主要内容区域 - 遵循设计系统 */}
+        <Grid container spacing={3}>
+          {/* 用户信息卡片 */}
+          <Grid item xs={12} lg={8}>
+            <Card sx={{ borderRadius: 3, border: '1px solid', borderColor: 'grey.200', elevation: 0 }}>
+              <CardContent sx={{ p: 3 }}>
+                <Box display="flex" alignItems="center" gap={3}>
+                  <Avatar
+                    src={avatarUrl || "/static/images/defaultAvatar.png"}
+                    sx={{
+                      width: 120,
+                      height: 120,
+                      border: "4px solid",
+                      borderColor: alpha(getRoleColor(user?.role), 0.2),
+                      backgroundColor: "grey.100",
+                    }}>
+                    {!avatarUrl && <AddIcon sx={{ fontSize: 40, color: "grey.400" }} />}
+                  </Avatar>
+                  <Box>
+                    <Typography variant="h3" sx={{ fontWeight: 600, color: "text.primary", mb: 2 }}>
+                      {user?.username}
+                    </Typography>
+                    <Stack direction="row" spacing={1} sx={{ mb: 2 }}>
+                      <Chip
+                        icon={getRoleIcon(user?.role)}
+                        label={user?.role?.charAt(0).toUpperCase() + user?.role?.slice(1)}
+                        sx={{
+                          height: 32,
+                          fontSize: "0.8rem",
+                          fontWeight: 600,
+                          backgroundColor: alpha(getRoleColor(user?.role), 0.1),
+                          color: getRoleColor(user?.role),
+                          borderRadius: 2,
+                        }}
+                      />
+                      <Chip
+                        icon={<WorkIcon />}
+                        label={user?.id}
+                        sx={{
+                          height: 32,
+                          fontSize: "0.8rem",
+                          fontWeight: 600,
+                          backgroundColor: alpha(getRoleColor(user?.role), 0.1),
+                          color: getRoleColor(user?.role),
+                          borderRadius: 2,
+                        }}
+                      />
+                      <Chip
+                        icon={user?.status ? <CheckCircleIcon /> : <BlockIcon />}
+                        label={user?.status ? "Active" : "Inactive"}
+                        sx={{
+                          height: 32,
+                          fontSize: "0.8rem",
+                          fontWeight: 600,
+                          backgroundColor: user?.status ? alpha("#2e7d32", 0.1) : alpha("#d32f2f", 0.1),
+                          color: user?.status ? "#2e7d32" : "#d32f2f",
+                          borderRadius: 2,
+                        }}
+                      />
+                    </Stack>
+                    <Box display="flex" alignItems="center" gap={3} flexWrap="wrap">
+                      <Box display="flex" alignItems="center" gap={1}>
+                        <EmailIcon sx={{ color: "text.secondary", fontSize: 20 }} />
+                        <Typography variant="body1" sx={{ color: "text.secondary" }}>
+                          {user?.email}
+                        </Typography>
+                      </Box>
+                      <Box display="flex" alignItems="center" gap={1}>
+                        <PhoneIcon sx={{ color: "text.secondary", fontSize: 20 }} />
+                        <Typography variant="body1" sx={{ color: "text.secondary" }}>
+                          {user?.contact_number}
+                        </Typography>
+                      </Box>
+                    </Box>
+                  </Box>
+                </Box>
+              </CardContent>
+            </Card>
+          </Grid>
+          
+          {/* 系统信息卡片 */}
+          <Grid item xs={12} lg={4}>
+            <Card sx={{ borderRadius: 3, border: '1px solid', borderColor: 'grey.200', elevation: 0 }}>
+              <CardContent sx={{ p: 3 }}>
+                <Typography variant="h6" sx={{ fontWeight: 600, color: "text.primary", mb: 2, display: "flex", alignItems: "center", gap: 1 }}>
+                  <AccessTimeIcon sx={{ fontSize: 20, color: '#3b82f6' }} />
+                  System Information
+                </Typography>
+                <Box sx={{ display: "flex", flexDirection: "column", gap: 2 }}>
+                  <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                    <Typography variant="body2" sx={{ color: "text.secondary" }}>
+                      Created
+                    </Typography>
+                    <Typography variant="body2" sx={{ fontWeight: 500, color: "text.primary" }}>
+                      {user?.create_date}
+                    </Typography>
+                  </Box>
+                  <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                    <Typography variant="body2" sx={{ color: "text.secondary" }}>
+                      Last Login
+                    </Typography>
+                    <Typography variant="body2" sx={{ fontWeight: 500, color: "text.primary" }}>
+                      {formatLastLogin(user?.last_login)}
+                    </Typography>
+                  </Box>
+                  <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                    <Typography variant="body2" sx={{ color: "text.secondary" }}>
+                      Created By
+                    </Typography>
+                    <Typography variant="body2" sx={{ fontWeight: 500, color: "text.primary" }}>
+                      {user?.created_by || "System"}
+                    </Typography>
+                  </Box>
+                </Box>
+              </CardContent>
+            </Card>
+          </Grid>
+        </Grid>
+
+        {/* 角色特定信息 */}
+        <Grid container spacing={3} sx={{ mt: 2 }}>
+          {/* 基本信息 */}
+          <Grid item xs={12} md={6}>
+            <Card sx={{ borderRadius: 3, border: '1px solid', borderColor: 'grey.200', elevation: 0 }}>
+              <CardContent sx={{ p: 3 }}>
+                <Typography variant="h6" sx={{ fontWeight: 600, color: "text.primary", mb: 2, display: "flex", alignItems: "center", gap: 1 }}>
+                  <PersonIcon sx={{ fontSize: 20, color: '#3b82f6' }} />
+                  Basic Information
+                </Typography>
+                <Box sx={{ display: "flex", flexDirection: "column", gap: 2 }}>
+                  <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                    <Typography variant="body2" sx={{ color: "text.secondary" }}>
+                      User ID
+                    </Typography>
+                    <Typography variant="body2" sx={{ fontWeight: 500, color: "text.primary" }}>
+                      {user?.id}
+                    </Typography>
+                  </Box>
+                  <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                    <Typography variant="body2" sx={{ color: "text.secondary" }}>
+                      IC Number
+                    </Typography>
+                    <Typography variant="body2" sx={{ fontWeight: 500, color: "text.primary" }}>
+                      {user?.ic}
+                    </Typography>
+                  </Box>
+                  <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                    <Typography variant="body2" sx={{ color: "text.secondary" }}>
+                      Email
+                    </Typography>
+                    <Typography variant="body2" sx={{ fontWeight: 500, color: "text.primary" }}>
+                      {user?.email}
+                    </Typography>
+                  </Box>
+                  <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                    <Typography variant="body2" sx={{ color: "text.secondary" }}>
+                      Contact
+                    </Typography>
+                    <Typography variant="body2" sx={{ fontWeight: 500, color: "text.primary" }}>
+                      {user?.contact_number}
+                    </Typography>
+                  </Box>
+                </Box>
+              </CardContent>
+            </Card>
+          </Grid>
+
+          {/* 角色特定信息 */}
+          {user?.role === 'therapist' && user?.therapist_profile && (
+            <Grid item xs={12} md={6}>
+              <Card sx={{ borderRadius: 3, border: '1px solid', borderColor: 'grey.200', elevation: 0 }}>
+                <CardContent sx={{ p: 3 }}>
+                  <Typography variant="h6" sx={{ fontWeight: 600, color: "text.primary", mb: 2, display: "flex", alignItems: "center", gap: 1 }}>
+                    <MedicalServicesIcon sx={{ fontSize: 20, color: '#3b82f6' }} />
+                    Therapist Information
+                  </Typography>
+                  <Box sx={{ display: "flex", flexDirection: "column", gap: 2 }}>
+                    <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                      <Typography variant="body2" sx={{ color: "text.secondary" }}>
+                        Specialization
+                      </Typography>
+                      <Typography variant="body2" sx={{ fontWeight: 500, color: "text.primary" }}>
+                        {user?.therapist_profile?.specialization || "Not specified"}
+                      </Typography>
+                    </Box>
+                    <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                      <Typography variant="body2" sx={{ color: "text.secondary" }}>
+                        Employment Date
+                      </Typography>
+                      <Typography variant="body2" sx={{ fontWeight: 500, color: "text.primary" }}>
+                        {user?.therapist_profile?.employment_date || "Not specified"}
+                      </Typography>
+                    </Box>
+                  </Box>
+                </CardContent>
+              </Card>
+            </Grid>
+          )}
+
+          {user?.role === 'patient' && user?.patient_profile && (
+            <Grid item xs={12} md={6}>
+              <Card sx={{ borderRadius: 3, border: '1px solid', borderColor: 'grey.200', elevation: 0 }}>
+                <CardContent sx={{ p: 3 }}>
+                  <Typography variant="h6" sx={{ fontWeight: 600, color: "text.primary", mb: 2, display: "flex", alignItems: "center", gap: 1 }}>
+                    <LocalHospitalIcon sx={{ fontSize: 20, color: '#3b82f6' }} />
+                    Patient Information
+                  </Typography>
+                  <Box sx={{ display: "flex", flexDirection: "column", gap: 2 }}>
+                    <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                      <Typography variant="body2" sx={{ color: "text.secondary" }}>
+                        Emergency Contact
+                      </Typography>
+                      <Typography variant="body2" sx={{ fontWeight: 500, color: "text.primary" }}>
+                        {user?.patient_profile?.emergency_contact || "Not specified"}
+                      </Typography>
+                    </Box>
+                  </Box>
+                </CardContent>
+              </Card>
+            </Grid>
+          )}
+
+          {user?.role === 'admin' && user?.admin_profile && (
+            <Grid item xs={12} md={6}>
+              <Card sx={{ borderRadius: 3, border: '1px solid', borderColor: 'grey.200', elevation: 0 }}>
+                <CardContent sx={{ p: 3 }}>
+                  <Typography variant="h6" sx={{ fontWeight: 600, color: "text.primary", mb: 2, display: "flex", alignItems: "center", gap: 1 }}>
+                    <AdminPanelSettingsIcon sx={{ fontSize: 20, color: '#3b82f6' }} />
+                    Admin Information
+                  </Typography>
+                  <Box sx={{ display: "flex", flexDirection: "column", gap: 2 }}>
+                    <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                      <Typography variant="body2" sx={{ color: "text.secondary" }}>
+                        Admin Role
+                      </Typography>
+                      <Typography variant="body2" sx={{ fontWeight: 500, color: "text.primary" }}>
+                        {user?.admin_profile?.admin_role || "Not specified"}
+                      </Typography>
+                    </Box>
+                  </Box>
+                </CardContent>
+              </Card>
+            </Grid>
+          )}
+        </Grid>
       </Box>
 
-      {/* Information Panels */}
-      <Grid container spacing={3} sx={{ p: 3 }}>
-        {/* System Information */}
-        <Grid item xs={12} md={6}>
-          <Box
-            sx={{
-              backgroundColor: "white",
-              border: "1px solid",
-              borderColor: "grey.200",
-              borderRadius: 3,
-              p: 3,
-            }}>
-            <Box
-              sx={{
-                display: "flex",
-                alignItems: "center",
-                gap: 1,
-                mb: 3,
-                pb: 2,
-                borderBottom: "1px solid",
-                borderColor: "grey.200",
-              }}>
-              <AccessTimeIcon sx={{ fontSize: 20, color: "text.secondary" }} />
-              <Typography variant="h6" sx={{ fontWeight: 600, color: "text.primary" }}>
-                System Information
-              </Typography>
-            </Box>
-            <Box sx={{ display: "flex", flexDirection: "column", gap: 2 }}>
-              <Box sx={{ display: "flex", justifyContent: "space-between", py: 1.5, borderBottom: "1px solid", borderColor: "grey.100" }}>
-                <Box sx={{ display: "flex", alignItems: "center", gap: 1.5 }}>
-                  <CalendarTodayIcon sx={{ fontSize: 18, color: "text.secondary" }} />
-                  <Typography variant="body2" sx={{ color: "text.secondary", fontWeight: 500 }}>
-                    Created Date
-                  </Typography>
-                </Box>
-                <Typography variant="body2" sx={{ fontWeight: 600, color: "text.primary" }}>
-                  {user?.create_date}
-                </Typography>
-              </Box>
-              <Box sx={{ display: "flex", justifyContent: "space-between", py: 1.5, borderBottom: "1px solid", borderColor: "grey.100" }}>
-                <Box sx={{ display: "flex", alignItems: "center", gap: 1.5 }}>
-                  <AccessTimeIcon sx={{ fontSize: 18, color: "text.secondary" }} />
-                  <Typography variant="body2" sx={{ color: "text.secondary", fontWeight: 500 }}>
-                    Last Login
-                  </Typography>
-                </Box>
-                <Typography variant="body2" sx={{ fontWeight: 600, color: "text.primary" }}>
-                  {formatLastLogin(user?.last_login)}
-                </Typography>
-              </Box>
-              <Box sx={{ display: "flex", justifyContent: "space-between", py: 1.5, borderBottom: "1px solid", borderColor: "grey.100" }}>
-                <Box sx={{ display: "flex", alignItems: "center", gap: 1.5 }}>
-                  <PersonIcon sx={{ fontSize: 18, color: "text.secondary" }} />
-                  <Typography variant="body2" sx={{ color: "text.secondary", fontWeight: 500 }}>
-                    Created By
-                  </Typography>
-                </Box>
-                <Typography variant="body2" sx={{ fontWeight: 600, color: "text.primary" }}>
-                  {user?.created_by || "System"}
-                </Typography>
-              </Box>
-              <Box sx={{ display: "flex", justifyContent: "space-between", py: 1.5 }}>
-                <Box sx={{ display: "flex", alignItems: "center", gap: 1.5 }}>
-                  <PersonIcon sx={{ fontSize: 18, color: "text.secondary" }} />
-                  <Typography variant="body2" sx={{ color: "text.secondary", fontWeight: 500 }}>
-                    Modified By
-                  </Typography>
-                </Box>
-                <Typography variant="body2" sx={{ fontWeight: 600, color: "text.primary" }}>
-                  {user?.modified_by || "System"}
-                </Typography>
-              </Box>
-            </Box>
-          </Box>
-        </Grid>
-
-        {/* Basic Information */}
-        <Grid item xs={12} md={6}>
-          <Box
-            sx={{
-              backgroundColor: "white",
-              border: "1px solid",
-              borderColor: "grey.200",
-              borderRadius: 3,
-              p: 3,
-            }}>
-            <Box
-              sx={{
-                display: "flex",
-                alignItems: "center",
-                gap: 1,
-                mb: 3,
-                pb: 2,
-                borderBottom: "1px solid",
-                borderColor: "grey.200",
-              }}>
-              <PersonIcon sx={{ fontSize: 20, color: "text.secondary" }} />
-              <Typography variant="h6" sx={{ fontWeight: 600, color: "text.primary" }}>
-                Basic Information
-              </Typography>
-            </Box>
-            <Box sx={{ display: "flex", flexDirection: "column", gap: 2 }}>
-              <Box sx={{ display: "flex", justifyContent: "space-between", py: 1.5, borderBottom: "1px solid", borderColor: "grey.100" }}>
-                <Box sx={{ display: "flex", alignItems: "center", gap: 1.5 }}>
-                  <PersonIcon sx={{ fontSize: 18, color: "text.secondary" }} />
-                  <Typography variant="body2" sx={{ color: "text.secondary", fontWeight: 500 }}>
-                    User ID
-                  </Typography>
-                </Box>
-                <Typography variant="body2" sx={{ fontWeight: 600, color: "text.primary" }}>
-                  {user?.id}
-                </Typography>
-              </Box>
-              <Box sx={{ display: "flex", justifyContent: "space-between", py: 1.5, borderBottom: "1px solid", borderColor: "grey.100" }}>
-                <Box sx={{ display: "flex", alignItems: "center", gap: 1.5 }}>
-                  <BadgeIcon sx={{ fontSize: 18, color: "text.secondary" }} />
-                  <Typography variant="body2" sx={{ color: "text.secondary", fontWeight: 500 }}>
-                    IC Number
-                  </Typography>
-                </Box>
-                <Typography variant="body2" sx={{ fontWeight: 600, color: "text.primary" }}>
-                  {user?.ic}
-                </Typography>
-              </Box>
-              <Box sx={{ display: "flex", justifyContent: "space-between", py: 1.5, borderBottom: "1px solid", borderColor: "grey.100" }}>
-                <Box sx={{ display: "flex", alignItems: "center", gap: 1.5 }}>
-                  <EmailIcon sx={{ fontSize: 18, color: "text.secondary" }} />
-                  <Typography variant="body2" sx={{ color: "text.secondary", fontWeight: 500 }}>
-                    Email
-                  </Typography>
-                </Box>
-                <Typography variant="body2" sx={{ fontWeight: 600, color: "text.primary" }}>
-                  {user?.email}
-                </Typography>
-              </Box>
-              <Box sx={{ display: "flex", justifyContent: "space-between", py: 1.5 }}>
-                <Box sx={{ display: "flex", alignItems: "center", gap: 1.5 }}>
-                  <PhoneIcon sx={{ fontSize: 18, color: "text.secondary" }} />
-                  <Typography variant="body2" sx={{ color: "text.secondary", fontWeight: 500 }}>
-                    Contact
-                  </Typography>
-                </Box>
-                <Typography variant="body2" sx={{ fontWeight: 600, color: "text.primary" }}>
-                  {user?.contact_number}
-                </Typography>
-              </Box>
-            </Box>
-          </Box>
-        </Grid>
-      </Grid>
+      {/* Change Password Dialog */}
+      <ChangeUserPasswordDialog
+        open={changePasswordOpen}
+        onClose={() => setChangePasswordOpen(false)}
+        userId={userId}
+      />
     </Box>
   );
 };

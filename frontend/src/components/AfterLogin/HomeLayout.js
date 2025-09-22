@@ -172,7 +172,17 @@ function HomeLayout() {
   return (
     <Box sx={{ display: "flex", height: "100vh", bgcolor: "#f8fafc" }}>
       <CssBaseline />
-      <ToastContainer position="top-right" autoClose={2500} hideProgressBar={false} />
+      <ToastContainer 
+        position="top-right" 
+        autoClose={3000} 
+        hideProgressBar={false}
+        newestOnTop={true}
+        closeOnClick={true}
+        rtl={false}
+        pauseOnFocusLoss={true}
+        draggable={false}
+        pauseOnHover={true}
+      />
       
       <Drawer
         variant={isMobile ? "temporary" : "permanent"}
