@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from "react";
+import { useNavigate } from "react-router-dom";
 import {
   Box,
   Typography,
@@ -55,6 +56,7 @@ function TabPanel(props) {
 }
 
 const TreatmentManagement = () => {
+  const navigate = useNavigate();
   const [tabValue, setTabValue] = useState(0);
   const [treatments, setTreatments] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -236,7 +238,7 @@ const TreatmentManagement = () => {
   return (
     <Box sx={{ p: 3 }}>
       <Typography variant="h4" sx={{ mb: 3, fontWeight: 'bold' }}>
-        Treatment Management
+        Treatment
       </Typography>
 
       {/* Action Buttons */}
@@ -244,7 +246,7 @@ const TreatmentManagement = () => {
         <Button
           variant="contained"
           startIcon={<AddIcon />}
-          onClick={() => setCreateDialogOpen(true)}
+          onClick={() => navigate('/create-treatment-plan')}
           size="large"
         >
           Create Treatment Plan

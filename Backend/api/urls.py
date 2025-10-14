@@ -48,6 +48,8 @@ urlpatterns = [
     path('update-appointment-status/<str:appointment_id>/', views.update_appointment_status, name='update-appointment-status'),
     path('get-patient-history/', views.get_patient_history, name='get-patient-history'),
     path('get-patient-detail/<str:patient_id>/', views.get_patient_detail, name='get-patient-detail'),
+    path('add-medical-history/<str:patient_id>/', views.add_medical_history, name='add-medical-history'),
+    path('update-medical-history/<int:history_id>/', views.update_medical_history, name='update-medical-history'),
 
     # /?therapist_id=${selectedTherapist}&date=${selectedDate}
     
@@ -56,10 +58,12 @@ urlpatterns = [
     path('notifications/<str:pk>/mark-read/', NotificationMarkReadView.as_view(), name='mark-notification-read'),
     
     # Treatment Management
-    path('treatment-templates/', views.treatment_templates, name='treatment-templates'),
-    path('treatment-templates/<str:template_id>/', views.treatment_template_detail, name='treatment-template-detail'),
+    # path('treatment-templates/', views.treatment_templates, name='treatment-templates'),
+    # path('treatment-templates/<str:template_id>/', views.treatment_template_detail, name='treatment-template-detail'),
     path('treatments/', views.treatments, name='treatments'),
+    path('create-treatment/', views.create_treatment, name='create-treatment'),
     path('treatments/<str:treatment_id>/', views.treatment_detail, name='treatment-detail'),
+    path('patient-treatments/<str:patient_id>/', views.patient_treatments, name='patient-treatments'),
     path('therapist-treatments/<str:therapist_id>/', views.therapist_treatments, name='therapist-treatments'),
     path('treatment-exercises/<str:treatment_id>/', views.treatment_exercises, name='treatment-exercises'),
     path('create-treatment-exercise/', views.create_treatment_exercise, name='create-treatment-exercise'),
@@ -76,6 +80,7 @@ urlpatterns = [
     path('actions/', views.list_actions, name='list-actions'),
     path('actions/create/', views.create_action, name='create-action'),
     path('actions/<int:action_id>/', views.action_detail, name='action-detail'),
+    path('actions/<int:action_id>/delete/', views.delete_action, name='delete-action'),
     path('actions/<int:action_id>/record/', views.upload_record, name='upload-record'),
     path('actions/<int:action_id>/finalize/', views.finalize_action, name='finalize-action'),
     path('actions/<int:action_id>/setup/', views.setup_action_inference, name='setup-action-inference'),

@@ -2,17 +2,13 @@ import React, { useState, useRef, useEffect, useCallback } from 'react';
 import {
   Box,
   Typography,
-  Paper,
   Button,
   Card,
   CardContent,
   Chip,
-  Slider,
   Grid,
   Alert,
   IconButton,
-  Switch,
-  FormControlLabel,
   Select,
   MenuItem,
   FormControl,
@@ -20,10 +16,12 @@ import {
   Dialog,
   DialogTitle,
   DialogContent,
+  DialogActions,
   List,
   ListItem,
   ListItemText,
-  ListItemButton
+  ListItemButton,
+  Tooltip
 } from '@mui/material';
 import {
   Videocam,
@@ -31,19 +29,16 @@ import {
   PlayArrow,
   Stop,
   Refresh,
-  Settings,
   Close,
-  TrendingUp,
-  Timer,
-  Assessment
+  PlayCircleOutline,
+  PlayCircleOutline as PlayCircleOutlineIcon
 } from '@mui/icons-material';
-import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import { toast } from 'react-toastify';
 
 const RealTimeTest = () => {
   const [actions, setActions] = useState([]);
   const [selectedAction, setSelectedAction] = useState(null);
-  const [isInferenceActive, setIsInferenceActive] = useState(false);
+  const [isRecognitionActive, setIsRecognitionActive] = useState(false);
   const [isCameraActive, setIsCameraActive] = useState(false);
   const [currentResults, setCurrentResults] = useState({
     reps: 0,
@@ -56,48 +51,69 @@ const RealTimeTest = () => {
     thr_out: 1.0
   });
   
-  const [distanceHistory, setDistanceHistory] = useState([]);
+  
   const [sessionStartTime, setSessionStartTime] = useState(null);
   const [sessionDuration, setSessionDuration] = useState(0);
   
-  const [showSettings, setShowSettings] = useState(false);
   const [showActionSelector, setShowActionSelector] = useState(false);
-  const [legacyMode, setLegacyMode] = useState(false);
+  
+  // Demo video states
+  const [showDemoVideo, setShowDemoVideo] = useState(false);
+  const [demoVideoUrl, setDemoVideoUrl] = useState(null);
+  const [demoVideoLoading, setDemoVideoLoading] = useState(false);
   
   const videoRef = useRef(null);
   const streamRef = useRef(null);
   const canvasRef = useRef(null);
-  const inferenceIntervalRef = useRef(null);
+  const recognitionIntervalRef = useRef(null);
   const frameCountRef = useRef(0);
 
   useEffect(() => {
     fetchActions();
     return () => {
-      stopInference();
+      stopRecognition();
       stopCamera();
     };
   }, []);
 
   useEffect(() => {
     let timer;
-    if (isInferenceActive && sessionStartTime) {
+    if (isRecognitionActive && sessionStartTime) {
       timer = setInterval(() => {
         setSessionDuration(Date.now() - sessionStartTime);
       }, 1000);
     }
     return () => clearInterval(timer);
-  }, [isInferenceActive, sessionStartTime]);
+  }, [isRecognitionActive, sessionStartTime]);
 
   const fetchActions = async () => {
     try {
       const response = await fetch('http://127.0.0.1:8000/api/actions/');
+      
       if (response.ok) {
         const data = await response.json();
-        setActions(data.actions || []);
+        let actionsList = [];
+        if (Array.isArray(data.actions)) {
+          actionsList = data.actions;
+        } else if (Array.isArray(data)) {
+          actionsList = data;
+        }
+        setActions(actionsList);
+        
+        // Auto-select first action if available and no action is currently selected
+        if (actionsList.length > 0 && !selectedAction) {
+          const firstAction = actionsList[0];
+          const success = await setupAction(firstAction.id);
+          if (success) {
+            setSelectedAction(firstAction);
+          }
+        }
+      } else {
+        setActions([]);
       }
     } catch (error) {
-      console.error('Error fetching actions:', error);
       toast.error('Failed to load actions');
+      setActions([]);
     }
   };
 
@@ -113,7 +129,6 @@ const RealTimeTest = () => {
           thr_in: result.thresholds?.thr_in || 0.5,
           thr_out: result.thresholds?.thr_out || 1.0
         });
-        toast.success('Action setup complete');
         return true;
       } else {
         throw new Error('Setup failed');
@@ -172,7 +187,7 @@ const RealTimeTest = () => {
     });
   }, []);
 
-  const sendFrameForInference = useCallback(async () => {
+  const sendFrameForRecognition = useCallback(async () => {
     if (!selectedAction || !isCameraActive) return;
     
     try {
@@ -196,27 +211,15 @@ const RealTimeTest = () => {
           state: result.state || 'OUT'
         });
         
-        // Update distance history for visualization
+        // Update frame count
         frameCountRef.current += 1;
-        if (frameCountRef.current % 3 === 0) { // Update every 3 frames to reduce noise
-          setDistanceHistory(prev => {
-            const newHistory = [...prev, {
-              frame: frameCountRef.current,
-              distance: result.distance || 0,
-              threshold_in: thresholds.thr_in,
-              threshold_out: thresholds.thr_out
-            }];
-            // Keep only last 100 points
-            return newHistory.slice(-100);
-          });
-        }
       }
     } catch (error) {
-      console.error('Error in inference:', error);
+      console.error('Error in recognition:', error);
     }
   }, [selectedAction, isCameraActive, captureFrame, thresholds]);
 
-  const startInference = async () => {
+  const startRecognition = async () => {
     if (!selectedAction) {
       toast.error('Please select an action first');
       return;
@@ -226,34 +229,30 @@ const RealTimeTest = () => {
       await startCamera();
     }
     
-    // Reset inference state
+    // Reset recognition state
     try {
       await fetch('http://127.0.0.1:8000/api/infer/reset/', {
         method: 'POST'
       });
     } catch (error) {
-      console.error('Error resetting inference:', error);
+      console.error('Error resetting recognition:', error);
     }
     
-    setIsInferenceActive(true);
+    setIsRecognitionActive(true);
     setSessionStartTime(Date.now());
     setCurrentResults({ reps: 0, distance: 0, state: 'OUT' });
-    setDistanceHistory([]);
     frameCountRef.current = 0;
     
-    // Start inference loop
-    inferenceIntervalRef.current = setInterval(sendFrameForInference, 100); // 10 FPS
-    
-    toast.success('Real-time inference started!');
+    // Start recognition loop
+    recognitionIntervalRef.current = setInterval(sendFrameForRecognition, 100); // 10 FPS
   };
 
-  const stopInference = () => {
-    if (inferenceIntervalRef.current) {
-      clearInterval(inferenceIntervalRef.current);
-      inferenceIntervalRef.current = null;
+  const stopRecognition = () => {
+    if (recognitionIntervalRef.current) {
+      clearInterval(recognitionIntervalRef.current);
+      recognitionIntervalRef.current = null;
     }
-    setIsInferenceActive(false);
-    toast.info('Inference stopped');
+    setIsRecognitionActive(false);
   };
 
   const resetSession = async () => {
@@ -263,7 +262,6 @@ const RealTimeTest = () => {
       });
       
       setCurrentResults({ reps: 0, distance: 0, state: 'OUT' });
-      setDistanceHistory([]);
       setSessionStartTime(Date.now());
       frameCountRef.current = 0;
       
@@ -274,33 +272,53 @@ const RealTimeTest = () => {
     }
   };
 
-  const updateThresholds = async (newThresholds) => {
-    setThresholds(newThresholds);
-    
-    if (isInferenceActive) {
-      try {
-        await fetch('http://127.0.0.1:8000/api/infer/stream/', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            features: new Array(64).fill(0), // Dummy features
-            update_thresholds: newThresholds
-          })
-        });
-      } catch (error) {
-        console.error('Error updating thresholds:', error);
-      }
-    }
-  };
 
   const selectAction = async (action) => {
     const success = await setupAction(action.id);
     if (success) {
       setSelectedAction(action);
       setShowActionSelector(false);
-      toast.success(`Selected action: ${action.name}`);
+    }
+  };
+
+  const viewDemoVideo = async (actionId) => {
+    setDemoVideoLoading(true);
+    setShowDemoVideo(true);
+    
+    try {
+      // Fetch action samples to get demo video
+      const response = await fetch(`http://127.0.0.1:8000/api/actions/${actionId}/`);
+      
+      if (response.ok) {
+        const actionData = await response.json();
+        
+        // Check if action has samples with video
+        if (actionData.samples && actionData.samples.length > 0) {
+          const sampleWithVideo = actionData.samples.find(sample => sample.video_url);
+          
+          if (sampleWithVideo) {
+            // Construct full URL for video
+            const videoUrl = sampleWithVideo.video_url.startsWith('http')
+              ? sampleWithVideo.video_url
+              : `http://127.0.0.1:8000${sampleWithVideo.video_url}`;
+            setDemoVideoUrl(videoUrl);
+          } else {
+            setDemoVideoUrl(null);
+            toast.info('No demo video available for this action');
+          }
+        } else {
+          setDemoVideoUrl(null);
+          toast.info('No demo video available for this action');
+        }
+      } else {
+        throw new Error('Failed to fetch action details');
+      }
+    } catch (error) {
+      console.error('Error fetching demo video:', error);
+      toast.error('Failed to load demo video');
+      setDemoVideoUrl(null);
+    } finally {
+      setDemoVideoLoading(false);
     }
   };
 
@@ -312,214 +330,177 @@ const RealTimeTest = () => {
   };
 
   return (
-    <Box sx={{ p: 3 }}>
-      {/* Header */}
-      <Paper sx={{ p: 3, mb: 3 }}>
-        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <Box>
-            <Typography variant="h4" fontWeight="bold" gutterBottom>
-              Real-Time Action Recognition
-            </Typography>
-            <Typography variant="body1" color="text.secondary">
-              Test your trained actions with live pose detection
-            </Typography>
-          </Box>
-          
-          <Box sx={{ display: 'flex', gap: 1 }}>
-            <FormControlLabel
-              control={
-                <Switch
-                  checked={legacyMode}
-                  onChange={(e) => setLegacyMode(e.target.checked)}
-                />
-              }
-              label="Legacy Mode"
-            />
-            <IconButton onClick={() => setShowSettings(true)}>
-              <Settings />
-            </IconButton>
-          </Box>
-        </Box>
-      </Paper>
+    <Box sx={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
+      <Grid container spacing={2} sx={{ height: '100%', flex: 1 }}>
+        {/* Left Column - Controls and Settings */}
+        <Grid item xs={12} md={5}>
+          <Box sx={{ height: '100%', display: 'flex', flexDirection: 'column', gap: 1.5 }}>
+            
+            {/* Action Selection */}
+            <Card sx={{ flex: '0 0 auto' }}>
+              <CardContent sx={{ p: 2 }}>
+                <Typography variant="h6" gutterBottom sx={{ mb: 1 }}>
+                  Action Selection
+                </Typography>
+                
+                <FormControl fullWidth sx={{ mb: 2 }}>
+                  <InputLabel>Select Action</InputLabel>
+                  <Select
+                    value={selectedAction ? selectedAction.id : ''}
+                    label="Select Action"
+                    onChange={(e) => {
+                      const actionId = e.target.value;
+                      const action = actions.find(a => a.id === actionId);
+                      if (action) {
+                        selectAction(action);
+                      } else {
+                        setSelectedAction(null);
+                      }
+                    }}
+                  >
+                    {actions.map((action) => (
+                      <MenuItem key={action.id} value={action.id}>
+                        {action.name}
+                      </MenuItem>
+                    ))}
+                  </Select>
+                </FormControl>
+                
+                {selectedAction && (
+                  <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <Box>
+                      <Chip 
+                        label={selectedAction.name}
+                        color="primary"
+                        size="small"
+                        sx={{ mr: 1 }}
+                      />
+                      <Typography variant="caption" color="text.secondary">
+                        {selectedAction.template_count} templates
+                      </Typography>
+                    </Box>
+                    <Tooltip title="View demo video">
+                      <IconButton 
+                        size="small" 
+                        color="secondary"
+                        onClick={() => viewDemoVideo(selectedAction.id)}
+                      >
+                        <PlayCircleOutlineIcon />
+                      </IconButton>
+                    </Tooltip>
+                  </Box>
+                )}
+              </CardContent>
+            </Card>
+            
 
-      <Grid container spacing={3}>
-        {/* Left Column - Controls and Status */}
-        <Grid item xs={12} md={4}>
-          {/* Action Selection */}
-          <Card sx={{ mb: 2 }}>
-            <CardContent>
-              <Typography variant="h6" gutterBottom>
-                Action Selection
-              </Typography>
-              
-              {selectedAction ? (
-                <Box>
-                  <Chip 
-                    label={selectedAction.name}
-                    color="primary"
-                    onDelete={() => setSelectedAction(null)}
-                    sx={{ mb: 1 }}
-                  />
-                  <Typography variant="body2" color="text.secondary">
-                    {selectedAction.description}
+            {/* Controls */}
+            <Card sx={{ flex: '0 0 auto' }}>
+              <CardContent sx={{ p: 2 }}>
+                <Typography variant="h6" gutterBottom sx={{ mb: 1 }}>
+                  Controls
+                </Typography>
+                
+                <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+                  <Button
+                    variant={isCameraActive ? 'outlined' : 'contained'}
+                    startIcon={isCameraActive ? <VideocamOff /> : <Videocam />}
+                    onClick={isCameraActive ? stopCamera : startCamera}
+                    color={isCameraActive ? 'error' : 'primary'}
+                    fullWidth
+                    size="large"
+                  >
+                    {isCameraActive ? 'Stop Camera' : 'Start Camera'}
+                  </Button>
+                  
+                  <Button
+                    variant={isRecognitionActive ? 'outlined' : 'contained'}
+                    startIcon={isRecognitionActive ? <Stop /> : <PlayArrow />}
+                    onClick={isRecognitionActive ? stopRecognition : startRecognition}
+                    disabled={!selectedAction || !isCameraActive}
+                    color={isRecognitionActive ? 'error' : 'success'}
+                    fullWidth
+                    size="large"
+                  >
+                    {isRecognitionActive ? 'Stop Recognition' : 'Start Recognition'}
+                  </Button>
+                  
+                  <Button
+                    variant="outlined"
+                    startIcon={<Refresh />}
+                    onClick={resetSession}
+                    disabled={!isRecognitionActive}
+                    fullWidth
+                  >
+                    Reset Session
+                  </Button>
+                </Box>
+              </CardContent>
+            </Card>
+
+            {/* Current Results */}
+            <Card sx={{ flex: '0 0 auto' }}>
+              <CardContent sx={{ p: 2 }}>
+                <Typography variant="h6" gutterBottom sx={{ mb: 1 }}>
+                  Current Results
+                </Typography>
+                
+                <Box sx={{ textAlign: 'center', mb: 2 }}>
+                  <Typography variant="h2" color="primary" fontWeight="bold" sx={{ fontSize: '2.5rem' }}>
+                    {currentResults.reps}
                   </Typography>
-                  <Typography variant="caption" display="block">
-                    Templates: {selectedAction.template_count}
+                  <Typography variant="body1" color="text.secondary">
+                    Repetitions
                   </Typography>
                 </Box>
-              ) : (
-                <Button
-                  variant="outlined"
-                  onClick={() => setShowActionSelector(true)}
-                  fullWidth
-                >
-                  Select Action
-                </Button>
-              )}
-            </CardContent>
-          </Card>
-
-          {/* Controls */}
-          <Card sx={{ mb: 2 }}>
-            <CardContent>
-              <Typography variant="h6" gutterBottom>
-                Controls
-              </Typography>
-              
-              <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
-                <Button
-                  variant={isCameraActive ? 'outlined' : 'contained'}
-                  startIcon={isCameraActive ? <VideocamOff /> : <Videocam />}
-                  onClick={isCameraActive ? stopCamera : startCamera}
-                  color={isCameraActive ? 'error' : 'primary'}
-                  fullWidth
-                >
-                  {isCameraActive ? 'Stop Camera' : 'Start Camera'}
-                </Button>
                 
-                <Button
-                  variant={isInferenceActive ? 'outlined' : 'contained'}
-                  startIcon={isInferenceActive ? <Stop /> : <PlayArrow />}
-                  onClick={isInferenceActive ? stopInference : startInference}
-                  disabled={!selectedAction || !isCameraActive}
-                  color={isInferenceActive ? 'error' : 'success'}
-                  fullWidth
-                >
-                  {isInferenceActive ? 'Stop Inference' : 'Start Inference'}
-                </Button>
-                
-                <Button
-                  variant="outlined"
-                  startIcon={<Refresh />}
-                  onClick={resetSession}
-                  disabled={!isInferenceActive}
-                  fullWidth
-                >
-                  Reset Session
-                </Button>
-              </Box>
-            </CardContent>
-          </Card>
-
-          {/* Current Results */}
-          <Card sx={{ mb: 2 }}>
-            <CardContent>
-              <Typography variant="h6" gutterBottom>
-                Current Results
-              </Typography>
-              
-              <Box sx={{ textAlign: 'center', mb: 2 }}>
-                <Typography variant="h2" color="primary" fontWeight="bold">
-                  {currentResults.reps}
-                </Typography>
-                <Typography variant="body2" color="text.secondary">
-                  Repetitions
-                </Typography>
-              </Box>
-              
-              <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 1 }}>
-                <Typography variant="body2">State:</Typography>
-                <Chip 
-                  label={currentResults.state}
-                  color={currentResults.state === 'IN' ? 'success' : 'default'}
-                  size="small"
-                />
-              </Box>
-              
-              <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 1 }}>
-                <Typography variant="body2">Distance:</Typography>
-                <Typography variant="body2" fontFamily="monospace">
-                  {currentResults.distance.toFixed(3)}
-                </Typography>
-              </Box>
-              
-              {sessionStartTime && (
-                <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
-                  <Typography variant="body2">Duration:</Typography>
-                  <Typography variant="body2" fontFamily="monospace">
-                    {formatDuration(sessionDuration)}
-                  </Typography>
+                <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+                  <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <Typography variant="body2" fontWeight="medium">State:</Typography>
+                    <Chip 
+                      label={currentResults.state}
+                      color={currentResults.state === 'IN' ? 'success' : 'default'}
+                      size="small"
+                    />
+                  </Box>
+                  
+                  <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <Typography variant="body2" fontWeight="medium">Distance:</Typography>
+                    <Typography variant="body2" fontFamily="monospace" color="primary">
+                      {currentResults.distance.toFixed(3)}
+                    </Typography>
+                  </Box>
+                  
+                  {sessionStartTime && (
+                    <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <Typography variant="body2" fontWeight="medium">Duration:</Typography>
+                      <Typography variant="body2" fontFamily="monospace" color="primary">
+                        {formatDuration(sessionDuration)}
+                      </Typography>
+                    </Box>
+                  )}
                 </Box>
-              )}
-            </CardContent>
-          </Card>
-
-          {/* Sensitivity Settings */}
-          <Card>
-            <CardContent>
-              <Typography variant="h6" gutterBottom>
-                Sensitivity
-              </Typography>
-              
-              <Box sx={{ mb: 3 }}>
-                <Typography gutterBottom>
-                  Enter Threshold: {thresholds.thr_in.toFixed(2)}
-                </Typography>
-                <Slider
-                  value={thresholds.thr_in}
-                  onChange={(e, value) => updateThresholds({ ...thresholds, thr_in: value })}
-                  min={0.1}
-                  max={2.0}
-                  step={0.05}
-                  marks={[
-                    { value: 0.1, label: 'Sensitive' },
-                    { value: 1.0, label: 'Normal' },
-                    { value: 2.0, label: 'Strict' }
-                  ]}
-                />
-              </Box>
-              
-              <Box>
-                <Typography gutterBottom>
-                  Exit Threshold: {thresholds.thr_out.toFixed(2)}
-                </Typography>
-                <Slider
-                  value={thresholds.thr_out}
-                  onChange={(e, value) => updateThresholds({ ...thresholds, thr_out: value })}
-                  min={0.2}
-                  max={3.0}
-                  step={0.05}
-                  marks={[
-                    { value: 0.2, label: 'Sensitive' },
-                    { value: 1.5, label: 'Normal' },
-                    { value: 3.0, label: 'Strict' }
-                  ]}
-                />
-              </Box>
-            </CardContent>
-          </Card>
+              </CardContent>
+            </Card>
+          </Box>
         </Grid>
 
         {/* Right Column - Video and Visualization */}
-        <Grid item xs={12} md={8}>
+        <Grid item xs={12} md={7}>
           {/* Video Feed */}
           <Card sx={{ mb: 2 }}>
-            <CardContent>
-              <Typography variant="h6" gutterBottom>
+            <CardContent sx={{ p: 2 }}>
+              <Typography variant="h6" gutterBottom sx={{ mb: 1 }}>
                 Live Video Feed
               </Typography>
               
-              <Box sx={{ position: 'relative', textAlign: 'center' }}>
+              <Box sx={{ 
+                position: 'relative', 
+                width: '100%',
+                height: 480,
+                overflow: 'hidden',
+                borderRadius: 1
+              }}>
                 <video
                   ref={videoRef}
                   autoPlay
@@ -527,11 +508,9 @@ const RealTimeTest = () => {
                   muted
                   style={{
                     width: '100%',
-                    maxWidth: 640,
-                    height: 480,
-                    borderRadius: 8,
-                    backgroundColor: '#f0f0f0',
-                    objectFit: 'cover'
+                    height: '100%',
+                    objectFit: 'cover',
+                    backgroundColor: '#f0f0f0'
                   }}
                 />
                 <canvas
@@ -559,21 +538,24 @@ const RealTimeTest = () => {
                   </Box>
                 )}
                 
-                {isInferenceActive && (
+                {isRecognitionActive && (
                   <Box
                     sx={{
                       position: 'absolute',
-                      top: 10,
-                      right: 10,
+                      top: 8,
+                      right: 8,
                       display: 'flex',
-                      gap: 1
+                      gap: 0.5,
+                      alignItems: 'center',
+                      zIndex: 10
                     }}
                   >
-                    <Chip label="LIVE" color="error" size="small" />
+                    <Chip label="LIVE" color="error" size="small" sx={{ fontSize: '0.7rem', height: 20 }} />
                     <Chip 
                       label={currentResults.state} 
                       color={currentResults.state === 'IN' ? 'success' : 'default'} 
                       size="small" 
+                      sx={{ fontSize: '0.7rem', height: 20 }}
                     />
                   </Box>
                 )}
@@ -581,73 +563,55 @@ const RealTimeTest = () => {
             </CardContent>
           </Card>
 
-          {/* Distance Visualization */}
-          {distanceHistory.length > 0 && (
-            <Card>
-              <CardContent>
-                <Typography variant="h6" gutterBottom>
-                  Distance Timeline
-                </Typography>
-                
-                <Box sx={{ height: 300 }}>
-                  <ResponsiveContainer width="100%" height="100%">
-                    <LineChart data={distanceHistory}>
-                      <CartesianGrid strokeDasharray="3 3" />
-                      <XAxis dataKey="frame" />
-                      <YAxis />
-                      <Tooltip />
-                      <Line 
-                        type="monotone" 
-                        dataKey="distance" 
-                        stroke="#2196f3" 
-                        strokeWidth={2}
-                        dot={false}
-                      />
-                      <Line 
-                        type="monotone" 
-                        dataKey="threshold_in" 
-                        stroke="#4caf50" 
-                        strokeDasharray="5 5"
-                        dot={false}
-                      />
-                      <Line 
-                        type="monotone" 
-                        dataKey="threshold_out" 
-                        stroke="#f44336" 
-                        strokeDasharray="5 5"
-                        dot={false}
-                      />
-                    </LineChart>
-                  </ResponsiveContainer>
-                </Box>
-                
-                <Box sx={{ display: 'flex', justifyContent: 'center', gap: 2, mt: 1 }}>
-                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-                    <Box sx={{ width: 20, height: 2, bgcolor: '#2196f3' }} />
-                    <Typography variant="caption">Distance</Typography>
-                  </Box>
-                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-                    <Box sx={{ width: 20, height: 2, bgcolor: '#4caf50', borderStyle: 'dashed' }} />
-                    <Typography variant="caption">Enter Threshold</Typography>
-                  </Box>
-                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-                    <Box sx={{ width: 20, height: 2, bgcolor: '#f44336', borderStyle: 'dashed' }} />
-                    <Typography variant="caption">Exit Threshold</Typography>
-                  </Box>
-                </Box>
-              </CardContent>
-            </Card>
-          )}
         </Grid>
       </Grid>
 
       {/* Action Selector Dialog */}
-      <Dialog open={showActionSelector} onClose={() => setShowActionSelector(false)} maxWidth="sm" fullWidth>
-        <DialogTitle>Select Action</DialogTitle>
+      <Dialog 
+        open={showActionSelector} 
+        onClose={() => {
+          console.log('Action selector dialog closing');
+          setShowActionSelector(false);
+        }} 
+        maxWidth="md" 
+        fullWidth
+        PaperProps={{
+          sx: { borderRadius: 2 }
+        }}
+      >
+        <DialogTitle>
+          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <Typography variant="h6">Select Action</Typography>
+            <IconButton onClick={() => setShowActionSelector(false)}>
+              <Close />
+            </IconButton>
+          </Box>
+        </DialogTitle>
         <DialogContent>
+          {actions.length === 0 && (
+            <Alert severity="info" sx={{ mb: 2 }}>
+              Loading actions... Please wait.
+            </Alert>
+          )}
           <List>
             {actions.map((action) => (
-              <ListItem key={action.id} disablePadding>
+              <ListItem 
+                key={action.id} 
+                disablePadding
+                secondaryAction={
+                  <IconButton 
+                    edge="end" 
+                    aria-label="view demo"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      viewDemoVideo(action.id);
+                    }}
+                    color="primary"
+                  >
+                    <PlayCircleOutline />
+                  </IconButton>
+                }
+              >
                 <ListItemButton onClick={() => selectAction(action)}>
                   <ListItemText
                     primary={action.name}
@@ -675,29 +639,87 @@ const RealTimeTest = () => {
         </DialogContent>
       </Dialog>
 
-      {/* Settings Dialog */}
-      <Dialog open={showSettings} onClose={() => setShowSettings(false)} maxWidth="sm" fullWidth>
-        <DialogTitle>Settings</DialogTitle>
+
+      {/* Demo Video Dialog */}
+      <Dialog 
+        open={showDemoVideo} 
+        onClose={() => {
+          setShowDemoVideo(false);
+          setDemoVideoUrl(null);
+        }} 
+        maxWidth="md" 
+        fullWidth
+      >
+        <DialogTitle>
+          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <Typography variant="h6">Demo Video</Typography>
+            <IconButton 
+              onClick={() => {
+                setShowDemoVideo(false);
+                setDemoVideoUrl(null);
+              }}
+            >
+              <Close />
+            </IconButton>
+          </Box>
+        </DialogTitle>
         <DialogContent>
-          <Typography variant="h6" gutterBottom>
-            Inference Settings
-          </Typography>
-          
-          <FormControlLabel
-            control={
-              <Switch
-                checked={legacyMode}
-                onChange={(e) => setLegacyMode(e.target.checked)}
-              />
-            }
-            label="Enable Legacy Mode"
-            sx={{ mb: 2 }}
-          />
-          
-          <Alert severity="info">
-            Legacy mode uses the original rule-based detection system.
-            Disable to use the new AI-based action recognition.
-          </Alert>
+          {demoVideoLoading ? (
+            <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: 300 }}>
+              <Box sx={{ textAlign: 'center' }}>
+                <Typography variant="body1" color="text.secondary" gutterBottom>
+                  Loading demo video...
+                </Typography>
+              </Box>
+            </Box>
+          ) : demoVideoUrl ? (
+            <Box sx={{ 
+              position: 'relative', 
+              paddingTop: '56.25%', // 16:9 aspect ratio
+              backgroundColor: '#000',
+              borderRadius: 1,
+              overflow: 'hidden'
+            }}>
+              <video
+                controls
+                autoPlay
+                loop
+                style={{
+                  position: 'absolute',
+                  top: 0,
+                  left: 0,
+                  width: '100%',
+                  height: '100%',
+                  objectFit: 'contain'
+                }}
+              >
+                <source src={demoVideoUrl} type="video/mp4" />
+                <source src={demoVideoUrl} type="video/webm" />
+                Your browser does not support the video tag.
+              </video>
+            </Box>
+          ) : (
+            <Box sx={{ 
+              display: 'flex', 
+              flexDirection: 'column',
+              justifyContent: 'center', 
+              alignItems: 'center', 
+              minHeight: 300,
+              backgroundColor: 'grey.100',
+              borderRadius: 1,
+              p: 3
+            }}>
+              <VideocamOff sx={{ fontSize: 64, color: 'grey.400', mb: 2 }} />
+              <Typography variant="h6" color="text.secondary" gutterBottom>
+                No Demo Video Available
+              </Typography>
+              <Typography variant="body2" color="text.secondary" textAlign="center">
+                This action doesn't have a demonstration video yet. 
+                <br />
+                Demo videos are recorded during action creation.
+              </Typography>
+            </Box>
+          )}
         </DialogContent>
       </Dialog>
     </Box>

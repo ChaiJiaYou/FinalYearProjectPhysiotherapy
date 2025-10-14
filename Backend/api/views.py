@@ -10,10 +10,10 @@ from django.views.decorators.csrf import csrf_exempt
 from django.middleware.csrf import get_token
 from django.shortcuts import get_object_or_404
 from django.utils.timezone import localtime, now, make_aware
-from .models import CustomUser, Admin, Patient, Therapist, Appointment, Notification, TreatmentTemplate, TemplateExercise, Treatment, TreatmentExercise, Exercise
+from .models import CustomUser, Admin, Patient, Therapist, Appointment, Notification, Treatment, TreatmentExercise, Exercise, MedicalHistory
 import time
 import json
-from .serializers import CustomUserSerializer, AppointmentSerializer, PatientHistorySerializer, NotificationSerializer
+from .serializers import CustomUserSerializer, AppointmentSerializer, PatientHistorySerializer, NotificationSerializer, MedicalHistorySerializer
 from django.utils.dateparse import parse_datetime
 from django.db import transaction
 from django.contrib.auth import login
@@ -46,7 +46,6 @@ def login_view(request):
     # Check specifically for A0001
     specific_user = CustomUser.objects.filter(id='A0001').first()
     if specific_user:
-        print(f"Found A0001 user: {specific_user.username}, Status: {specific_user.status}")
         password_test = specific_user.check_password('chai030513')
         print(f"Password test for A0001: {password_test}")
     else:
@@ -546,7 +545,7 @@ def get_patient_appointments(request):
         return Response({"error": "Missing patient_id"}, status=status.HTTP_400_BAD_REQUEST)
 
     # Retrieve all appointments for this patient
-    appointments = Appointment.objects.filter(patientId__id=patient_id).order_by("-appointmentDateTime")
+    appointments = Appointment.objects.filter(patient_id__id=patient_id).order_by("-start_at")
     
     serializer = AppointmentSerializer(appointments, many=True)
     return Response(serializer.data, status=status.HTTP_200_OK)
@@ -674,18 +673,94 @@ def get_patient_history(request):
 def get_patient_detail(request, patient_id):
     try:
         print(f"Fetching patient detail for ID: {patient_id}, type: {type(patient_id)}")
-        # Get patient with related user data and medical histories
-        patient = Patient.objects.select_related('user').prefetch_related(
-            'user__medical_histories'
-        ).get(id=patient_id)
+        
+        # Try to get patient by user ID first (string ID like P2506001)
+        try:
+            patient = Patient.objects.select_related('user').prefetch_related(
+                'user__medical_histories'
+            ).get(user__id=patient_id)
+        except Patient.DoesNotExist:
+            # If not found by user ID, try by patient ID (numeric)
+            try:
+                patient = Patient.objects.select_related('user').prefetch_related(
+                    'user__medical_histories'
+                ).get(id=patient_id)
+            except Patient.DoesNotExist:
+                print(f"Patient not found with ID: {patient_id}")
+                return Response({'error': 'Patient not found'}, status=status.HTTP_404_NOT_FOUND)
         
         serializer = PatientHistorySerializer(patient)
         return Response(serializer.data, status=status.HTTP_200_OK)
-    except Patient.DoesNotExist:
-        print(f"Patient not found with ID: {patient_id}")
-        return Response({'error': 'Patient not found'}, status=status.HTTP_404_NOT_FOUND)
     except Exception as e:
         print(f"Error fetching patient detail: {str(e)}")
+        return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+@api_view(['POST'])
+def add_medical_history(request, patient_id):
+    try:
+        # Try to get patient by user ID first (string ID like P2506001)
+        try:
+            patient = Patient.objects.get(user__id=patient_id)
+        except Patient.DoesNotExist:
+            # If not found by user ID, try by patient ID (numeric)
+            try:
+                patient = Patient.objects.get(id=patient_id)
+            except Patient.DoesNotExist:
+                return Response({'error': 'Patient not found'}, status=status.HTTP_404_NOT_FOUND)
+        
+        user = patient.user
+        
+        # Get form data
+        data = request.data
+        
+        # Create medical history record
+        medical_history = MedicalHistory.objects.create(
+            patient_id=user,
+            recorded_by_id=request.user if request.user.is_authenticated else None,
+            past_medical_history=data.get('past_medical_history', ''),
+            surgical_history=data.get('surgical_history', ''),
+            family_history=data.get('family_history', ''),
+            medications=data.get('medications', ''),
+            allergies=data.get('allergies', ''),
+            notes=data.get('notes', '')
+        )
+        
+        # Serialize and return the created record
+        serializer = MedicalHistorySerializer(medical_history)
+        return Response(serializer.data, status=status.HTTP_201_CREATED)
+        
+    except Patient.DoesNotExist:
+        return Response({'error': 'Patient not found'}, status=status.HTTP_404_NOT_FOUND)
+    except Exception as e:
+        print(f"Error adding medical history: {str(e)}")
+        return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+@api_view(['PUT'])
+def update_medical_history(request, history_id):
+    try:
+        # Get the medical history record
+        medical_history = MedicalHistory.objects.get(id=history_id)
+        
+        # Get form data
+        data = request.data
+        
+        # Update medical history record
+        medical_history.past_medical_history = data.get('past_medical_history', medical_history.past_medical_history)
+        medical_history.surgical_history = data.get('surgical_history', medical_history.surgical_history)
+        medical_history.family_history = data.get('family_history', medical_history.family_history)
+        medical_history.medications = data.get('medications', medical_history.medications)
+        medical_history.allergies = data.get('allergies', medical_history.allergies)
+        medical_history.notes = data.get('notes', medical_history.notes)
+        medical_history.save()
+        
+        # Serialize and return the updated record
+        serializer = MedicalHistorySerializer(medical_history)
+        return Response(serializer.data, status=status.HTTP_200_OK)
+        
+    except MedicalHistory.DoesNotExist:
+        return Response({'error': 'Medical history record not found'}, status=status.HTTP_404_NOT_FOUND)
+    except Exception as e:
+        print(f"Error updating medical history: {str(e)}")
         return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 @api_view(['GET'])
@@ -696,9 +771,12 @@ def list_patients(request):
         data = [{
             'id': patient.id,
             'username': patient.username,
+            'first_name': patient.first_name,
+            'last_name': patient.last_name,
             'gender': patient.gender,
             'contact_number': patient.contact_number,
-            'email': patient.email
+            'email': patient.email,
+            'status': patient.status
         } for patient in patients]
         
         return Response(data, status=status.HTTP_200_OK)
@@ -808,150 +886,155 @@ class NotificationMarkReadView(generics.UpdateAPIView):
 
 # Treatment Management Views
 
-@api_view(['GET', 'POST'])
-def treatment_templates(request):
-    """Get all treatment templates or create a new one"""
-    try:
-        if request.method == 'GET':
-            # Return all templates for admin management (active + inactive)
-            templates = TreatmentTemplate.objects.all().prefetch_related('template_exercises__exercise_id')
-            
-            data = []
-            for template in templates:
-                template_exercises = []
-                for te in template.template_exercises.all():
-                    template_exercises.append({
-                        'exercise_id': str(te.exercise_id.exercise_id),
-                        'exercise_name': te.exercise_id.name,
-                        'body_part': te.exercise_id.body_part,
-                        'default_target_metrics': te.default_target_metrics,
-                        'default_repetitions': te.default_repetitions,
-                        'default_sets': te.default_sets,
-                        'default_pain_threshold': te.default_pain_threshold,
-                        'order_in_template': te.order_in_template,
-                        'is_required': te.is_required,
-                    })
-                
-                data.append({
-                    'template_id': str(template.template_id),
-                    'name': template.name,
-                    'treatment_type': template.treatment_type,
-                    'treatment_subtype': template.treatment_subtype,
-                    'condition': template.condition,
-                    'description': template.description,
-                    'default_frequency': template.default_frequency,
-                    'estimated_duration_weeks': template.estimated_duration_weeks,
-                    'is_active': template.is_active,
-                    'exercises': template_exercises,
-                })
-            
-            return Response(data, status=status.HTTP_200_OK)
-            
-        elif request.method == 'POST':
-            data = request.data
-            
-            # Get the therapist creating the template
-            created_by = None
-            if 'created_by' in data:
-                created_by = get_object_or_404(CustomUser, id=data['created_by'], role='therapist')
-            
-            template = TreatmentTemplate.objects.create(
-                name=data.get('name', 'Unnamed Template'),
-                treatment_type=data.get('treatment_type'),
-                treatment_subtype=data.get('treatment_subtype'),
-                condition=data.get('condition'),
-                description=data.get('description', ''),
-                default_frequency=data.get('default_frequency', ''),
-                estimated_duration_weeks=data.get('estimated_duration_weeks', 4),
-                is_active=data.get('is_active', True),
-                created_by=created_by,
-            )
-            
-            return Response({
-                'template_id': str(template.template_id),
-                'message': 'Template created successfully'
-            }, status=status.HTTP_201_CREATED)
-            
-    except Exception as e:
-        return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+# @api_view(['GET', 'POST'])
+# def treatment_templates(request):
+#     """Get all treatment templates or create a new one"""
+#     try:
+#         if request.method == 'GET':
+#             # Return all templates for admin management (active + inactive)
+#             templates = TreatmentTemplate.objects.all().prefetch_related('template_exercises__exercise_id')
+#             
+#             data = []
+#             for template in templates:
+#                 template_exercises = []
+#                 for te in template.template_exercises.all():
+#                     template_exercises.append({
+#                         'exercise_id': str(te.exercise_id.exercise_id),
+#                         'exercise_name': te.exercise_id.name,
+#                         'body_part': te.exercise_id.body_part,
+#                         'default_target_metrics': te.default_target_metrics,
+#                         'default_repetitions': te.default_repetitions,
+#                         'default_sets': te.default_sets,
+#                         'default_pain_threshold': te.default_pain_threshold,
+#                         'order_in_template': te.order_in_template,
+#                         'is_required': te.is_required,
+#                     })
+#                 
+#                 data.append({
+#                     'template_id': str(template.template_id),
+#                     'name': template.name,
+#                     'treatment_type': template.treatment_type,
+#                     'treatment_subtype': template.treatment_subtype,
+#                     'condition': template.condition,
+#                     'description': template.description,
+#                     'default_frequency': template.default_frequency,
+#                     'estimated_duration_weeks': template.estimated_duration_weeks,
+#                     'is_active': template.is_active,
+#                     'exercises': template_exercises,
+#                 })
+#             
+#             return Response(data, status=status.HTTP_200_OK)
+#             
+#         elif request.method == 'POST':
+#             data = request.data
+#             
+#             # Get the therapist creating the template
+#             created_by = None
+#             if 'created_by' in data:
+#                 created_by = get_object_or_404(CustomUser, id=data['created_by'], role='therapist')
+#             
+#             template = TreatmentTemplate.objects.create(
+#                 name=data.get('name', 'Unnamed Template'),
+#                 treatment_type=data.get('treatment_type'),
+#                 treatment_subtype=data.get('treatment_subtype'),
+#                 condition=data.get('condition'),
+#                 description=data.get('description', ''),
+#                 default_frequency=data.get('default_frequency', ''),
+#                 estimated_duration_weeks=data.get('estimated_duration_weeks', 4),
+#                 is_active=data.get('is_active', True),
+#                 created_by=created_by,
+#             )
+#             
+#             return Response({
+#                 'template_id': str(template.template_id),
+#                 'message': 'Template created successfully'
+#             }, status=status.HTTP_201_CREATED)
+#             
+#     except Exception as e:
+#         return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
-@api_view(['GET', 'PUT', 'DELETE'])
-def treatment_template_detail(request, template_id):
-    """Get, update, or delete a specific treatment template with exercises"""
-    try:
-        template = TreatmentTemplate.objects.prefetch_related('template_exercises__exercise_id').get(template_id=template_id)
-        
-        if request.method == 'GET':
-            template_exercises = []
-            for te in template.template_exercises.all():
-                template_exercises.append({
-                    'exercise_id': str(te.exercise_id.exercise_id),
-                    'exercise_name': te.exercise_id.name,
-                    'body_part': te.exercise_id.body_part,
-                    'default_target_metrics': te.default_target_metrics,
-                    'default_repetitions': te.default_repetitions,
-                    'default_sets': te.default_sets,
-                    'default_pain_threshold': te.default_pain_threshold,
-                    'order_in_template': te.order_in_template,
-                    'is_required': te.is_required,
-                })
-            
-            data = {
-                'template_id': str(template.template_id),
-                'name': template.name,
-                'treatment_type': template.treatment_type,
-                'treatment_subtype': template.treatment_subtype,
-                'condition': template.condition,
-                'description': template.description,
-                'default_frequency': template.default_frequency,
-                'estimated_duration_weeks': template.estimated_duration_weeks,
-                'is_active': template.is_active,
-                'exercises': template_exercises,
-            }
-            
-            return Response(data, status=status.HTTP_200_OK)
-            
-        elif request.method == 'PUT':
-            data = request.data
-            
-            # Update fields if provided
-            if 'name' in data:
-                template.name = data['name']
-            if 'treatment_type' in data:
-                template.treatment_type = data['treatment_type']
-            if 'treatment_subtype' in data:
-                template.treatment_subtype = data['treatment_subtype']
-            if 'condition' in data:
-                template.condition = data['condition']
-            if 'description' in data:
-                template.description = data['description']
-            if 'default_frequency' in data:
-                template.default_frequency = data['default_frequency']
-            if 'estimated_duration_weeks' in data:
-                template.estimated_duration_weeks = data['estimated_duration_weeks']
-            if 'is_active' in data:
-                template.is_active = data['is_active']
-                
-            template.save()
-            
-            return Response({'message': 'Template updated successfully'}, status=status.HTTP_200_OK)
-            
-        elif request.method == 'DELETE':
-            template.is_active = False  # Soft delete
-            template.save()
-            return Response({'message': 'Template deleted successfully'}, status=status.HTTP_200_OK)
-            
-    except TreatmentTemplate.DoesNotExist:
-        return Response({'error': 'Template not found'}, status=status.HTTP_404_NOT_FOUND)
-    except Exception as e:
-        return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+# @api_view(['GET', 'PUT', 'DELETE'])
+# def treatment_template_detail(request, template_id):
+#     """Get, update, or delete a specific treatment template with exercises"""
+#     try:
+#         template = TreatmentTemplate.objects.prefetch_related('template_exercises__exercise_id').get(template_id=template_id)
+#         
+#         if request.method == 'GET':
+#             template_exercises = []
+#             for te in template.template_exercises.all():
+#                 template_exercises.append({
+#                     'exercise_id': str(te.exercise_id.exercise_id),
+#                     'exercise_name': te.exercise_id.name,
+#                     'body_part': te.exercise_id.body_part,
+#                     'default_target_metrics': te.default_target_metrics,
+#                     'default_repetitions': te.default_repetitions,
+#                     'default_sets': te.default_sets,
+#                     'default_pain_threshold': te.default_pain_threshold,
+#                     'order_in_template': te.order_in_template,
+#                     'is_required': te.is_required,
+#                 })
+#             
+#             data = {
+#                 'template_id': str(template.template_id),
+#                 'name': template.name,
+#                 'treatment_type': template.treatment_type,
+#                 'treatment_subtype': template.treatment_subtype,
+#                 'condition': template.condition,
+#                 'description': template.description,
+#                 'default_frequency': template.default_frequency,
+#                 'estimated_duration_weeks': template.estimated_duration_weeks,
+#                 'is_active': template.is_active,
+#                 'exercises': template_exercises,
+#             }
+#             
+#             return Response(data, status=status.HTTP_200_OK)
+#             
+#         elif request.method == 'PUT':
+#             data = request.data
+#             
+#             # Update fields if provided
+#             if 'name' in data:
+#                 template.name = data['name']
+#             if 'treatment_type' in data:
+#                 template.treatment_type = data['treatment_type']
+#             if 'treatment_subtype' in data:
+#                 template.treatment_subtype = data['treatment_subtype']
+#             if 'condition' in data:
+#                 template.condition = data['condition']
+#             if 'description' in data:
+#                 template.description = data['description']
+#             if 'default_frequency' in data:
+#                 template.default_frequency = data['default_frequency']
+#             if 'estimated_duration_weeks' in data:
+#                 template.estimated_duration_weeks = data['estimated_duration_weeks']
+#             if 'is_active' in data:
+#                 template.is_active = data['is_active']
+#                 
+#             template.save()
+#             
+#             return Response({'message': 'Template updated successfully'}, status=status.HTTP_200_OK)
+#             
+#         elif request.method == 'DELETE':
+#             template.is_active = False  # Soft delete
+#             template.save()
+#             return Response({'message': 'Template deleted successfully'}, status=status.HTTP_200_OK)
+#             
+#     except TreatmentTemplate.DoesNotExist:
+#         return Response({'error': 'Template not found'}, status=status.HTTP_404_NOT_FOUND)
+#     except Exception as e:
+#         return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 @api_view(['GET', 'POST'])
 def treatments(request):
     """Get all treatments or create a new treatment plan"""
     try:
         if request.method == 'GET':
-            treatments = Treatment.objects.all().select_related('patient_id', 'therapist_id', 'template_id').order_by('-created_at')
+            # Support filtering by patient_id
+            patient_id = request.GET.get('patient_id')
+            if patient_id:
+                treatments = Treatment.objects.filter(patient_id=patient_id).select_related('patient_id', 'therapist_id').order_by('-created_at')
+            else:
+                treatments = Treatment.objects.all().select_related('patient_id', 'therapist_id').order_by('-created_at')
             
             data = []
             for treatment in treatments:
@@ -965,16 +1048,11 @@ def treatments(request):
                     'therapist_name': treatment.therapist_id.username if treatment.therapist_id else 'Unknown',
                     'therapist_id': treatment.therapist_id.id if treatment.therapist_id else '',
                     'name': treatment.name,
-                    'treatment_type': treatment.treatment_type,
-                    'treatment_subtype': treatment.treatment_subtype,
-                    'condition': treatment.condition,
                     'status': treatment.status,
-                    'frequency': treatment.frequency,
                     'start_date': treatment.start_date,
                     'end_date': treatment.end_date,
+                    'goal_notes': treatment.goal_notes,
                     'created_at': treatment.created_at,
-                    'creation_method': treatment.creation_method,
-                    'template_name': treatment.template_id.name if treatment.template_id else None,
                     'exercise_count': exercise_count,
                 })
             
@@ -987,22 +1065,14 @@ def treatments(request):
             patient = get_object_or_404(CustomUser, id=data.get('patient_id'), role='patient')
             therapist = get_object_or_404(CustomUser, id=data.get('therapist_id'), role='therapist')
             
-            # Get template if using template
-            template = None
-            if data.get('template_id'):
-                template = get_object_or_404(TreatmentTemplate, template_id=data.get('template_id'))
-            
             # Create treatment
             treatment = Treatment.objects.create(
                 patient_id=patient,
                 therapist_id=therapist,
-                template_id=template,
-                creation_method='template' if template else 'custom',
-                name=data.get('name', template.name if template else 'Unnamed Treatment'),
-                treatment_type=data.get('treatment_type'),
-                treatment_subtype=data.get('treatment_subtype'),
-                frequency=data.get('frequency'),
+                name=data.get('name', 'Unnamed Treatment'),
                 start_date=data.get('start_date'),
+                end_date=data.get('end_date'),
+                goal_notes=data.get('goal_notes'),
                 status=data.get('status', 'active'),
             )
             
@@ -1014,11 +1084,83 @@ def treatments(request):
     except Exception as e:
         return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
+@api_view(['POST'])
+def create_treatment(request):
+    """Create a new treatment plan"""
+    try:
+        data = request.data
+        print(f"DEBUG: Creating treatment with data: {data}")  # Debug log
+        
+        # Get patient and therapist
+        patient = get_object_or_404(CustomUser, id=data.get('patient_id'), role='patient')
+        # Allow admin or therapist to create treatment plans
+        therapist = get_object_or_404(CustomUser, id=data.get('therapist_id'), role__in=['therapist', 'admin'])
+        
+        # If creating an active treatment, deactivate any existing active treatments for this patient
+        if data.get('status') == 'active':
+            Treatment.objects.filter(
+                patient_id=patient,
+                status='active'
+            ).update(status='completed')
+        
+        # Create treatment
+        treatment = Treatment.objects.create(
+            patient_id=patient,
+            therapist_id=therapist,
+            name=data.get('name', 'Unnamed Treatment'),
+            start_date=data.get('start_date'),
+            end_date=data.get('end_date'),
+            goal_notes=data.get('goal_notes'),
+            status=data.get('status', 'active'),
+        )
+        print(f"DEBUG: Treatment created successfully: {treatment.treatment_id}")  # Debug log
+        
+        return Response({
+            'treatment_id': str(treatment.treatment_id),
+            'message': 'Treatment created successfully'
+        }, status=status.HTTP_201_CREATED)
+        
+    except Exception as e:
+        print(f"DEBUG: Error creating treatment: {str(e)}")  # Debug log
+        import traceback
+        traceback.print_exc()  # Print full error stack
+        return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+@api_view(['GET'])
+def patient_treatments(request, patient_id):
+    """Get active treatment for a patient (only one active treatment at a time)"""
+    try:
+        treatments = Treatment.objects.filter(
+            patient_id=patient_id, 
+            status='active'
+        ).select_related('therapist_id').order_by('-created_at')
+        
+        data = []
+        for treatment in treatments:
+            # Get exercise count
+            exercise_count = TreatmentExercise.objects.filter(treatment_id=treatment.treatment_id).count()
+            
+            data.append({
+                'treatment_id': str(treatment.treatment_id),
+                'name': treatment.name,
+                'status': treatment.status,
+                'start_date': treatment.start_date,
+                'end_date': treatment.end_date,
+                'goal_notes': treatment.goal_notes,
+                'created_at': treatment.created_at,
+                'therapist_name': treatment.therapist_id.username if treatment.therapist_id else 'Unknown',
+                'exercise_count': exercise_count,
+            })
+        
+        return Response(data, status=status.HTTP_200_OK)
+    except Exception as e:
+        return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
 @api_view(['GET'])
 def therapist_treatments(request, therapist_id):
     """Get all treatments for a therapist"""
     try:
-        treatments = Treatment.objects.filter(therapist_id=therapist_id).select_related('patient_id', 'template_id')
+        treatments = Treatment.objects.filter(therapist_id=therapist_id).select_related('patient_id')
         
         data = []
         for treatment in treatments:
@@ -1036,7 +1178,7 @@ def therapist_treatments(request, therapist_id):
                 'end_date': treatment.end_date,
                 'created_at': treatment.created_at,
                 'creation_method': treatment.creation_method,
-                'template_name': treatment.template_id.name if treatment.template_id else None,
+                'template_name': None,  # No longer using templates
             })
         
         return Response(data, status=status.HTTP_200_OK)
@@ -1047,20 +1189,37 @@ def therapist_treatments(request, therapist_id):
 def treatment_exercises(request, treatment_id):
     """Get all exercises for a treatment"""
     try:
-        exercises = TreatmentExercise.objects.filter(treatment_id=treatment_id).select_related('exercise_id')
+        exercises = TreatmentExercise.objects.filter(treatment_id=treatment_id).select_related('exercise_id', 'exercise_id__action_id')
         
         data = []
         for te in exercises:
+            # Get demo video URL from linked action's samples
+            demo_video_url = None
+            if te.exercise_id and te.exercise_id.action_id:
+                # Get the first sample video URL from the action
+                action = te.exercise_id.action_id
+                # Get the first sample for this action
+                first_sample = action.samples.first()
+                if first_sample and first_sample.video_url:
+                    demo_video_url = first_sample.video_url
+            
             data.append({
-                'exercise_id': str(te.treatment_exercise_id),
+                'treatment_exercise_id': str(te.treatment_exercise_id),
+                'exercise_id': str(te.exercise_id.exercise_id) if te.exercise_id else None,
                 'exercise_name': te.exercise_id.name if te.exercise_id else 'Custom Exercise',
-                'body_part': te.exercise_id.body_part if te.exercise_id else 'N/A',
-                'target_metrics': te.target_metrics,
-                'repetitions': te.repetitions,
+                'category': te.exercise_id.category if te.exercise_id else 'N/A',
+                'difficulty': te.exercise_id.difficulty if te.exercise_id else 'N/A',
+                'instructions': te.exercise_id.instructions if te.exercise_id else '',
+                'reps_per_set': te.reps_per_set,
                 'sets': te.sets,
-                'pain_threshold': te.pain_threshold,
+                'duration_per_set': te.duration_per_set,
+                'notes': te.notes,
                 'order_in_treatment': te.order_in_treatment,
                 'is_active': te.is_active,
+                'start_date': te.start_date,
+                'end_date': te.end_date,
+                'demo_video_url': demo_video_url,
+                'action_id': str(te.exercise_id.action_id.id) if te.exercise_id and te.exercise_id.action_id else None,
             })
         
         return Response(data, status=status.HTTP_200_OK)
@@ -1074,35 +1233,17 @@ def create_treatment_exercise(request):
         data = request.data
         
         treatment = get_object_or_404(Treatment, treatment_id=data.get('treatment_id'))
-        
-        # Try to find existing exercise or create custom one
-        exercise = None
-        exercise_name = data.get('exercise_name')
-        body_part = data.get('body_part', 'general')
-        
-        if data.get('exercise_id'):
-            exercise = get_object_or_404(Exercise, exercise_id=data.get('exercise_id'))
-        else:
-            # Create a new exercise if it doesn't exist
-            exercise, created = Exercise.objects.get_or_create(
-                name=exercise_name,
-                body_part=body_part,
-                defaults={
-                    'category': 'custom',
-                    'difficulty': 'beginner',
-                    'default_metrics': data.get('target_metrics', {}),
-                    'instructions': f'Custom exercise: {exercise_name}',
-                }
-            )
+        exercise = get_object_or_404(Exercise, exercise_id=data.get('exercise_id'))
         
         treatment_exercise = TreatmentExercise.objects.create(
             treatment_id=treatment,
             exercise_id=exercise,
-            target_metrics=data.get('target_metrics', {}),
-            repetitions=data.get('repetitions'),
-            sets=data.get('sets'),
-            pain_threshold=data.get('pain_threshold'),
+            reps_per_set=data.get('reps_per_set'),
+            sets=data.get('sets', 1),
+            duration_per_set=data.get('duration_per_set'),
+            notes=data.get('notes'),
             order_in_treatment=data.get('order_in_treatment', 1),
+            is_active=data.get('is_active', True),
         )
         
         return Response({
@@ -1130,16 +1271,11 @@ def treatment_detail(request, treatment_id):
                 'therapist_name': treatment.therapist_id.username if treatment.therapist_id else 'Unknown',
                 'therapist_id': treatment.therapist_id.id if treatment.therapist_id else '',
                 'name': treatment.name,
-                'treatment_type': treatment.treatment_type,
-                'treatment_subtype': treatment.treatment_subtype,
-                'condition': treatment.condition,
                 'status': treatment.status,
-                'frequency': treatment.frequency,
                 'start_date': treatment.start_date,
                 'end_date': treatment.end_date,
+                'goal_notes': treatment.goal_notes,
                 'created_at': treatment.created_at,
-                'creation_method': treatment.creation_method,
-                'template_name': treatment.template_id.name if treatment.template_id else None,
                 'exercise_count': exercise_count,
             }
             
@@ -1151,18 +1287,14 @@ def treatment_detail(request, treatment_id):
             # Update fields if provided
             if 'name' in data:
                 treatment.name = data['name']
-            if 'treatment_type' in data:
-                treatment.treatment_type = data['treatment_type']
-            if 'treatment_subtype' in data:
-                treatment.treatment_subtype = data['treatment_subtype']
-            if 'condition' in data:
-                treatment.condition = data['condition']
             if 'status' in data:
                 treatment.status = data['status']
-            if 'frequency' in data:
-                treatment.frequency = data['frequency']
+            if 'start_date' in data:
+                treatment.start_date = data['start_date']
             if 'end_date' in data:
                 treatment.end_date = data['end_date']
+            if 'goal_notes' in data:
+                treatment.goal_notes = data['goal_notes']
                 
             treatment.save()
             
@@ -1183,14 +1315,18 @@ def update_treatment_exercise(request, exercise_id):
         data = request.data
         
         # Update fields if provided
-        if 'target_metrics' in data:
-            exercise.target_metrics = data['target_metrics']
-        if 'repetitions' in data:
-            exercise.repetitions = data['repetitions']
+        if 'reps_per_set' in data:
+            exercise.reps_per_set = data['reps_per_set']
         if 'sets' in data:
             exercise.sets = data['sets']
-        if 'pain_threshold' in data:
-            exercise.pain_threshold = data['pain_threshold']
+        if 'duration_per_set' in data:
+            exercise.duration_per_set = data['duration_per_set']
+        if 'notes' in data:
+            exercise.notes = data['notes']
+        if 'is_active' in data:
+            exercise.is_active = data['is_active']
+        if 'order_in_treatment' in data:
+            exercise.order_in_treatment = data['order_in_treatment']
             
         exercise.save()
         
@@ -1209,21 +1345,12 @@ def list_exercises(request):
         for exercise in exercises:
             data.append({
                 'exercise_id': str(exercise.exercise_id),
-                'exercise_name': exercise.name,
-                'body_part': exercise.body_part,
+                'name': exercise.name,
                 'category': exercise.category,
                 'difficulty': exercise.difficulty,
-                'description': exercise.instructions,  # Using instructions as description for compatibility
                 'instructions': exercise.instructions,
-                'default_target_metrics': exercise.default_metrics,
-                'default_repetitions': 10,  # Default values for frontend compatibility
-                'default_sets': 3,
-                'default_pain_threshold': 5,
-                'demo_video_url': exercise.demo_video_url,
-                'created_at': exercise.created_at,
+                'action_id': str(exercise.action_id.id) if exercise.action_id else None,
                 'created_by_name': exercise.created_by.username if exercise.created_by else 'System',
-                'is_active': exercise.is_active,
-                'detection_rules': exercise.detection_rules or {},
             })
         
         return Response(data, status=status.HTTP_200_OK)
@@ -1241,14 +1368,18 @@ def create_exercise(request):
         if 'created_by' in data:
             created_by = get_object_or_404(CustomUser, id=data['created_by'], role='therapist')
         
+        # Get the action if provided
+        action_id = None
+        if data.get('action_id'):
+            from .models import Action
+            action_id = get_object_or_404(Action, id=data['action_id'])
+        
         exercise = Exercise.objects.create(
             name=data.get('name', 'Unnamed Exercise'),
-            body_part=data.get('body_part', 'general'),
-            category=data.get('category', 'general'),
+            category=data.get('category', 'upper_body'),
             difficulty=data.get('difficulty', 'beginner'),
-            default_metrics=data.get('default_metrics', {}),
             instructions=data.get('instructions', 'No instructions provided'),
-            demo_video_url=data.get('demo_video_url'),
+            action_id=action_id,
             created_by=created_by,
         )
         
@@ -1284,6 +1415,8 @@ def exercise_detail(request, exercise_id):
                 'created_at': exercise.created_at,
                 'created_by_name': exercise.created_by.username if exercise.created_by else 'System',
                 'detection_rules': exercise.detection_rules or {},
+                'action_id': str(exercise.action_id.id) if exercise.action_id else None,
+                'action_name': exercise.action_id.name if exercise.action_id else None,
             }
             return Response(data, status=status.HTTP_200_OK)
             
@@ -1291,34 +1424,28 @@ def exercise_detail(request, exercise_id):
             data = request.data
             
             # Update fields if provided
-            if 'exercise_name' in data:
-                exercise.name = data['exercise_name']
-            if 'body_part' in data:
-                exercise.body_part = data['body_part']
+            if 'name' in data:
+                exercise.name = data['name']
             if 'category' in data:
                 exercise.category = data['category']
             if 'difficulty' in data:
                 exercise.difficulty = data['difficulty']
-            if 'description' in data:
-                exercise.instructions = data['description']
             if 'instructions' in data:
                 exercise.instructions = data['instructions']
-            if 'default_target_metrics' in data:
-                exercise.default_metrics = data['default_target_metrics']
-            if 'demo_video_url' in data:
-                exercise.demo_video_url = data['demo_video_url']
-            if 'is_active' in data:
-                exercise.is_active = data['is_active']
-            if 'detection_rules' in data:
-                exercise.detection_rules = data['detection_rules'] or {}
+            if 'action_id' in data:
+                if data['action_id']:  # If action_id is provided and not empty
+                    from .models import Action
+                    action = get_object_or_404(Action, id=data['action_id'])
+                    exercise.action_id = action
+                else:  # If action_id is empty string, set to None
+                    exercise.action_id = None
                 
             exercise.save()
             
             return Response({'message': 'Exercise updated successfully'}, status=status.HTTP_200_OK)
             
         elif request.method == 'DELETE':
-            exercise.is_active = False  # Soft delete
-            exercise.save()
+            exercise.delete()  # Hard delete
             return Response({'message': 'Exercise deleted successfully'}, status=status.HTTP_200_OK)
             
     except Exercise.DoesNotExist:
@@ -1460,6 +1587,72 @@ def list_actions(request):
         return JsonResponse({'error': str(e)}, status=500)
 
 
+@api_view(['DELETE'])
+def delete_action(request, action_id):
+    """
+    Delete an action and all associated data:
+    - Delete all ActionSample records and their video files
+    - Delete all ActionTemplate records
+    - Set action_id to NULL for all linked Exercise records
+    - Delete the Action record itself
+    """
+    try:
+        import os
+        from django.conf import settings
+        
+        action = Action.objects.get(id=action_id)
+        action_name = action.name
+        
+        # 1. Get all samples and delete their video files
+        samples = ActionSample.objects.filter(action=action)
+        deleted_videos = 0
+        for sample in samples:
+            if sample.video_url:
+                # Handle both relative URLs and absolute paths
+                if sample.video_url.startswith('/media/'):
+                    # Relative URL - construct full path
+                    video_path = os.path.join(settings.BASE_DIR, sample.video_url.lstrip('/'))
+                else:
+                    # Absolute path (legacy)
+                    video_path = sample.video_url
+                
+                if os.path.exists(video_path):
+                    try:
+                        os.remove(video_path)
+                        deleted_videos += 1
+                    except Exception as e:
+                        print(f"Failed to delete video file {video_path}: {e}")
+        
+        # Count records before deletion
+        template_count = ActionTemplate.objects.filter(action=action).count()
+        sample_count = samples.count()
+        
+        # 2. Update all linked exercises (set action_id to NULL)
+        # Note: This happens automatically due to on_delete=SET_NULL, but we'll count them
+        linked_exercises = Exercise.objects.filter(action_id=action).count()
+        
+        # 3. Delete the action (this will CASCADE delete samples and templates)
+        action.delete()
+        
+        return JsonResponse({
+            'success': True,
+            'message': f'Action "{action_name}" deleted successfully',
+            'details': {
+                'templates_deleted': template_count,
+                'samples_deleted': sample_count,
+                'videos_deleted': deleted_videos,
+                'exercises_unlinked': linked_exercises
+            }
+        })
+        
+    except Action.DoesNotExist:
+        return JsonResponse({'error': 'Action not found'}, status=404)
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return JsonResponse({'error': str(e)}, status=500)
+
+
 @api_view(['POST'])
 @parser_classes([MultiPartParser, FormParser])
 def upload_record(request, action_id):
@@ -1489,10 +1682,12 @@ def upload_record(request, action_id):
                 for chunk in video_file.chunks():
                     f.write(chunk)
             
-            # Create sample record
+            # Create sample record with relative URL
+            # Convert absolute path to relative URL for web access
+            relative_url = f"/media/action_videos/{video_filename}"
             sample = ActionSample.objects.create(
                 action=action,
-                video_url=video_path,
+                video_url=relative_url,
                 fps=fps
             )
             
@@ -1552,7 +1747,6 @@ def finalize_action(request, action_id):
 def infer_stream(request):
     """Real-time inference endpoint for DTW-based action recognition"""
     try:
-        print(f"DEBUG infer_stream: content_type = {request.content_type}")
         features = None
         update_thresholds = None
         
@@ -1571,7 +1765,6 @@ def infer_stream(request):
                     return JsonResponse(frame_result, status=400)
                 
                 features = frame_result['features']
-                print(f"DEBUG infer_stream: Extracted features from image, shape: {np.array(features).shape if features else 'None'}")
                 
                 # Check for threshold updates in form data
                 thr_in = request.POST.get('thr_in')
@@ -1581,7 +1774,6 @@ def infer_stream(request):
                         'thr_in': float(thr_in),
                         'thr_out': float(thr_out)
                     }
-                    print(f"DEBUG infer_stream: Threshold updates from form: {update_thresholds}")
                 else:
                     update_thresholds = None
             else:
@@ -1607,15 +1799,11 @@ def infer_stream(request):
             update_thresholds = payload.get('update_thresholds')
         
         # Run DTW inference
-        print(f"DEBUG infer_stream: About to call dtw_infer_update with features type: {type(features)}, update_thresholds: {update_thresholds}")
-        print(f"DEBUG infer_stream: features is None: {features is None}")
-        print(f"DEBUG infer_stream: features length: {len(features) if features else 'N/A'}")
         
         inference_payload = {
             'features': features,
             'update_thresholds': update_thresholds
         }
-        print(f"DEBUG infer_stream: inference_payload: {inference_payload}")
         
         result = dtw_infer_update(inference_payload)
         # Ensure debug observability fields
@@ -1625,11 +1813,9 @@ def infer_stream(request):
             # If missing, keep 'OK' as default
             dbg.setdefault('reason_code', 'OK')
             result['debug'] = dbg
-        print(f"DEBUG infer_stream: Got result from dtw_infer_update: {result}")
         return JsonResponse(result)
         
     except Exception as e:
-        print(f"DEBUG infer_stream: Exception occurred: {e}")
         import traceback
         traceback.print_exc()
         return JsonResponse({'error': str(e)}, status=500)
@@ -1697,6 +1883,7 @@ def action_detail(request, action_id):
             sample_data.append({
                 'id': sample.id,
                 'has_video': bool(sample.video_url),
+                'video_url': sample.video_url if sample.video_url else None,
                 'has_keypoints': bool(sample.keypoints_json),
                 'fps': sample.fps,
                 'created_at': sample.created_at.isoformat()

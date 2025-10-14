@@ -2,10 +2,6 @@ import React, { useState, useEffect } from "react";
 import {
   Box,
   Typography,
-  Grid,
-  Card,
-  CardContent,
-  CardActions,
   Button,
   TextField,
   InputAdornment,
@@ -14,7 +10,14 @@ import {
   CircularProgress,
   Alert,
   Paper,
-  Stack,
+  Table,
+  TableBody,
+  TableCell,
+  TableContainer,
+  TableHead,
+  TableRow,
+  TablePagination,
+  
 } from "@mui/material";
 import {
   Search as SearchIcon,
@@ -33,6 +36,8 @@ const PatientListPage = () => {
   const [filteredPatients, setFilteredPatients] = useState([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
+  const [page, setPage] = useState(0);
+  const [rowsPerPage, setRowsPerPage] = useState(10);
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -62,12 +67,18 @@ const PatientListPage = () => {
   };
 
   const filterPatients = () => {
+    // Filter out inactive patients first
+    const activePatients = patients.filter(patient => {
+      const user = patient.user;
+      return user.is_active !== false; // Only show active patients
+    });
+
     if (!searchTerm.trim()) {
-      setFilteredPatients(patients);
+      setFilteredPatients(activePatients);
       return;
     }
 
-    const filtered = patients.filter(patient => {
+    const filtered = activePatients.filter(patient => {
       const user = patient.user;
       return (
         user.username.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -81,6 +92,15 @@ const PatientListPage = () => {
 
   const handleViewPatient = (patientId) => {
     navigate(`/home/patients/${patientId}`);
+  };
+
+  const handleChangePage = (event, newPage) => {
+    setPage(newPage);
+  };
+
+  const handleChangeRowsPerPage = (event) => {
+    setRowsPerPage(parseInt(event.target.value, 10));
+    setPage(0);
   };
 
   const convertBinaryToUrl = (binaryData) => {
@@ -125,42 +145,27 @@ const PatientListPage = () => {
     );
   }
 
+  // Get current page data
+  const paginatedPatients = filteredPatients.slice(
+    page * rowsPerPage,
+    page * rowsPerPage + rowsPerPage
+  );
+
   return (
     <Box sx={{ p: { xs: 2, md: 4 }, backgroundColor: "#f8fafc", minHeight: "100vh" }}>
       {/* Header Section */}
-      <Paper
-        elevation={0}
-        sx={{
-          p: 3,
-          mb: 3,
-          borderRadius: 2,
-          bgcolor: "white",
-          border: "1px solid",
-          borderColor: "grey.200",
-        }}
-      >
-        <Typography variant="h4" fontWeight="bold" color="text.primary" gutterBottom>
-          Patient Management
-        </Typography>
-        <Typography variant="body1" color="text.secondary">
-          Search and view detailed information about patients
-        </Typography>
-      </Paper>
-
-      {/* Search Section */}
-      <Paper
-        elevation={0}
-        sx={{
-          p: 3,
-          mb: 3,
-          borderRadius: 2,
-          bgcolor: "white",
-          border: "1px solid",
-          borderColor: "grey.200",
-        }}
-      >
+      <Box sx={{ mb: 3, display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+        <Box>
+          <Typography variant="h4" fontWeight="bold" color="text.primary" gutterBottom>
+            Patient Management
+          </Typography>
+          <Typography variant="body1" color="text.secondary">
+            View and manage active patients in the system
+          </Typography>
+        </Box>
+        
+        {/* Search Section */}
         <TextField
-          fullWidth
           placeholder="Search by name, ID, IC number, or email..."
           value={searchTerm}
           onChange={(e) => setSearchTerm(e.target.value)}
@@ -171,160 +176,192 @@ const PatientListPage = () => {
               </InputAdornment>
             ),
           }}
-          sx={{ maxWidth: 500 }}
+          sx={{ 
+            width: 900,
+            '& .MuiOutlinedInput-root': {
+              borderRadius: 2,
+            }
+          }}
         />
-        
-        <Box sx={{ mt: 2 }}>
-          <Typography variant="body2" color="text.secondary">
-            Showing {filteredPatients.length} of {patients.length} patients
-          </Typography>
-        </Box>
-      </Paper>
+      </Box>
 
-      {/* Patients Grid */}
+      {/* Patients Table */}
       {filteredPatients.length === 0 ? (
         <Alert severity="info" sx={{ mt: 2 }}>
           {patients.length === 0 
             ? "No patients found in the system."
-            : "No patients match your search criteria."
+            : "No active patients match your search criteria."
           }
         </Alert>
       ) : (
-        <Grid container spacing={3}>
-          {filteredPatients.map((patient) => {
-            const user = patient.user;
-            const avatarUrl = user.avatar ? convertBinaryToUrl(user.avatar) : null;
-            
-            return (
-              <Grid item xs={12} md={6} lg={4} key={patient.id}>
-                <Card 
-                  elevation={2}
-                  sx={{ 
-                    height: '100%',
-                    display: 'flex',
-                    flexDirection: 'column',
-                    transition: 'all 0.3s ease',
-                    '&:hover': {
-                      transform: 'translateY(-4px)',
-                      boxShadow: 4,
-                    },
-                  }}
-                >
-                  <CardContent sx={{ flexGrow: 1, p: 3 }}>
-                    {/* Avatar and Basic Info */}
-                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, mb: 2 }}>
-                      <Avatar
-                        src={avatarUrl || "/static/images/defaultAvatar.png"}
-                        sx={{
-                          width: 60,
-                          height: 60,
-                          border: "2px solid",
-                          borderColor: alpha(getGenderColor(user.gender), 0.3),
-                        }}
-                      >
-                        <PersonIcon />
-                      </Avatar>
-                      <Box sx={{ flexGrow: 1 }}>
-                        <Typography variant="h6" fontWeight="600" color="text.primary">
-                          {user.username}
-                        </Typography>
-                        <Typography variant="body2" color="text.secondary">
-                          ID: {user.id}
-                        </Typography>
-                        <Box sx={{ display: 'flex', gap: 1, mt: 1 }}>
-                          {user.gender && (
-                            <Chip
-                              label={user.gender}
-                              size="small"
-                              sx={{
-                                bgcolor: alpha(getGenderColor(user.gender), 0.1),
-                                color: getGenderColor(user.gender),
-                                fontWeight: "600",
-                              }}
-                            />
-                          )}
-                          {user.dob && (
-                            <Chip
-                              label={`Age ${calculateAge(user.dob)}`}
-                              size="small"
-                              variant="outlined"
-                            />
-                          )}
-                        </Box>
-                      </Box>
-                    </Box>
-
-                    {/* Contact Information */}
-                    <Stack spacing={1}>
-                      {user.ic && (
-                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                          <BadgeIcon sx={{ fontSize: 16, color: 'text.secondary' }} />
-                          <Typography variant="body2" color="text.secondary">
-                            IC: {user.ic}
-                          </Typography>
-                        </Box>
-                      )}
-                      
-                      {user.email && (
-                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                          <EmailIcon sx={{ fontSize: 16, color: 'text.secondary' }} />
-                          <Typography variant="body2" color="text.secondary" noWrap>
-                            {user.email}
-                          </Typography>
-                        </Box>
-                      )}
-                      
-                      {user.contact_number && (
-                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                          <PhoneIcon sx={{ fontSize: 16, color: 'text.secondary' }} />
-                          <Typography variant="body2" color="text.secondary">
-                            {user.contact_number}
-                          </Typography>
-                        </Box>
-                      )}
-                      
-                      {patient.emergency_contact && (
-                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                          <PhoneIcon sx={{ fontSize: 16, color: 'error.main' }} />
-                          <Typography variant="body2" color="error.main">
-                            Emergency: {patient.emergency_contact}
-                          </Typography>
-                        </Box>
-                      )}
-                    </Stack>
-
-                    {/* Medical History Count */}
-                    <Box sx={{ mt: 2, pt: 2, borderTop: 1, borderColor: 'grey.200' }}>
-                      <Typography variant="body2" color="text.secondary">
-                        <strong>Medical Records:</strong> {patient.medical_histories ? patient.medical_histories.length : 0}
-                      </Typography>
-                      {patient.medical_histories && patient.medical_histories.length > 0 && (
-                        <Typography variant="body2" color="text.secondary">
-                          <strong>Last Visit:</strong> {patient.medical_histories[0].session_date}
-                        </Typography>
-                      )}
-                    </Box>
-                  </CardContent>
-
-                  <CardActions sx={{ p: 2, pt: 0 }}>
-                    <Button
-                      fullWidth
-                      variant="contained"
-                      startIcon={<ViewIcon />}
-                      onClick={() => handleViewPatient(patient.id)}
-                      sx={{
-                        bgcolor: "primary.main",
-                        "&:hover": { bgcolor: "primary.dark" },
+        <Paper
+          elevation={0}
+          sx={{
+            borderRadius: 3,
+            border: "1px solid",
+            borderColor: "grey.200",
+            overflow: "hidden",
+          }}
+        >
+          <TableContainer>
+            <Table>
+              <TableHead>
+                <TableRow sx={{ bgcolor: "grey.50" }}>
+                  <TableCell sx={{ fontWeight: 600, color: "text.primary" }}>Patient</TableCell>
+                  <TableCell sx={{ fontWeight: 600, color: "text.primary" }}>ID</TableCell>
+                  <TableCell sx={{ fontWeight: 600, color: "text.primary" }}>Gender</TableCell>
+                  <TableCell sx={{ fontWeight: 600, color: "text.primary" }}>Age</TableCell>
+                  <TableCell sx={{ fontWeight: 600, color: "text.primary" }}>Contact</TableCell>
+                  <TableCell sx={{ fontWeight: 600, color: "text.primary" }}>Medical Records</TableCell>
+                  <TableCell sx={{ fontWeight: 600, color: "text.primary" }}>Actions</TableCell>
+                </TableRow>
+              </TableHead>
+              <TableBody>
+                {paginatedPatients.map((patient) => {
+                  const user = patient.user;
+                  const avatarUrl = user.avatar ? convertBinaryToUrl(user.avatar) : null;
+                  
+                  return (
+                    <TableRow 
+                      key={patient.id}
+                      sx={{ 
+                        '&:hover': { 
+                          bgcolor: 'grey.50' 
+                        } 
                       }}
                     >
-                      View Details
-                    </Button>
-                  </CardActions>
-                </Card>
-              </Grid>
-            );
-          })}
-        </Grid>
+                      {/* Patient Info */}
+                      <TableCell>
+                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+                          <Avatar
+                            src={avatarUrl || "/static/images/defaultAvatar.png"}
+                            sx={{
+                              width: 40,
+                              height: 40,
+                              border: "2px solid",
+                              borderColor: alpha(getGenderColor(user.gender), 0.3),
+                            }}
+                          >
+                            <PersonIcon />
+                          </Avatar>
+                          <Box>
+                            <Typography variant="body1" fontWeight="600" color="text.primary">
+                              {user.username}
+                            </Typography>
+                          </Box>
+                        </Box>
+                      </TableCell>
+
+                      {/* Patient ID */}
+                      <TableCell>
+                        <Typography variant="body2" color="text.primary" fontWeight="500">
+                          {user.id}
+                        </Typography>
+                      </TableCell>
+
+                      {/* Gender */}
+                      <TableCell>
+                        {user.gender && (
+                          <Chip
+                            label={user.gender}
+                            size="small"
+                            sx={{
+                              bgcolor: alpha(getGenderColor(user.gender), 0.1),
+                              color: getGenderColor(user.gender),
+                              fontWeight: "600",
+                              height: 32,
+                              borderRadius: 2,
+                            }}
+                          />
+                        )}
+                      </TableCell>
+
+                      {/* Age */}
+                      <TableCell>
+                        {user.dob && (
+                          <Typography variant="body2" color="text.secondary">
+                            {calculateAge(user.dob)} years
+                          </Typography>
+                        )}
+                      </TableCell>
+
+                      {/* Contact Info */}
+                      <TableCell>
+                        <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.5 }}>
+                          {user.email && (
+                            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                              <EmailIcon sx={{ fontSize: 16, color: 'text.secondary' }} />
+                              <Typography variant="body2" color="text.secondary" noWrap>
+                                {user.email}
+                              </Typography>
+                            </Box>
+                          )}
+                          {user.contact_number && (
+                            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                              <PhoneIcon sx={{ fontSize: 16, color: 'text.secondary' }} />
+                              <Typography variant="body2" color="text.secondary">
+                                {user.contact_number}
+                              </Typography>
+                            </Box>
+                          )}
+                        </Box>
+                      </TableCell>
+
+                      {/* Medical Records */}
+                      <TableCell>
+                        <Typography variant="body2" color="text.secondary">
+                          {patient.medical_histories ? patient.medical_histories.length : 0} records
+                        </Typography>
+                        {patient.medical_histories && patient.medical_histories.length > 0 && (
+                          <Typography variant="body2" color="text.secondary" sx={{ fontSize: '0.75rem' }}>
+                            Last: {patient.medical_histories[0].session_date}
+                          </Typography>
+                        )}
+                      </TableCell>
+
+                      {/* Actions */}
+                      <TableCell>
+                        <Button
+                          variant="contained"
+                          startIcon={<ViewIcon />}
+                          onClick={() => handleViewPatient(patient.user.id)}
+                          sx={{
+                            bgcolor: "#3b82f6",
+                            color: "white",
+                            borderRadius: 2,
+                            textTransform: "uppercase",
+                            fontWeight: 600,
+                            px: 3,
+                            "&:hover": { 
+                              bgcolor: "#2563eb" 
+                            },
+                          }}
+                        >
+                          View Details
+                        </Button>
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
+              </TableBody>
+            </Table>
+          </TableContainer>
+          
+          {/* Pagination */}
+          <TablePagination
+            rowsPerPageOptions={[5, 10, 25]}
+            component="div"
+            count={filteredPatients.length}
+            rowsPerPage={rowsPerPage}
+            page={page}
+            onPageChange={handleChangePage}
+            onRowsPerPageChange={handleChangeRowsPerPage}
+            sx={{
+              borderTop: 1,
+              borderColor: 'grey.200',
+            }}
+          />
+        </Paper>
       )}
     </Box>
   );

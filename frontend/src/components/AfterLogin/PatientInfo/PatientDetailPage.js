@@ -10,18 +10,18 @@ import {
   Paper,
   Tab,
   Tabs,
-  Table,
-  TableBody,
-  TableCell,
-  TableContainer,
-  TableHead,
-  TableRow,
   Alert,
   CircularProgress,
   Button,
   Divider,
   Stack,
   IconButton,
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  DialogActions,
+  TextField,
+  Tooltip,
 } from "@mui/material";
 import {
   Person as PersonIcon,
@@ -34,7 +34,11 @@ import {
   FitnessCenter as ExerciseIcon,
   LocalHospital as MedicalIcon,
   ArrowBack as BackIcon,
+  Edit as EditIcon,
+  Schedule,
+  Notes,
   HealthAndSafety as EmergencyIcon,
+  Add as AddIcon,
 } from "@mui/icons-material";
 import { useParams, useNavigate } from "react-router-dom";
 import { toast } from "react-toastify";
@@ -52,6 +56,20 @@ const PatientDetailPage = () => {
   const [loading, setLoading] = useState(true);
   const [tabValue, setTabValue] = useState(0);
   const [avatarUrl, setAvatarUrl] = useState("");
+  
+  // Edit modal states
+  const [editModalOpen, setEditModalOpen] = useState(false);
+  const [editModalLoading, setEditModalLoading] = useState(false);
+  const [editingHistory, setEditingHistory] = useState(null);
+  const [editFormData, setEditFormData] = useState({
+    past_medical_history: '',
+    surgical_history: '',
+    family_history: '',
+    medications: '',
+    allergies: '',
+    notes: ''
+  });
+  
 
   useEffect(() => {
     if (patientId) {
@@ -61,12 +79,14 @@ const PatientDetailPage = () => {
 
   const fetchPatientData = async () => {
     try {
+      console.log("DEBUG - Starting to fetch patient data for patientId:", patientId);
       setLoading(true);
       await Promise.all([
         fetchPatientDetail(),
         fetchPatientTreatments(),
         fetchPatientAppointments(),
       ]);
+      console.log("DEBUG - Finished fetching all patient data");
     } catch (error) {
       console.error("Error fetching patient data:", error);
       toast.error("Failed to fetch patient information");
@@ -110,13 +130,26 @@ const PatientDetailPage = () => {
 
   const fetchPatientAppointments = async () => {
     try {
-      const response = await fetch(`http://127.0.0.1:8000/api/patient-appointments/?patient_id=${patientId}`);
+      console.log("DEBUG - Fetching appointments for patientId:", patientId);
+      const url = `http://127.0.0.1:8000/api/appointments/list/?scope=patient&user_id=${patientId}`;
+      console.log("DEBUG - API URL:", url);
+      
+      const response = await fetch(url);
+      console.log("DEBUG - Response status:", response.status);
+      console.log("DEBUG - Response ok:", response.ok);
+      
       if (response.ok) {
         const data = await response.json();
-        setAppointments(data);
+        console.log("DEBUG - Response data:", data);
+        console.log("DEBUG - Appointments array:", data.appointments);
+        console.log("DEBUG - Appointments length:", data.appointments?.length || 0);
+        setAppointments(data.appointments || []);
+      } else {
+        const errorText = await response.text();
+        console.error("DEBUG - Response not ok:", response.status, errorText);
       }
     } catch (error) {
-      console.error("Error fetching appointments:", error);
+      console.error("DEBUG - Error fetching appointments:", error);
     }
   };
 
@@ -194,6 +227,80 @@ const PatientDetailPage = () => {
     setTabValue(newValue);
   };
 
+  const handleAddMedicalHistory = () => {
+    navigate(`/home/patients/${patientId}/add-medical-history`);
+  };
+
+  const handleEditMedicalHistory = (history) => {
+    setEditingHistory(history);
+    setEditFormData({
+      past_medical_history: history.past_medical_history || '',
+      surgical_history: history.surgical_history || '',
+      family_history: history.family_history || '',
+      medications: history.medications || '',
+      allergies: history.allergies || '',
+      notes: history.notes || ''
+    });
+    setEditModalOpen(true);
+  };
+
+  const handleCloseEditModal = () => {
+    setEditModalOpen(false);
+    setEditingHistory(null);
+    setEditFormData({
+      past_medical_history: '',
+      surgical_history: '',
+      family_history: '',
+      medications: '',
+      allergies: '',
+      notes: ''
+    });
+  };
+
+  const handleEditInputChange = (field) => (event) => {
+    setEditFormData(prev => ({
+      ...prev,
+      [field]: event.target.value
+    }));
+  };
+
+  const handleSubmitEditMedicalHistory = async () => {
+    try {
+      setEditModalLoading(true);
+      
+      // Check if at least one field is filled
+      const hasData = Object.values(editFormData).some(value => value.trim() !== '');
+      if (!hasData) {
+        toast.error('Please fill in at least one field');
+        return;
+      }
+
+      const response = await fetch(`http://127.0.0.1:8000/api/update-medical-history/${editingHistory.id}/`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(editFormData),
+      });
+
+      if (response.ok) {
+        toast.success('Medical history updated successfully');
+        handleCloseEditModal();
+        // Refresh patient data to show updated medical history
+        fetchPatientData();
+      } else {
+        const errorData = await response.json();
+        toast.error(errorData.error || 'Failed to update medical history');
+      }
+    } catch (error) {
+      console.error('Error updating medical history:', error);
+      toast.error('Something went wrong while updating medical history');
+    } finally {
+      setEditModalLoading(false);
+    }
+  };
+
+
   const TabPanel = ({ children, value, index }) => (
     <div hidden={value !== index}>
       {value === index && <Box sx={{ pt: 3 }}>{children}</Box>}
@@ -221,19 +328,8 @@ const PatientDetailPage = () => {
   return (
     <Box sx={{ p: { xs: 2, md: 4 }, backgroundColor: "#f8fafc", minHeight: "100vh" }}>
       {/* Header Section */}
-      <Paper
-        elevation={0}
-        sx={{
-          p: 3,
-          mb: 3,
-          borderRadius: 2,
-          bgcolor: "white",
-          border: "1px solid",
-          borderColor: "grey.200",
-        }}
-      >
-        <Box display="flex" alignItems="center" justifyContent="space-between">
-          <Box display="flex" alignItems="center" gap={2}>
+      <Box sx={{ mb: 3 }}>
+        <Box display="flex" alignItems="center" gap={2} mb={2}>
             <IconButton onClick={() => navigate('/home/patients')} color="primary">
               <BackIcon />
             </IconButton>
@@ -247,7 +343,6 @@ const PatientDetailPage = () => {
             </Box>
           </Box>
         </Box>
-      </Paper>
 
       <Grid container spacing={3}>
         {/* Left Column - Patient Basic Info */}
@@ -312,16 +407,6 @@ const PatientDetailPage = () => {
             </Typography>
             
             <Stack spacing={2}>
-              {user.ic && (
-                <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
-                  <BadgeIcon sx={{ color: 'text.secondary' }} />
-                  <Box>
-                    <Typography variant="body2" color="text.secondary">IC Number</Typography>
-                    <Typography variant="body1" fontWeight="500">{user.ic}</Typography>
-                  </Box>
-                </Box>
-              )}
-              
               {user.email && (
                 <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
                   <EmailIcon sx={{ color: 'text.secondary' }} />
@@ -400,7 +485,7 @@ const PatientDetailPage = () => {
               <Grid item xs={6}>
                 <Box textAlign="center">
                   <Typography variant="h4" color="info.main" fontWeight="bold">
-                    {appointments.length}
+                    {appointments.filter(apt => apt.status === 'Completed' || apt.status === 'Scheduled').length}
                   </Typography>
                   <Typography variant="body2" color="text.secondary">Appointments</Typography>
                 </Box>
@@ -451,32 +536,184 @@ const PatientDetailPage = () => {
             {/* Medical History Tab */}
             <TabPanel value={tabValue} index={0}>
               <Box sx={{ p: 3 }}>
-                <Typography variant="h6" gutterBottom>Medical History Records</Typography>
+                <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
+                  <Typography variant="h6">Medical History Records</Typography>
+                  <Button
+                    variant="contained"
+                    startIcon={<AddIcon />}
+                    onClick={handleAddMedicalHistory}
+                    sx={{
+                      bgcolor: "#3b82f6",
+                      color: "white",
+                      borderRadius: 2,
+                      textTransform: "uppercase",
+                      fontWeight: 600,
+                      px: 3,
+                      "&:hover": { 
+                        bgcolor: "#2563eb" 
+                      },
+                    }}
+                  >
+                    Add Medical History
+                  </Button>
+                </Box>
                 {patient.medical_histories && patient.medical_histories.length > 0 ? (
-                  <TableContainer>
-                    <Table>
-                      <TableHead>
-                        <TableRow>
-                          <TableCell>Session Date</TableCell>
-                          <TableCell>Description</TableCell>
-                          <TableCell>Objective Findings</TableCell>
-                          <TableCell>Treatment</TableCell>
-                          <TableCell>Remarks</TableCell>
-                        </TableRow>
-                      </TableHead>
-                      <TableBody>
+                  <Grid container spacing={3}>
                         {patient.medical_histories.map((history, index) => (
-                          <TableRow key={index}>
-                            <TableCell>{formatDate(history.session_date)}</TableCell>
-                            <TableCell>{history.description || 'N/A'}</TableCell>
-                            <TableCell>{history.objective_findings || 'N/A'}</TableCell>
-                            <TableCell>{history.treatment || 'N/A'}</TableCell>
-                            <TableCell>{history.remarks || 'N/A'}</TableCell>
-                          </TableRow>
-                        ))}
-                      </TableBody>
-                    </Table>
-                  </TableContainer>
+                      <Grid item xs={12} key={index}>
+                        <Card 
+                          sx={{ 
+                            borderRadius: 3,
+                            border: '1px solid',
+                            borderColor: 'grey.200',
+                            boxShadow: 0,
+                            overflow: 'hidden'
+                          }}
+                        >
+                          <CardContent sx={{ p: 3 }}>
+                            <Box sx={{ mb: 2, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                              <Typography variant="h6" fontWeight="bold" color="text.primary">
+                                Medical History Record #{index + 1}
+                              </Typography>
+                              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                                <Typography variant="body2" color="text.secondary">
+                                  {formatDate(history.created_at)}
+                                </Typography>
+                                <IconButton 
+                                  size="small" 
+                                  onClick={() => handleEditMedicalHistory(history)}
+                                  sx={{ 
+                                    color: 'primary.main',
+                                    '&:hover': { 
+                                      bgcolor: 'primary.50' 
+                                    }
+                                  }}
+                                >
+                                  <EditIcon fontSize="small" />
+                                </IconButton>
+                              </Box>
+                            </Box>
+                            
+                            <Grid container spacing={2}>
+                              {history.past_medical_history && (
+                                <Grid item xs={12}>
+                                  <Box sx={{ 
+                                    bgcolor: 'grey.50', 
+                                    p: 3, 
+                                    borderRadius: 2,
+                                    border: '1px solid',
+                                    borderColor: 'grey.200'
+                                  }}>
+                                    <Typography variant="subtitle1" fontWeight="bold" color="text.primary" gutterBottom>
+                                      Past Medical History
+                                    </Typography>
+                                    <Typography variant="body1" color="text.secondary" sx={{ whiteSpace: 'pre-wrap', lineHeight: 1.6 }}>
+                                      {history.past_medical_history}
+                                    </Typography>
+                                  </Box>
+                                </Grid>
+                              )}
+                              
+                              {history.surgical_history && (
+                                <Grid item xs={12}>
+                                  <Box sx={{ 
+                                    bgcolor: 'grey.50', 
+                                    p: 3, 
+                                    borderRadius: 2,
+                                    border: '1px solid',
+                                    borderColor: 'grey.200'
+                                  }}>
+                                    <Typography variant="subtitle1" fontWeight="bold" color="text.primary" gutterBottom>
+                                      Surgical History
+                                    </Typography>
+                                    <Typography variant="body1" color="text.secondary" sx={{ whiteSpace: 'pre-wrap', lineHeight: 1.6 }}>
+                                      {history.surgical_history}
+                                    </Typography>
+                                  </Box>
+                                </Grid>
+                              )}
+                              
+                              {history.family_history && (
+                                <Grid item xs={12}>
+                                  <Box sx={{ 
+                                    bgcolor: 'grey.50', 
+                                    p: 3, 
+                                    borderRadius: 2,
+                                    border: '1px solid',
+                                    borderColor: 'grey.200'
+                                  }}>
+                                    <Typography variant="subtitle1" fontWeight="bold" color="text.primary" gutterBottom>
+                                      Family History
+                                    </Typography>
+                                    <Typography variant="body1" color="text.secondary" sx={{ whiteSpace: 'pre-wrap', lineHeight: 1.6 }}>
+                                      {history.family_history}
+                                    </Typography>
+                                  </Box>
+                                </Grid>
+                              )}
+                              
+                              {history.medications && (
+                                <Grid item xs={12}>
+                                  <Box sx={{ 
+                                    bgcolor: 'grey.50', 
+                                    p: 3, 
+                                    borderRadius: 2,
+                                    border: '1px solid',
+                                    borderColor: 'grey.200'
+                                  }}>
+                                    <Typography variant="subtitle1" fontWeight="bold" color="text.primary" gutterBottom>
+                                      Medications
+                                    </Typography>
+                                    <Typography variant="body1" color="text.secondary" sx={{ whiteSpace: 'pre-wrap', lineHeight: 1.6 }}>
+                                      {history.medications}
+                                    </Typography>
+                                  </Box>
+                                </Grid>
+                              )}
+                              
+                              {history.allergies && (
+                                <Grid item xs={12}>
+                                  <Box sx={{ 
+                                    bgcolor: 'grey.50', 
+                                    p: 3, 
+                                    borderRadius: 2,
+                                    border: '1px solid',
+                                    borderColor: 'grey.200'
+                                  }}>
+                                    <Typography variant="subtitle1" fontWeight="bold" color="text.primary" gutterBottom>
+                                      Allergies
+                                    </Typography>
+                                    <Typography variant="body1" color="text.secondary" sx={{ whiteSpace: 'pre-wrap', lineHeight: 1.6 }}>
+                                      {history.allergies}
+                                    </Typography>
+                                  </Box>
+                                </Grid>
+                              )}
+                              
+                              {history.notes && (
+                                <Grid item xs={12}>
+                                  <Box sx={{ 
+                                    bgcolor: 'grey.50', 
+                                    p: 3, 
+                                    borderRadius: 2,
+                                    border: '1px solid',
+                                    borderColor: 'grey.200'
+                                  }}>
+                                    <Typography variant="subtitle1" fontWeight="bold" color="text.primary" gutterBottom>
+                                      Additional Notes
+                                    </Typography>
+                                    <Typography variant="body1" color="text.secondary" sx={{ whiteSpace: 'pre-wrap', lineHeight: 1.6 }}>
+                                      {history.notes}
+                                    </Typography>
+                                  </Box>
+                                </Grid>
+                              )}
+                            </Grid>
+                          </CardContent>
+                        </Card>
+                      </Grid>
+                    ))}
+                  </Grid>
                 ) : (
                   <Alert severity="info">No medical history records found</Alert>
                 )}
@@ -547,47 +784,341 @@ const PatientDetailPage = () => {
             <TabPanel value={tabValue} index={2}>
               <Box sx={{ p: 3 }}>
                 <Typography variant="h6" gutterBottom>Appointment History Records</Typography>
-                {appointments.length > 0 ? (
-                  <TableContainer>
-                    <Table>
-                      <TableHead>
-                        <TableRow>
-                          <TableCell>Appointment ID</TableCell>
-                          <TableCell>Date & Time</TableCell>
-                          <TableCell>Therapist</TableCell>
-                          <TableCell>Duration</TableCell>
-                          <TableCell>Status</TableCell>
-                          <TableCell>Notes</TableCell>
-                        </TableRow>
-                      </TableHead>
-                      <TableBody>
-                        {appointments.map((appointment) => (
-                          <TableRow key={appointment.appointmentId}>
-                            <TableCell>{appointment.appointmentId}</TableCell>
-                            <TableCell>{formatDateTime(appointment.appointmentDateTime)}</TableCell>
-                            <TableCell>{appointment.therapist?.username || 'N/A'}</TableCell>
-                            <TableCell>{appointment.duration} minutes</TableCell>
-                            <TableCell>
+                {(() => {
+                  const filteredAppointments = appointments.filter(appointment => 
+                    appointment.status === 'Completed' || 
+                    appointment.status === 'Scheduled'
+                  );
+                  
+                  
+                  return filteredAppointments.length > 0 ? (
+                    <Box sx={{ bgcolor: 'white', borderRadius: 2, border: '1px solid', borderColor: 'grey.200' }}>
+                      <Box sx={{ p: 2, borderBottom: '1px solid', borderColor: 'grey.200', bgcolor: 'grey.50' }}>
+                        <Grid container spacing={2} sx={{ fontWeight: 'bold', color: 'text.primary' }}>
+                          <Grid item xs={3}>
+                            <Typography variant="subtitle2" fontWeight="bold">Date & Time</Typography>
+                          </Grid>
+                          <Grid item xs={2}>
+                            <Typography variant="subtitle2" fontWeight="bold">Therapist</Typography>
+                          </Grid>
+                          <Grid item xs={2}>
+                            <Typography variant="subtitle2" fontWeight="bold">Duration</Typography>
+                          </Grid>
+                          <Grid item xs={2}>
+                            <Typography variant="subtitle2" fontWeight="bold">Mode</Typography>
+                          </Grid>
+                          <Grid item xs={2}>
+                            <Typography variant="subtitle2" fontWeight="bold">Status</Typography>
+                          </Grid>
+                          <Grid item xs={1}>
+                            <Typography variant="subtitle2" fontWeight="bold">Notes</Typography>
+                          </Grid>
+                        </Grid>
+                      </Box>
+                      {filteredAppointments.map((appointment, index) => (
+                        <Box 
+                          key={appointment.appointment_code}
+                          sx={{ 
+                            p: 2, 
+                            borderBottom: index < filteredAppointments.length - 1 ? '1px solid' : 'none',
+                            borderColor: 'grey.200',
+                            '&:hover': { bgcolor: 'grey.50' }
+                          }}
+                        >
+                          <Grid container spacing={2} alignItems="center">
+                            <Grid item xs={3}>
+                              <Typography variant="body2" color="text.primary">
+                                {formatDateTime(appointment.start_at)}
+                              </Typography>
+                            </Grid>
+                            <Grid item xs={2}>
+                              <Typography variant="body2" color="text.secondary">
+                                {appointment.therapist?.username || 'N/A'}
+                              </Typography>
+                            </Grid>
+                            <Grid item xs={2}>
+                              <Typography variant="body2" color="text.secondary">
+                                {appointment.duration_min} min
+                              </Typography>
+                            </Grid>
+                            <Grid item xs={2}>
+                              <Typography variant="body2" color="text.secondary">
+                                {appointment.mode?.replace('_', ' ').toUpperCase() || 'N/A'}
+                              </Typography>
+                            </Grid>
+                            <Grid item xs={2}>
                               <Chip 
                                 label={appointment.status} 
                                 color={getStatusColor(appointment.status)}
                                 size="small"
+                                sx={{ borderRadius: 2, fontWeight: 600 }}
                               />
-                            </TableCell>
-                            <TableCell>{appointment.notes || 'N/A'}</TableCell>
-                          </TableRow>
-                        ))}
-                      </TableBody>
-                    </Table>
-                  </TableContainer>
-                ) : (
-                  <Alert severity="info">No appointment records found</Alert>
-                )}
+                            </Grid>
+                            <Grid item xs={1}>
+                              <Box sx={{ display: 'flex', justifyContent: 'center' }}>
+                                {(appointment.session_notes && appointment.session_notes.trim()) ? (
+                                  <Tooltip 
+                                    title={appointment.session_notes} 
+                                    arrow
+                                    placement="top"
+                                    sx={{ maxWidth: 300 }}
+                                  >
+                                    <Notes sx={{ color: 'primary.main', fontSize: 18, cursor: 'pointer' }} />
+                                  </Tooltip>
+                                ) : null}
+                              </Box>
+                            </Grid>
+                          </Grid>
+                        </Box>
+                      ))}
+                    </Box>
+                  ) : (
+                    <Alert severity="info">No completed or scheduled appointments found</Alert>
+                  );
+                })()}
               </Box>
             </TabPanel>
           </Paper>
         </Grid>
       </Grid>
+
+      {/* Edit Medical History Modal */}
+      <Dialog 
+        open={editModalOpen} 
+        onClose={handleCloseEditModal}
+        maxWidth="md"
+        fullWidth
+        PaperProps={{
+          sx: {
+            borderRadius: 3,
+          }
+        }}
+      >
+        <DialogTitle sx={{ pb: 2 }}>
+          <Typography variant="h5" fontWeight="bold" color="text.primary">
+            Edit Medical History
+          </Typography>
+          <Typography variant="body2" color="text.secondary">
+            Update medical record for {patient?.user?.username}
+          </Typography>
+        </DialogTitle>
+        
+        <DialogContent sx={{ pt: 2, pb: 1 }}>
+          <Grid container spacing={2}>
+            {/* Past Medical History */}
+            <Grid item xs={12}>
+              <Box sx={{ mb: 2 }}>
+                <Typography variant="subtitle2" fontWeight="bold" color="text.primary" gutterBottom>
+                  Past Medical History
+                </Typography>
+                <TextField
+                  fullWidth
+                  multiline
+                  rows={4}
+                  value={editFormData.past_medical_history}
+                  onChange={handleEditInputChange('past_medical_history')}
+                  placeholder="Details of any diagnosed medical conditions, including chronic illnesses and past significant illnesses..."
+                  variant="outlined"
+                  sx={{
+                    '& .MuiOutlinedInput-root': {
+                      borderRadius: 2,
+                      backgroundColor: 'grey.50',
+                      '&:hover': {
+                        backgroundColor: 'grey.100',
+                      },
+                      '&.Mui-focused': {
+                        backgroundColor: 'white',
+                      }
+                    }
+                  }}
+                />
+              </Box>
+            </Grid>
+
+            {/* Surgical History */}
+            <Grid item xs={12}>
+              <Box sx={{ mb: 2 }}>
+                <Typography variant="subtitle2" fontWeight="bold" color="text.primary" gutterBottom>
+                  Surgical History
+                </Typography>
+                <TextField
+                  fullWidth
+                  multiline
+                  rows={4}
+                  value={editFormData.surgical_history}
+                  onChange={handleEditInputChange('surgical_history')}
+                  placeholder="List of past surgeries with procedures and dates..."
+                  variant="outlined"
+                  sx={{
+                    '& .MuiOutlinedInput-root': {
+                      borderRadius: 2,
+                      backgroundColor: 'grey.50',
+                      '&:hover': {
+                        backgroundColor: 'grey.100',
+                      },
+                      '&.Mui-focused': {
+                        backgroundColor: 'white',
+                      }
+                    }
+                  }}
+                />
+              </Box>
+            </Grid>
+
+            {/* Family History */}
+            <Grid item xs={12}>
+              <Box sx={{ mb: 2 }}>
+                <Typography variant="subtitle2" fontWeight="bold" color="text.primary" gutterBottom>
+                  Family History
+                </Typography>
+                <TextField
+                  fullWidth
+                  multiline
+                  rows={4}
+                  value={editFormData.family_history}
+                  onChange={handleEditInputChange('family_history')}
+                  placeholder="Information about health of blood relatives, e.g., cancer, hypertension, diabetes..."
+                  variant="outlined"
+                  sx={{
+                    '& .MuiOutlinedInput-root': {
+                      borderRadius: 2,
+                      backgroundColor: 'grey.50',
+                      '&:hover': {
+                        backgroundColor: 'grey.100',
+                      },
+                      '&.Mui-focused': {
+                        backgroundColor: 'white',
+                      }
+                    }
+                  }}
+                />
+              </Box>
+            </Grid>
+
+            {/* Medications */}
+            <Grid item xs={12}>
+              <Box sx={{ mb: 2 }}>
+                <Typography variant="subtitle2" fontWeight="bold" color="text.primary" gutterBottom>
+                  Medications
+                </Typography>
+                <TextField
+                  fullWidth
+                  multiline
+                  rows={4}
+                  value={editFormData.medications}
+                  onChange={handleEditInputChange('medications')}
+                  placeholder="Comprehensive list of current and past medications, including dosage and frequency..."
+                  variant="outlined"
+                  sx={{
+                    '& .MuiOutlinedInput-root': {
+                      borderRadius: 2,
+                      backgroundColor: 'grey.50',
+                      '&:hover': {
+                        backgroundColor: 'grey.100',
+                      },
+                      '&.Mui-focused': {
+                        backgroundColor: 'white',
+                      }
+                    }
+                  }}
+                />
+              </Box>
+            </Grid>
+
+            {/* Allergies */}
+            <Grid item xs={12}>
+              <Box sx={{ mb: 2 }}>
+                <Typography variant="subtitle2" fontWeight="bold" color="text.primary" gutterBottom>
+                  Allergies
+                </Typography>
+                <TextField
+                  fullWidth
+                  multiline
+                  rows={3}
+                  value={editFormData.allergies}
+                  onChange={handleEditInputChange('allergies')}
+                  placeholder="Known allergies to medications, food, or environmental factors..."
+                  variant="outlined"
+                  sx={{
+                    '& .MuiOutlinedInput-root': {
+                      borderRadius: 2,
+                      backgroundColor: 'grey.50',
+                      '&:hover': {
+                        backgroundColor: 'grey.100',
+                      },
+                      '&.Mui-focused': {
+                        backgroundColor: 'white',
+                      }
+                    }
+                  }}
+                />
+              </Box>
+            </Grid>
+
+            {/* Additional Notes */}
+            <Grid item xs={12}>
+              <Box sx={{ mb: 2 }}>
+                <Typography variant="subtitle2" fontWeight="bold" color="text.primary" gutterBottom>
+                  Additional Notes
+                </Typography>
+                <TextField
+                  fullWidth
+                  multiline
+                  rows={3}
+                  value={editFormData.notes}
+                  onChange={handleEditInputChange('notes')}
+                  placeholder="Any additional notes or observations..."
+                  variant="outlined"
+                  sx={{
+                    '& .MuiOutlinedInput-root': {
+                      borderRadius: 2,
+                      backgroundColor: 'grey.50',
+                      '&:hover': {
+                        backgroundColor: 'grey.100',
+                      },
+                      '&.Mui-focused': {
+                        backgroundColor: 'white',
+                      }
+                    }
+                  }}
+                />
+              </Box>
+            </Grid>
+          </Grid>
+        </DialogContent>
+        
+        <DialogActions sx={{ p: 3, pt: 1, gap: 2 }}>
+          <Button 
+            onClick={handleCloseEditModal} 
+            disabled={editModalLoading}
+            variant="outlined"
+            sx={{
+              borderRadius: 2,
+              textTransform: 'uppercase',
+              fontWeight: 600,
+              px: 3,
+              minWidth: 100
+            }}
+          >
+            Cancel
+          </Button>
+          <Button 
+            onClick={handleSubmitEditMedicalHistory} 
+            variant="contained" 
+            disabled={editModalLoading}
+            sx={{
+              borderRadius: 2,
+              textTransform: 'uppercase',
+              fontWeight: 600,
+              px: 3,
+              minWidth: 100
+            }}
+          >
+            {editModalLoading ? "Updating..." : "Update"}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
     </Box>
   );
 };

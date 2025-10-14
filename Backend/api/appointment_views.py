@@ -1,7 +1,6 @@
 """
 预约管理API视图
 """
-print("DEBUG - Loading appointment_views module")
 
 from rest_framework.decorators import api_view, parser_classes, permission_classes
 from rest_framework.parsers import JSONParser
@@ -16,7 +15,6 @@ from datetime import datetime, timedelta
 import pytz
 from django.db.models import Q
 
-print("DEBUG - Importing models and serializers")
 from .models import Appointment, UnavailableSlot, CustomUser
 from .serializers import AppointmentSerializer, UnavailableSlotSerializer
 from .services.notification_service import notification_service
@@ -27,31 +25,21 @@ def get_malaysia_date():
     malaysia_now = datetime.now(malaysia_tz)
     return malaysia_now.date()
 
-print("DEBUG - appointment_views module loaded successfully")
 
 
 @api_view(['POST'])
 @parser_classes([JSONParser])
 def create_appointment(request):
     """创建预约 - 支持新患者占位模式"""
-    print("DEBUG - create_appointment function called")
-    print(f"DEBUG - Request method: {request.method}")
-    print(f"DEBUG - Request content type: {request.content_type}")
-    print(f"DEBUG - Request headers: {dict(request.headers)}")
     
     try:
         data = request.data
-        print(f"DEBUG - Raw request data: {data}")
-        print(f"DEBUG - Data type: {type(data)}")
         
         # 验证必填字段
         therapist_id = data.get('therapist_id')
         start_at_str = data.get('start_at')
         duration_min = data.get('duration_min', 30)
         
-        print(f"DEBUG - therapist_id: {therapist_id}")
-        print(f"DEBUG - start_at_str: {start_at_str}")
-        print(f"DEBUG - duration_min: {duration_min}")
         
         if not therapist_id or not start_at_str:
             return Response({
@@ -66,7 +54,6 @@ def create_appointment(request):
         
         # 解析时间
         try:
-            print(f"DEBUG - Parsing time: {start_at_str}")
             # 处理带毫秒的ISO格式
             if start_at_str.endswith('Z'):
                 start_at_str = start_at_str.replace('Z', '+00:00')
@@ -75,7 +62,6 @@ def create_appointment(request):
                 if not start_at_str.endswith('Z') and '+' not in start_at_str and '-' not in start_at_str[-6:]:
                     start_at_str += '+00:00'
             
-            print(f"DEBUG - Processed time string: {start_at_str}")
             start_at = datetime.fromisoformat(start_at_str)
             
             # 检查是否已经是aware datetime
@@ -84,11 +70,9 @@ def create_appointment(request):
                 start_at = timezone.make_aware(start_at)
             else:
                 # 如果已经是aware datetime，直接使用
-                print(f"DEBUG - Already aware datetime: {start_at}")
+                pass
             
-            print(f"DEBUG - Final start_at: {start_at}")
         except ValueError as e:
-            print(f"DEBUG - Time parsing error: {e}")
             return Response({
                 'error': 'Invalid date format. Use ISO format (YYYY-MM-DDTHH:MM:SSZ)'
             }, status=status.HTTP_400_BAD_REQUEST)
@@ -97,42 +81,32 @@ def create_appointment(request):
         end_at = start_at + timedelta(minutes=duration_min)
         
         # 验证治疗师存在
-        print(f"DEBUG - Looking for therapist: {therapist_id}")
         therapist = get_object_or_404(CustomUser, id=therapist_id, role='therapist')
-        print(f"DEBUG - Found therapist: {therapist.username}")
         
         # 验证患者（如果提供）
         patient_id = data.get('patient_id')
         patient = None
         if patient_id:
-            print(f"DEBUG - Looking for patient: {patient_id}")
             patient = get_object_or_404(CustomUser, id=patient_id, role='patient')
-            print(f"DEBUG - Found patient: {patient.username}")
         
         # 新患者占位字段
         contact_name = data.get('contact_name', '')
         contact_phone = data.get('contact_phone', '')
         
-        print(f"DEBUG - Contact info: name={contact_name}, phone={contact_phone}")
         
         # 验证：要么有患者ID，要么有联系方式
         if not patient_id and not (contact_name and contact_phone):
-            print("DEBUG - Missing patient info")
             return Response({
                 'error': 'Either patient_id or contact_name + contact_phone must be provided'
             }, status=status.HTTP_400_BAD_REQUEST)
         
         with transaction.atomic():
-            print("DEBUG - Starting transaction")
             # 冲突检测
-            print(f"DEBUG - Checking time conflict for {therapist_id} from {start_at} to {end_at}")
             if _has_time_conflict(therapist_id, start_at, end_at):
-                print("DEBUG - Time conflict detected")
                 return Response({
                     'error': 'Time slot unavailable. This time conflicts with another appointment.'
                 }, status=status.HTTP_409_CONFLICT)
             
-            print("DEBUG - No time conflict, creating appointment")
             
             # 根据创建者确定状态
             # 如果患者创建，状态为 Pending；如果治疗师创建，状态为 Scheduled
@@ -143,7 +117,6 @@ def create_appointment(request):
                 appointment_status = 'Pending'  # 患者创建的预约默认为Pending
             else:
                 appointment_status = 'Scheduled'  # 默认治疗师创建
-            print(f'DEBUG - Creating appointment with status: {appointment_status} (patient_id: {data.get("patient_id")})')
             
             # 创建预约
             appointment = Appointment.objects.create(
@@ -159,7 +132,6 @@ def create_appointment(request):
                 patient_message=data.get('patient_message', ''),
                 status=appointment_status
             )
-            print(f"DEBUG - Appointment created with ID: {appointment.id}, code: {appointment.appointment_code}")
             
             # 发送通知
             notification_service.send_appointment_created(appointment)
@@ -171,10 +143,6 @@ def create_appointment(request):
             }, status=status.HTTP_201_CREATED)
             
     except Exception as e:
-        print(f"DEBUG - Exception occurred: {str(e)}")
-        print(f"DEBUG - Exception type: {type(e)}")
-        import traceback
-        print(f"DEBUG - Traceback: {traceback.format_exc()}")
         return Response({
             'error': f'An error occurred: {str(e)}'
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
@@ -257,7 +225,6 @@ def list_appointments(request):
         to_date = request.GET.get('to')
         status_filter = request.GET.get('status')
         
-        print(f"DEBUG - list_appointments: scope={scope}, user_id={user_id}, from={from_date}, to={to_date}, status={status_filter}")
         
         if not scope or not user_id:
             return Response({
@@ -281,7 +248,6 @@ def list_appointments(request):
                 from_dt = datetime.strptime(from_date, '%Y-%m-%d')
                 from_dt = timezone.make_aware(from_dt)
                 appointments = appointments.filter(start_at__date__gte=from_dt.date())
-                print(f"DEBUG - Filtering from date: {from_dt.date()}")
             except ValueError:
                 return Response({
                     'error': 'Invalid from_date format'
@@ -293,7 +259,6 @@ def list_appointments(request):
                 to_dt = datetime.strptime(to_date, '%Y-%m-%d')
                 to_dt = timezone.make_aware(to_dt)
                 appointments = appointments.filter(start_at__date__lte=to_dt.date())
-                print(f"DEBUG - Filtering to date: {to_dt.date()}")
             except ValueError:
                 return Response({
                     'error': 'Invalid to_date format'
@@ -302,10 +267,8 @@ def list_appointments(request):
         # 状态过滤
         if status_filter:
             appointments = appointments.filter(status=status_filter)
-            print(f"DEBUG - Filtering by status: {status_filter}")
         
         appointments = appointments.order_by('start_at')
-        print(f"DEBUG - Found {appointments.count()} appointments")
         serializer = AppointmentSerializer(appointments, many=True)
         
         return Response({
@@ -390,9 +353,6 @@ def create_availability_slot(request):
                 end_at = timezone.make_aware(end_at)
                 
         except ValueError as e:
-            print(f"DEBUG - Date parsing error: {e}")
-            print(f"DEBUG - start_at_str: {start_at_str}")
-            print(f"DEBUG - end_at_str: {end_at_str}")
             return Response({
                 'error': f'Invalid date format. Use ISO format (YYYY-MM-DDTHH:MM:SSZ). Error: {str(e)}'
             }, status=status.HTTP_400_BAD_REQUEST)

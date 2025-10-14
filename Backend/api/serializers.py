@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import CustomUser, Appointment, MedicalHistory, Admin, Therapist, Patient, Notification, Exercise, TreatmentTemplate
+from .models import CustomUser, Appointment, MedicalHistory, Admin, Therapist, Patient, Notification, Exercise
 import base64
 from django.utils import timezone
 import pytz
@@ -190,7 +190,7 @@ class AppointmentSerializer(serializers.ModelSerializer):
 
     def get_latest_medical_history(self, obj):
         if obj.patient_id:
-            history = obj.patient_id.medical_histories.order_by('-session_date').first()
+            history = obj.patient_id.medical_histories.order_by('-created_at').first()
             if history:
                 return MedicalHistorySerializer(history).data
         return None
@@ -245,11 +245,17 @@ class MedicalHistorySerializer(serializers.ModelSerializer):
     class Meta:
         model = MedicalHistory
         fields = [
-            "session_date",
-            "description",
-            "objective_findings",
-            "treatment",
-            "remarks",
+            "id",
+            "patient_id",
+            "recorded_by_id",
+            "created_at",
+            "updated_at",
+            "past_medical_history",
+            "surgical_history",
+            "family_history",
+            "medications",
+            "allergies",
+            "notes",
         ]
 
 class PatientHistorySerializer(serializers.ModelSerializer):
@@ -274,6 +280,7 @@ class PatientHistorySerializer(serializers.ModelSerializer):
             'ic': obj.user.ic,
             'gender': obj.user.gender,
             'dob': obj.user.dob,
+            'status': obj.user.status,
             'avatar': avatar_data
         }
     
@@ -281,7 +288,7 @@ class PatientHistorySerializer(serializers.ModelSerializer):
         return obj.emergency_contact
 
     def get_medical_histories(self, obj):
-        histories = obj.user.medical_histories.all().order_by('-session_date')
+        histories = obj.user.medical_histories.all().order_by('-created_at')
         return MedicalHistorySerializer(histories, many=True).data
 
     class Meta:
@@ -305,46 +312,44 @@ class ExerciseSerializer(serializers.ModelSerializer):
     class Meta:
         model = Exercise
         fields = [
-            'exercise_id', 'name', 'body_part', 'category', 'difficulty', 
-            'default_metrics', 'instructions', 'demo_video_url', 
-            'created_at', 'created_by', 'created_by_name', 'is_active',
-            'detection_rules'
+            'exercise_id', 'name', 'category', 'difficulty', 
+            'instructions', 'action_id', 'created_by', 'created_by_name'
         ]
         
     def get_created_by_name(self, obj):
         return obj.created_by.username if obj.created_by else None
 
-class TreatmentTemplateSerializer(serializers.ModelSerializer):
-    exercises = serializers.SerializerMethodField()
-    created_by_name = serializers.SerializerMethodField()
-    
-    class Meta:
-        model = TreatmentTemplate
-        fields = [
-            'template_id', 'name', 'treatment_type', 'treatment_subtype',
-            'condition', 'description', 'default_frequency', 
-            'estimated_duration_weeks', 'created_at', 'created_by', 
-            'created_by_name', 'is_active', 'exercises'
-        ]
-        
-    def get_created_by_name(self, obj):
-        return obj.created_by.username if obj.created_by else None
-        
-    def get_exercises(self, obj):
-        template_exercises = obj.template_exercises.all().order_by('order_in_template')
-        exercises_data = []
-        for te in template_exercises:
-            exercise_data = {
-                'exercise_name': te.exercise_id.name,
-                'body_part': te.exercise_id.body_part,
-                'category': te.exercise_id.category,
-                'default_target_metrics': te.default_target_metrics or te.exercise_id.default_metrics,
-                'default_repetitions': te.default_repetitions,
-                'default_sets': te.default_sets,
-                'default_pain_threshold': te.default_pain_threshold,
-                'order_in_template': te.order_in_template,
-                'is_required': te.is_required,
-                'instructions': te.exercise_id.instructions,
-            }
-            exercises_data.append(exercise_data)
-        return exercises_data
+# class TreatmentTemplateSerializer(serializers.ModelSerializer):
+#     exercises = serializers.SerializerMethodField()
+#     created_by_name = serializers.SerializerMethodField()
+#     
+#     class Meta:
+#         model = TreatmentTemplate
+#         fields = [
+#             'template_id', 'name', 'treatment_type', 'treatment_subtype',
+#             'condition', 'description', 'default_frequency', 
+#             'estimated_duration_weeks', 'created_at', 'created_by', 
+#             'created_by_name', 'is_active', 'exercises'
+#         ]
+#         
+#     def get_created_by_name(self, obj):
+#         return obj.created_by.username if obj.created_by else None
+#         
+#     def get_exercises(self, obj):
+#         template_exercises = obj.template_exercises.all().order_by('order_in_template')
+#         exercises_data = []
+#         for te in template_exercises:
+#             exercise_data = {
+#                 'exercise_name': te.exercise_id.name,
+#                 'body_part': te.exercise_id.body_part,
+#                 'category': te.exercise_id.category,
+#                 'default_target_metrics': te.default_target_metrics or te.exercise_id.default_metrics,
+#                 'default_repetitions': te.default_repetitions,
+#                 'default_sets': te.default_sets,
+#                 'default_pain_threshold': te.default_pain_threshold,
+#                 'order_in_template': te.order_in_template,
+#                 'is_required': te.is_required,
+#                 'instructions': te.exercise_id.instructions,
+#             }
+#             exercises_data.append(exercise_data)
+#         return exercises_data

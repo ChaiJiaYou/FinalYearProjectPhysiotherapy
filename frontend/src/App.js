@@ -13,11 +13,16 @@ import TherapistAppointmentPage from './components/AfterLogin/Appointment/Therap
 import AdminTherapistAppointments from './components/AfterLogin/Appointment/Admin/AdminTherapistAppointments';
 import TherapistSchedule from './components/Therapist/TherapistSchedule';
 import { TreatmentManagement } from './components/AfterLogin/Treatment/Therapist';
-import { TreatmentAdminCenter } from './components/AfterLogin/Treatment/Admin';
+import CreateTreatmentPlanPage from './components/AfterLogin/Treatment/Therapist/CreateTreatmentPlanPage';
+import TherapistTreatmentCenter from './components/AfterLogin/Treatment/Therapist/TherapistTreatmentCenter';
+import { TreatmentAdminCenter, TreatmentList } from './components/AfterLogin/Treatment/Admin';
+import PatientTreatmentDetail from './components/AfterLogin/Treatment/Admin/PatientTreatmentDetail';
 import PatientListPage from './components/AfterLogin/PatientInfo/PatientListPage';
 import PatientDetailPage from './components/AfterLogin/PatientInfo/PatientDetailPage';
-import ExercisePage from './components/AfterLogin/Exercise/ExercisePage';
-import ExerciseAdminCenter from './components/AfterLogin/Admin/ExerciseAdminCenter';
+import AddMedicalHistoryPage from './components/AfterLogin/PatientInfo/AddMedicalHistoryPage';
+import PatientExercisePage from './components/AfterLogin/Patient/PatientExercisePage';
+import ActionLearningCenter from './components/AfterLogin/Admin/ActionLearningCenter';
+import ExerciseManagementCenter from './components/AfterLogin/Admin/ExerciseManagementCenter';
 import ErrorPage from './components/ErrorPage';
 import TestComponent from './components/TestComponent';
 
@@ -37,12 +42,18 @@ function App() {
         <Route path="therapist-appointments" element={<TherapistAppointmentPage />} />
         <Route path="admin-appointments" element={<AdminTherapistAppointments />} />
         <Route path="schedule" element={<TherapistSchedule />} />
-        <Route path="treatment" element={<TreatmentManagement />} />
+        <Route path="treatment" element={<TherapistTreatmentCenter />} />
+        <Route path="treatment/:patientId" element={<PatientTreatmentDetail />} />
+        <Route path="treatment/:patientId/create" element={<CreateTreatmentPlanPage />} />
+        <Route path="treatment/:patientId/:treatmentId/edit" element={<CreateTreatmentPlanPage />} />
+        <Route path="create-treatment-plan" element={<CreateTreatmentPlanPage />} />
         <Route path="admin-treatment" element={<TreatmentAdminCenter />} />
-        <Route path="exercise-admin" element={<ExerciseAdminCenter />} />
+        <Route path="exercise-management" element={<ExerciseManagementCenter />} />
+        <Route path="action-learning" element={<ActionLearningCenter />} />
         <Route path="patients" element={<PatientListPage />} />
         <Route path="patients/:patientId" element={<PatientDetailPage />} />
-        <Route path="exercise" element={<ExercisePage />} />
+        <Route path="patients/:patientId/add-medical-history" element={<AddMedicalHistoryPage />} />
+        <Route path="exercise" element={<PatientExercisePage />} />
         <Route path="*" element={<ErrorPage status={404} message="Page not found in this section" />} />
       </Route>
       <Route path="*" element={<ErrorPage status={404} message="Page not found" />} />

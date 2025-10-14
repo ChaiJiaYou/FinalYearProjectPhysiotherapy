@@ -25,10 +25,13 @@ import {
   IconButton,
   Divider,
   Autocomplete,
+  Card,
+  CardContent,
 } from "@mui/material";
 import {
   Visibility as VisibilityIcon,
   Close as CloseIcon,
+  Refresh as RefreshIcon,
 } from "@mui/icons-material";
 import { toast } from "react-toastify";
 import "react-toastify/dist/ReactToastify.css";
@@ -233,29 +236,78 @@ const AdminTherapistAppointments = () => {
   );
 
   return (
-    <Box sx={{ p: 3, borderRadius: "8px" }}>
-      <Typography variant="h4" sx={{ fontWeight: "bold", color: "#333", mb: 3 }}>
-        All Appointments
-      </Typography>
+    <Box sx={{ bgcolor: '#f8fafc', minHeight: '100vh', p: { xs: 2, md: 4 } }}>
+      <Box sx={{ maxWidth: 'xl', mx: 'auto' }}>
+        {/* 页面头部 - 遵循User Management设计系统 */}
+        <Box display="flex" justifyContent="space-between" alignItems="center" mb={4}>
+          <Box>
+            <Typography variant="h4" gutterBottom sx={{ color: '#000000', fontWeight: 600 }}>
+              All Appointments
+            </Typography>
+            <Typography variant="body1" color="text.secondary">
+              Manage and monitor all appointment bookings in the system
+            </Typography>
+          </Box>
+          <Box display="flex" gap={2}>
+            <Button
+              variant="outlined"
+              startIcon={<RefreshIcon />}
+              onClick={() => window.location.reload()}
+              disabled={loading}
+              sx={{
+                borderRadius: 2,
+                textTransform: 'uppercase',
+                fontWeight: 600,
+                px: 3,
+                borderColor: '#3b82f6',
+                color: '#3b82f6',
+                '&:hover': {
+                  borderColor: '#2563eb',
+                  bgcolor: 'rgba(59, 130, 246, 0.04)',
+                }
+              }}
+            >
+              Refresh
+            </Button>
+          </Box>
+        </Box>
 
-      {/* Filters Section */}
-      <Paper sx={{ 
-        p: 2, 
-        mb: 3, 
-        borderRadius: 2, 
-        boxShadow: 2,
-        backgroundColor: '#f5f5f5',
-        border: '1px solid #e0e0e0'
-      }}>
+        {/* 搜索和过滤 - 遵循User Management设计系统 */}
+        <Card sx={{ mb: 3, borderRadius: 3, border: '1px solid', borderColor: 'grey.200', elevation: 0 }}>
+          <CardContent sx={{ p: 3 }}>
+            <Box display="flex" alignItems="center" justifyContent="space-between" mb={2}>
+              <Typography variant="h6" sx={{ fontWeight: 600 }}>
+                Search & Filter Appointments
+              </Typography>
+              <Button
+                size="small"
+                onClick={handleResetFilter}
+                variant="outlined"
+                sx={{ 
+                  borderRadius: 2,
+                  textTransform: 'uppercase',
+                  fontWeight: 600,
+                  px: 3,
+                  borderColor: '#3b82f6',
+                  color: '#3b82f6',
+                  '&:hover': {
+                    borderColor: '#2563eb',
+                    bgcolor: 'rgba(59, 130, 246, 0.04)',
+                  }
+                }}
+              >
+                Reset Filters
+              </Button>
+            </Box>
         <Grid container spacing={2} alignItems="center">
           {/* Date Range Filter */}
           <Grid item xs={12} md={3}>
             <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
               <Typography variant="subtitle2" sx={{ 
-                color: "#333", 
-                minWidth: 70,
+                color: "text.primary", 
+                minWidth: 80,
                 fontWeight: 600,
-                fontSize: '0.875rem'
+                fontSize: '0.9rem'
               }}>
                 Date Range:
               </Typography>
@@ -265,20 +317,24 @@ const AdminTherapistAppointments = () => {
                 onChange={(e) => handleDateRangeChange('startDate', e.target.value)}
                 size="small"
                 sx={{ 
-                  minWidth: 130,
+                  minWidth: 140,
                   '& .MuiOutlinedInput-root': {
-                    borderRadius: 1,
-                    backgroundColor: 'white',
+                    borderRadius: 2,
+                    backgroundColor: 'grey.50',
                     '& fieldset': {
-                      borderColor: '#d0d0d0'
+                      borderColor: 'grey.300'
                     },
                     '&:hover fieldset': {
-                      borderColor: '#1976d2'
+                      borderColor: 'primary.main'
+                    },
+                    '&.Mui-focused fieldset': {
+                      borderColor: 'primary.main',
+                      borderWidth: 2
                     }
                   }
                 }}
               />
-              <Typography variant="body2" sx={{ color: "#666", fontSize: '0.875rem' }}>
+              <Typography variant="body2" sx={{ color: "text.secondary", fontSize: '0.9rem', fontWeight: 500 }}>
                 to
               </Typography>
               <TextField
@@ -287,15 +343,19 @@ const AdminTherapistAppointments = () => {
                 onChange={(e) => handleDateRangeChange('endDate', e.target.value)}
                 size="small"
                 sx={{ 
-                  minWidth: 130,
+                  minWidth: 140,
                   '& .MuiOutlinedInput-root': {
-                    borderRadius: 1,
-                    backgroundColor: 'white',
+                    borderRadius: 2,
+                    backgroundColor: 'grey.50',
                     '& fieldset': {
-                      borderColor: '#d0d0d0'
+                      borderColor: 'grey.300'
                     },
                     '&:hover fieldset': {
-                      borderColor: '#1976d2'
+                      borderColor: 'primary.main'
+                    },
+                    '&.Mui-focused fieldset': {
+                      borderColor: 'primary.main',
+                      borderWidth: 2
                     }
                   }
                 }}
@@ -305,24 +365,26 @@ const AdminTherapistAppointments = () => {
 
           {/* Filter Buttons */}
           <Grid item xs={12} md={2}>
-            <Box sx={{ display: 'flex', gap: 1 }}>
+            <Box sx={{ display: 'flex', gap: 1.5 }}>
               <Button
                 variant="contained"
                 onClick={handleTodayFilter}
                 size="small"
                 sx={{ 
                   textTransform: 'none',
-                  borderRadius: 1,
-                  px: 1.5,
-                  py: 0.5,
-                  fontSize: '0.8rem',
+                  borderRadius: 2,
+                  px: 2,
+                  py: 0.8,
+                  fontSize: '0.85rem',
                   fontWeight: 600,
-                  backgroundColor: '#1976d2',
-                  boxShadow: 1,
+                  backgroundColor: 'primary.main',
+                  boxShadow: '0 2px 4px rgba(25, 118, 210, 0.2)',
                   '&:hover': {
-                    backgroundColor: '#1565c0',
-                    boxShadow: 2
-                  }
+                    backgroundColor: 'primary.dark',
+                    boxShadow: '0 4px 8px rgba(25, 118, 210, 0.3)',
+                    transform: 'translateY(-1px)'
+                  },
+                  transition: 'all 0.2s ease-in-out'
                 }}
               >
                 Today
@@ -333,19 +395,20 @@ const AdminTherapistAppointments = () => {
                 size="small"
                 sx={{ 
                   textTransform: 'none',
-                  borderRadius: 1,
-                  px: 1.5,
-                  py: 0.5,
-                  fontSize: '0.8rem',
+                  borderRadius: 2,
+                  px: 2,
+                  py: 0.8,
+                  fontSize: '0.85rem',
                   fontWeight: 600,
-                  borderColor: '#757575',
-                  color: '#757575',
+                  borderColor: 'grey.400',
+                  color: 'text.secondary',
                   backgroundColor: 'white',
                   '&:hover': {
-                    borderColor: '#616161',
-                    backgroundColor: '#f5f5f5',
-                    color: '#424242'
-                  }
+                    borderColor: 'grey.600',
+                    backgroundColor: 'grey.50',
+                    color: 'text.primary'
+                  },
+                  transition: 'all 0.2s ease-in-out'
                 }}
               >
                 Reset
@@ -357,25 +420,29 @@ const AdminTherapistAppointments = () => {
           <Grid item xs={12} md={2}>
             <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
               <Typography variant="subtitle2" sx={{ 
-                color: "#333", 
-                minWidth: 50,
+                color: "text.primary", 
+                minWidth: 60,
                 fontWeight: 600,
-                fontSize: '0.875rem'
+                fontSize: '0.9rem'
               }}>
                 Status:
               </Typography>
-              <FormControl size="small" sx={{ minWidth: 110 }}>
+              <FormControl size="small" sx={{ minWidth: 120 }}>
                 <Select 
                   value={statusFilter} 
                   onChange={(e) => setStatusFilter(e.target.value)}
                   sx={{ 
-                    borderRadius: 1,
-                    backgroundColor: 'white',
+                    borderRadius: 2,
+                    backgroundColor: 'grey.50',
                     '& .MuiOutlinedInput-notchedOutline': {
-                      borderColor: '#d0d0d0'
+                      borderColor: 'grey.300'
                     },
                     '&:hover .MuiOutlinedInput-notchedOutline': {
-                      borderColor: '#1976d2'
+                      borderColor: 'primary.main'
+                    },
+                    '&.Mui-focused .MuiOutlinedInput-notchedOutline': {
+                      borderColor: 'primary.main',
+                      borderWidth: 2
                     }
                   }}
                 >
@@ -393,10 +460,10 @@ const AdminTherapistAppointments = () => {
           <Grid item xs={12} md={3}>
             <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
               <Typography variant="subtitle2" sx={{ 
-                color: "#333", 
-                minWidth: 70,
+                color: "text.primary", 
+                minWidth: 80,
                 fontWeight: 600,
-                fontSize: '0.875rem'
+                fontSize: '0.9rem'
               }}>
                 Therapist:
               </Typography>
@@ -414,15 +481,19 @@ const AdminTherapistAppointments = () => {
                     {...params}
                     placeholder="Search therapist..."
                     sx={{
-                      minWidth: 150,
+                      minWidth: 160,
                       '& .MuiOutlinedInput-root': {
-                        borderRadius: 1,
-                        backgroundColor: 'white',
+                        borderRadius: 2,
+                        backgroundColor: 'grey.50',
                         '& fieldset': {
-                          borderColor: '#d0d0d0'
+                          borderColor: 'grey.300'
                         },
                         '&:hover fieldset': {
-                          borderColor: '#1976d2'
+                          borderColor: 'primary.main'
+                        },
+                        '&.Mui-focused fieldset': {
+                          borderColor: 'primary.main',
+                          borderWidth: 2
                         }
                       }
                     }}
@@ -464,32 +535,86 @@ const AdminTherapistAppointments = () => {
               <Chip 
                 label={`${filteredAppointments.length} found`}
                 sx={{ 
-                  backgroundColor: '#e3f2fd',
-                  color: '#1976d2',
+                  backgroundColor: 'primary.50',
+                  color: 'primary.main',
                   fontWeight: 600,
-                  fontSize: '0.75rem',
-                  height: 28,
-                  borderRadius: 1,
-                  border: '1px solid #bbdefb'
+                  fontSize: '0.8rem',
+                  height: 32,
+                  borderRadius: 2,
+                  border: '1px solid',
+                  borderColor: 'primary.200',
+                  '& .MuiChip-label': {
+                    px: 1.5
+                  }
                 }}
               />
             </Box>
           </Grid>
         </Grid>
-      </Paper>
+          </CardContent>
+        </Card>
 
-      {/* Appointments Table */}
-      <TableContainer component={Paper} sx={{ boxShadow: 2, borderRadius: 2 }}>
-        <Table sx={{ minWidth: 650 }}>
+        {/* Appointments Table - 遵循User Management设计系统 */}
+        <Card sx={{ borderRadius: 3, border: '1px solid', borderColor: 'grey.200', elevation: 0 }}>
+          <TableContainer sx={{ overflowX: 'hidden', width: '100%' }}>
+        <Table sx={{ width: '100%', tableLayout: 'fixed' }}>
           <TableHead>
-            <TableRow sx={{ backgroundColor: "#f5f5f5" }}>
-              <TableCell sx={{ fontWeight: "700", fontSize: "0.875rem", py: 1, borderBottom: "2px solid #e0e0e0", width: '120px' }}>Date</TableCell>
-              <TableCell sx={{ fontWeight: "700", fontSize: "0.875rem", py: 1, borderBottom: "2px solid #e0e0e0", width: '120px' }}>Time</TableCell>
-              <TableCell sx={{ fontWeight: "700", fontSize: "0.875rem", py: 1, borderBottom: "2px solid #e0e0e0", width: '180px' }}>Patient</TableCell>
-              <TableCell sx={{ fontWeight: "700", fontSize: "0.875rem", py: 1, borderBottom: "2px solid #e0e0e0", width: '100px' }}>Duration</TableCell>
-              <TableCell sx={{ fontWeight: "700", fontSize: "0.875rem", py: 1, borderBottom: "2px solid #e0e0e0", width: '100px' }}>Mode</TableCell>
-              <TableCell sx={{ fontWeight: "700", fontSize: "0.875rem", py: 1, borderBottom: "2px solid #e0e0e0", width: '120px' }}>Status</TableCell>
-              <TableCell sx={{ fontWeight: "700", fontSize: "0.875rem", py: 1, borderBottom: "2px solid #e0e0e0", width: '200px' }}>Actions</TableCell>
+            <TableRow sx={{ 
+              backgroundColor: 'grey.50',
+              '& .MuiTableCell-root': {
+                borderBottom: '2px solid',
+                borderColor: 'grey.300'
+              }
+            }}>
+              <TableCell sx={{ 
+                fontWeight: 700, 
+                fontSize: "0.9rem", 
+                py: 2, 
+                color: 'text.primary',
+                width: '10%' 
+              }}>Date</TableCell>
+              <TableCell sx={{ 
+                fontWeight: 700, 
+                fontSize: "0.9rem", 
+                py: 2, 
+                color: 'text.primary',
+                width: '10%' 
+              }}>Time</TableCell>
+              <TableCell sx={{ 
+                fontWeight: 700, 
+                fontSize: "0.9rem", 
+                py: 2, 
+                color: 'text.primary',
+                width: '18%' 
+              }}>Patient</TableCell>
+              <TableCell sx={{ 
+                fontWeight: 700, 
+                fontSize: "0.9rem", 
+                py: 2, 
+                color: 'text.primary',
+                width: '8%' 
+              }}>Duration</TableCell>
+              <TableCell sx={{ 
+                fontWeight: 700, 
+                fontSize: "0.9rem", 
+                py: 2, 
+                color: 'text.primary',
+                width: '8%' 
+              }}>Mode</TableCell>
+              <TableCell sx={{ 
+                fontWeight: 700, 
+                fontSize: "0.9rem", 
+                py: 2, 
+                color: 'text.primary',
+                width: '12%' 
+              }}>Status</TableCell>
+              <TableCell sx={{ 
+                fontWeight: 700, 
+                fontSize: "0.9rem", 
+                py: 2, 
+                color: 'text.primary',
+                width: '34%' 
+              }}>Actions</TableCell>
             </TableRow>
           </TableHead>
           <TableBody>
@@ -516,77 +641,126 @@ const AdminTherapistAppointments = () => {
                     key={appointment.appointmentId} 
                     hover
                     sx={{ 
-                      '&:hover': { backgroundColor: '#f8f9fa' },
-                      '&:nth-of-type(even)': { backgroundColor: '#fafafa' }
+                      '&:hover': { 
+                        backgroundColor: 'primary.50',
+                        transform: 'scale(1.001)',
+                        boxShadow: '0 2px 8px rgba(0,0,0,0.1)'
+                      },
+                      '&:nth-of-type(even)': { backgroundColor: 'grey.25' },
+                      transition: 'all 0.2s ease-in-out'
                     }}
                   >
-                    <TableCell sx={{ py: 0.5, fontSize: "0.875rem", width: '120px' }}>{dateStr}</TableCell>
-                    <TableCell sx={{ py: 0.5, fontSize: "0.875rem", width: '120px' }}>{timeStr}</TableCell>
-                    <TableCell sx={{ py: 0.5, fontSize: "0.875rem", width: '180px' }}>
+                    <TableCell sx={{ 
+                      py: 1.5, 
+                      fontSize: "0.9rem", 
+                      width: '10%',
+                      fontWeight: 500,
+                      color: 'text.primary'
+                    }}>{dateStr}</TableCell>
+                    <TableCell sx={{ 
+                      py: 1.5, 
+                      fontSize: "0.9rem", 
+                      width: '10%',
+                      fontWeight: 500,
+                      color: 'text.primary'
+                    }}>{timeStr}</TableCell>
+                    <TableCell sx={{ py: 1.5, width: '18%' }}>
                       <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
                         <Box
                           sx={{
                             width: 28,
                             height: 28,
                             borderRadius: '50%',
-                            backgroundColor: '#e3f2fd',
+                            backgroundColor: 'primary.100',
                             display: 'flex',
                             alignItems: 'center',
                             justifyContent: 'center',
-                            fontSize: '0.7rem',
+                            fontSize: '0.75rem',
                             fontWeight: 600,
-                            color: '#1976d2'
+                            color: 'primary.main',
+                            border: '1px solid',
+                            borderColor: 'primary.200',
+                            flexShrink: 0
                           }}
                         >
                           {appointment.patient.username ? appointment.patient.username.charAt(0).toUpperCase() : 'P'}
                         </Box>
-                        {appointment.patient.username || 'New Patient'}
+                        <Typography variant="body2" sx={{ 
+                          fontWeight: 500, 
+                          color: 'text.primary',
+                          fontSize: '0.85rem',
+                          overflow: 'hidden',
+                          textOverflow: 'ellipsis',
+                          whiteSpace: 'nowrap'
+                        }}>
+                          {appointment.patient.username || 'New Patient'}
+                        </Typography>
                       </Box>
                     </TableCell>
-                    <TableCell sx={{ py: 0.5, fontSize: "0.875rem", width: '100px' }}>60 min</TableCell>
-                    <TableCell sx={{ py: 0.5, width: '100px' }}>
+                    <TableCell sx={{ 
+                      py: 1.5, 
+                      fontSize: "0.9rem", 
+                      width: '8%',
+                      fontWeight: 500,
+                      color: 'text.primary'
+                    }}>60 min</TableCell>
+                    <TableCell sx={{ py: 1.5, width: '8%' }}>
                       <Chip 
                         label="onsite" 
                         size="small" 
                         sx={{ 
-                          backgroundColor: '#f5f5f5',
-                          color: '#666',
+                          backgroundColor: 'grey.100',
+                          color: 'text.secondary',
                           fontSize: '0.7rem',
-                          height: 20
+                          height: 20,
+                          fontWeight: 600,
+                          borderRadius: 2
                         }} 
                       />
                     </TableCell>
-                    <TableCell sx={{ py: 0.5, width: '120px' }}>
+                    <TableCell sx={{ py: 1.5, width: '12%' }}>
                       <Chip 
                         label={appointment.status} 
                         size="small"
                         sx={{
-                          backgroundColor: appointment.status === 'Pending' ? '#fff3e0' : 
-                                          appointment.status === 'Scheduled' ? '#e3f2fd' :
-                                          appointment.status === 'Completed' ? '#e8f5e8' : '#ffebee',
-                          color: appointment.status === 'Pending' ? '#f57c00' :
-                                 appointment.status === 'Scheduled' ? '#1976d2' :
-                                 appointment.status === 'Completed' ? '#2e7d32' : '#d32f2f',
+                          backgroundColor: appointment.status === 'Pending' ? 'warning.50' : 
+                                          appointment.status === 'Scheduled' ? 'primary.50' :
+                                          appointment.status === 'Completed' ? 'success.50' : 'error.50',
+                          color: appointment.status === 'Pending' ? 'warning.main' :
+                                 appointment.status === 'Scheduled' ? 'primary.main' :
+                                 appointment.status === 'Completed' ? 'success.main' : 'error.main',
                           fontSize: '0.7rem',
                           height: 20,
-                          fontWeight: 600
+                          fontWeight: 600,
+                          borderRadius: 2,
+                          border: '1px solid',
+                          borderColor: appointment.status === 'Pending' ? 'warning.200' : 
+                                      appointment.status === 'Scheduled' ? 'primary.200' :
+                                      appointment.status === 'Completed' ? 'success.200' : 'error.200'
                         }}
                       />
                     </TableCell>
-                    <TableCell sx={{ py: 0.5, width: '200px' }}>
-                      <Box sx={{ display: 'flex', gap: 0.5, alignItems: 'center' }}>
+                    <TableCell sx={{ py: 1.5, width: '34%' }}>
+                      <Box sx={{ display: 'flex', gap: 0.3, alignItems: 'center', flexWrap: 'nowrap' }}>
                         {/* View Details button - always visible */}
                         <IconButton
                           size="small"
                           onClick={() => handleViewDetails(appointment)}
                           sx={{ 
-                            color: '#1976d2',
+                            color: 'primary.main',
+                            backgroundColor: 'primary.50',
+                            border: '1px solid',
+                            borderColor: 'primary.200',
+                            minWidth: 28,
+                            height: 28,
                             '&:hover': {
-                              backgroundColor: '#e3f2fd'
-                            }
+                              backgroundColor: 'primary.100',
+                              transform: 'scale(1.05)'
+                            },
+                            transition: 'all 0.2s ease-in-out'
                           }}
                         >
-                          <VisibilityIcon fontSize="small" />
+                          <VisibilityIcon sx={{ fontSize: '0.8rem' }} />
                         </IconButton>
                         
                         {/* Complete button - always visible but disabled for non-Scheduled */}
@@ -599,18 +773,23 @@ const AdminTherapistAppointments = () => {
                             minWidth: 'auto',
                             px: 0.8,
                             py: 0.3,
-                            fontSize: '0.7rem',
+                            fontSize: '0.65rem',
                             textTransform: 'none',
-                            borderColor: appointment.status === "Scheduled" ? '#4caf50' : '#d0d0d0',
-                            color: appointment.status === "Scheduled" ? '#4caf50' : '#d0d0d0',
+                            borderRadius: 1.5,
+                            borderColor: appointment.status === "Scheduled" ? 'success.main' : 'grey.300',
+                            color: appointment.status === "Scheduled" ? 'success.main' : 'grey.500',
+                            backgroundColor: appointment.status === "Scheduled" ? 'success.50' : 'grey.50',
                             '&:hover': appointment.status === "Scheduled" ? {
-                              backgroundColor: '#e8f5e8',
-                              borderColor: '#4caf50'
+                              backgroundColor: 'success.100',
+                              borderColor: 'success.main',
+                              transform: 'scale(1.02)'
                             } : {},
                             '&:disabled': {
-                              borderColor: '#d0d0d0',
-                              color: '#d0d0d0'
-                            }
+                              borderColor: 'grey.300',
+                              color: 'grey.500',
+                              backgroundColor: 'grey.50'
+                            },
+                            transition: 'all 0.2s ease-in-out'
                           }}
                         >
                           Complete
@@ -626,18 +805,23 @@ const AdminTherapistAppointments = () => {
                             minWidth: 'auto',
                             px: 0.8,
                             py: 0.3,
-                            fontSize: '0.7rem',
+                            fontSize: '0.65rem',
                             textTransform: 'none',
-                            borderColor: (appointment.status === "Completed" || appointment.status === "Cancelled") ? '#d0d0d0' : '#f44336',
-                            color: (appointment.status === "Completed" || appointment.status === "Cancelled") ? '#d0d0d0' : '#f44336',
+                            borderRadius: 1.5,
+                            borderColor: (appointment.status === "Completed" || appointment.status === "Cancelled") ? 'grey.300' : 'error.main',
+                            color: (appointment.status === "Completed" || appointment.status === "Cancelled") ? 'grey.500' : 'error.main',
+                            backgroundColor: (appointment.status === "Completed" || appointment.status === "Cancelled") ? 'grey.50' : 'error.50',
                             '&:hover': (appointment.status !== "Completed" && appointment.status !== "Cancelled") ? {
-                              backgroundColor: '#ffebee',
-                              borderColor: '#f44336'
+                              backgroundColor: 'error.100',
+                              borderColor: 'error.main',
+                              transform: 'scale(1.02)'
                             } : {},
                             '&:disabled': {
-                              borderColor: '#d0d0d0',
-                              color: '#d0d0d0'
-                            }
+                              borderColor: 'grey.300',
+                              color: 'grey.500',
+                              backgroundColor: 'grey.50'
+                            },
+                            transition: 'all 0.2s ease-in-out'
                           }}
                         >
                           {appointment.status === "Pending" ? "Reject" : "Cancel"}
@@ -656,46 +840,85 @@ const AdminTherapistAppointments = () => {
             )}
           </TableBody>
         </Table>
-      </TableContainer>
-      
-      {/* 分页组件 */}
-      <TablePagination
-        rowsPerPageOptions={[5, 10, 25, 50]}
-        component="div"
-        count={filteredAppointments.length}
-        rowsPerPage={rowsPerPage}
-        page={page}
-        onPageChange={handleChangePage}
-        onRowsPerPageChange={handleChangeRowsPerPage}
-        labelRowsPerPage="Rows per page:"
-        labelDisplayedRows={({ from, to, count }) => 
-          `${from}-${to} of ${count !== -1 ? count : `more than ${to}`}`
-        }
-        sx={{
-          borderTop: '1px solid #e0e0e0',
-          '& .MuiTablePagination-toolbar': {
-            paddingLeft: 2,
-            paddingRight: 2,
-          },
-          '& .MuiTablePagination-selectLabel': {
-            marginBottom: 0,
-          },
-          '& .MuiTablePagination-displayedRows': {
-            marginBottom: 0,
+          </TableContainer>
+        </Card>
+        
+        {/* 分页组件 - 遵循User Management设计系统 */}
+        <Card sx={{ 
+          mt: 2,
+          borderRadius: 3,
+          border: '1px solid',
+          borderColor: 'grey.200',
+          elevation: 0
+        }}>
+        <TablePagination
+          rowsPerPageOptions={[5, 10, 25, 50]}
+          component="div"
+          count={filteredAppointments.length}
+          rowsPerPage={rowsPerPage}
+          page={page}
+          onPageChange={handleChangePage}
+          onRowsPerPageChange={handleChangeRowsPerPage}
+          labelRowsPerPage="Rows per page:"
+          labelDisplayedRows={({ from, to, count }) => 
+            `${from}-${to} of ${count !== -1 ? count : `more than ${to}`}`
           }
-        }}
-      />
+          sx={{
+            backgroundColor: 'grey.50',
+            borderTop: '1px solid',
+            borderColor: 'grey.200',
+            '& .MuiTablePagination-toolbar': {
+              paddingLeft: 3,
+              paddingRight: 3,
+              paddingTop: 2,
+              paddingBottom: 2,
+            },
+            '& .MuiTablePagination-selectLabel': {
+              marginBottom: 0,
+              fontSize: '0.9rem',
+              fontWeight: 500,
+              color: 'text.secondary'
+            },
+            '& .MuiTablePagination-displayedRows': {
+              marginBottom: 0,
+              fontSize: '0.9rem',
+              fontWeight: 500,
+              color: 'text.primary'
+            },
+            '& .MuiTablePagination-select': {
+              fontSize: '0.9rem',
+              fontWeight: 500,
+              backgroundColor: 'white',
+              borderRadius: 2,
+              border: '1px solid',
+              borderColor: 'grey.300',
+              '&:hover': {
+                borderColor: 'primary.main'
+              }
+            },
+            '& .MuiIconButton-root': {
+              color: 'primary.main',
+              '&:hover': {
+                backgroundColor: 'primary.50'
+              },
+              '&:disabled': {
+                color: 'grey.400'
+              }
+            }
+          }}
+        />
+        </Card>
 
-      {/* View Details Dialog */}
-      <Dialog 
-        open={viewDetailsOpen} 
-        onClose={handleCloseDetails}
-        maxWidth="md"
-        fullWidth
-        PaperProps={{
-          sx: { borderRadius: 2 }
-        }}
-      >
+        {/* View Details Dialog */}
+        <Dialog 
+          open={viewDetailsOpen} 
+          onClose={handleCloseDetails}
+          maxWidth="md"
+          fullWidth
+          PaperProps={{
+            sx: { borderRadius: 2 }
+          }}
+        >
         <DialogTitle sx={{ 
           display: 'flex', 
           justifyContent: 'space-between', 
@@ -913,7 +1136,8 @@ const AdminTherapistAppointments = () => {
             Close
           </Button>
         </DialogActions>
-      </Dialog>
+        </Dialog>
+      </Box>
     </Box>
   );
 };

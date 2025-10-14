@@ -328,14 +328,16 @@ def estimate_thresholds(templates: List[Dict]) -> Dict[str, float]:
     iqr = q75 - q25
     
     # Set thresholds based on distribution
-    # thr_in: relatively permissive (for positive detections)
-    # thr_out: more strict (for ending detections)
-    thr_in = median - 0.5 * iqr
-    thr_out = median + 0.5 * iqr
+    # OPTIMIZED: Wider hysteresis gap for stability (0.75x - 1.35x median)
+    # thr_in: more permissive (75% of median) - easier to enter
+    # thr_out: stricter gap (135% of median) - harder to exit prematurely
+    # Gap = 60% of median, much wider than noise level (~10%)
+    thr_in = 0.75 * median
+    thr_out = 1.35 * median
     
     # Ensure reasonable bounds
     thr_in = max(0.1, thr_in)
-    thr_out = max(thr_in + 0.1, thr_out)
+    thr_out = max(thr_in + 0.2, thr_out)  # Minimum 0.2 gap for stability
     
     return {
         'thr_in': float(thr_in),

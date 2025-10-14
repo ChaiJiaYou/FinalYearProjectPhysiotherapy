@@ -3,10 +3,6 @@ import {
   Box,
   Typography,
   TextField,
-  FormControl,
-  InputLabel,
-  Select,
-  MenuItem,
   Table,
   TableBody,
   TableCell,
@@ -16,354 +12,316 @@ import {
   Paper,
   Chip,
   Button,
-  IconButton,
   InputAdornment,
   Alert,
   CircularProgress,
   TablePagination,
-  Tooltip,
+  Avatar,
+  Stack,
+  Container,
+  useTheme,
+  useMediaQuery,
+  Card,
+  CardContent,
 } from "@mui/material";
 import {
   Search as SearchIcon,
-  FilterList as FilterIcon,
   Visibility as ViewIcon,
-  Edit as EditIcon,
-  Delete as DeleteIcon,
   Refresh as RefreshIcon,
+  Person as PersonIcon,
+  MedicalServices as MedicalServicesIcon,
 } from "@mui/icons-material";
 import { toast } from "react-toastify";
-import { formatDate } from "../../../../utils/dateUtils";
+import { useNavigate } from "react-router-dom";
 
 const TreatmentList = () => {
-  const [treatments, setTreatments] = useState([]);
+  const [patients, setPatients] = useState([]);
   const [loading, setLoading] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
-  const [statusFilter, setStatusFilter] = useState('active');
-  const [typeFilter, setTypeFilter] = useState('');
   const [page, setPage] = useState(0);
   const [rowsPerPage, setRowsPerPage] = useState(10);
+  const navigate = useNavigate();
+  const theme = useTheme();
+  const isSmallScreen = useMediaQuery(theme.breakpoints.down("md"));
 
   useEffect(() => {
-    fetchTreatments();
+    fetchPatients();
   }, []);
 
-  const fetchTreatments = async () => {
+  const fetchPatients = async () => {
+    setLoading(true);
     try {
-      setLoading(true);
-      const response = await fetch("http://127.0.0.1:8000/api/treatments/");
+      const response = await fetch('http://127.0.0.1:8000/api/list-patients/');
       if (response.ok) {
         const data = await response.json();
-        setTreatments(data);
+        setPatients(data || []);
       } else {
-        toast.error("Failed to load treatments");
+        toast.error('Failed to fetch patients');
       }
     } catch (error) {
-      console.error("Error fetching treatments:", error);
-      toast.error("Something went wrong while fetching treatments");
+      console.error('Error fetching patients:', error);
+      toast.error('Error fetching patients');
     } finally {
       setLoading(false);
     }
   };
 
-  const handleDeleteTreatment = async (treatmentId) => {
-    if (window.confirm("Are you sure you want to delete this treatment?")) {
-      try {
-        const response = await fetch(`http://127.0.0.1:8000/api/treatments/${treatmentId}/`, {
-          method: "DELETE",
-        });
-        
-        if (response.ok) {
-          toast.success("Treatment deleted successfully");
-          fetchTreatments();
-        } else {
-          toast.error("Failed to delete treatment");
-        }
-      } catch (error) {
-        console.error("Error deleting treatment:", error);
-        toast.error("Something went wrong while deleting treatment");
-      }
+  const handleViewPatient = (patientId) => {
+    // Check if we're in admin context by checking current path
+    const currentPath = window.location.pathname;
+    const isAdminContext = currentPath.includes('/admin-treatment');
+    
+    if (isAdminContext) {
+      navigate(`/home/treatment/${patientId}?from=admin`);
+    } else {
+      navigate(`/home/treatment/${patientId}`);
     }
   };
 
-  const handleStatusChange = async (treatmentId, newStatus) => {
-    try {
-      const response = await fetch(`http://127.0.0.1:8000/api/treatments/${treatmentId}/`, {
-        method: "PATCH",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ status: newStatus }),
-      });
-      
-      if (response.ok) {
-        toast.success("Treatment status updated");
-        fetchTreatments();
-      } else {
-        toast.error("Failed to update treatment status");
-      }
-    } catch (error) {
-      console.error("Error updating treatment status:", error);
-      toast.error("Something went wrong while updating treatment status");
-    }
+  const filteredPatients = patients.filter(patient =>
+    patient.username.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    patient.first_name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    patient.last_name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    patient.email?.toLowerCase().includes(searchTerm.toLowerCase())
+  );
+
+  const handleChangePage = (event, newPage) => {
+    setPage(newPage);
   };
 
-  // Filter treatments based on search term and filters
-  const filteredTreatments = treatments.filter(treatment => {
-    const matchesSearch = 
-      treatment.name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      treatment.patient_name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      treatment.therapist_name?.toLowerCase().includes(searchTerm.toLowerCase());
-    
-    const matchesStatus = !statusFilter || treatment.status === statusFilter;
-    const matchesType = !typeFilter || treatment.treatment_type === typeFilter;
-    
-    return matchesSearch && matchesStatus && matchesType;
-  });
+  const handleChangeRowsPerPage = (event) => {
+    setRowsPerPage(parseInt(event.target.value, 10));
+    setPage(0);
+  };
 
-  // Pagination
-  const paginatedTreatments = filteredTreatments.slice(
+  const paginatedPatients = filteredPatients.slice(
     page * rowsPerPage,
     page * rowsPerPage + rowsPerPage
   );
 
   const getStatusColor = (status) => {
-    const colors = {
-      active: 'success',
-      completed: 'info',
-      paused: 'warning',
-      cancelled: 'error',
-    };
-    return colors[status] || 'default';
+    return status ? 'success' : 'error';
   };
 
-  const getTypeLabel = (type) => {
-    return type?.replace('_', ' ').replace(/\b\w/g, l => l.toUpperCase()) || 'Unknown';
+  const getStatusText = (status) => {
+    return status ? 'Active' : 'Inactive';
   };
-
-  if (loading) {
-    return (
-      <Box sx={{ display: 'flex', justifyContent: 'center', py: 4 }}>
-        <CircularProgress />
-      </Box>
-    );
-  }
 
   return (
     <Box>
-      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
-        <Typography variant="h5" sx={{ fontWeight: 'bold' }}>
-          Treatment Management
-        </Typography>
-        <Button
-          variant="outlined"
-          startIcon={<RefreshIcon />}
-          onClick={fetchTreatments}
-        >
-          Refresh
-        </Button>
-      </Box>
-
-      {/* Filters */}
-      <Paper sx={{ p: 2, mb: 3 }}>
-        <Box sx={{ display: 'flex', gap: 2, flexWrap: 'wrap' }}>
-          <TextField
-            placeholder="Search treatments, patients, or therapists..."
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-            InputProps={{
-              startAdornment: (
-                <InputAdornment position="start">
-                  <SearchIcon />
-                </InputAdornment>
-              ),
-            }}
-            sx={{ minWidth: 300 }}
-          />
-          
-          <FormControl sx={{ minWidth: 150 }}>
-            <InputLabel>Status</InputLabel>
-            <Select
-              value={statusFilter}
-              onChange={(e) => setStatusFilter(e.target.value)}
-              label="Status"
+      {/* 搜索和过滤 - 遵循User Management设计系统 */}
+      <Card sx={{ mb: 3, borderRadius: 3, border: '1px solid', borderColor: 'grey.200', elevation: 0 }}>
+        <CardContent sx={{ p: 3 }}>
+          <Box display="flex" alignItems="center" justifyContent="space-between" mb={2}>
+            <Typography variant="h6" sx={{ fontWeight: 600 }}>
+              Search & Filter Patients
+            </Typography>
+            <Button
+              variant="outlined"
+              startIcon={<RefreshIcon />}
+              onClick={fetchPatients}
+              disabled={loading}
+              sx={{
+                borderRadius: 2,
+                textTransform: 'uppercase',
+                fontWeight: 600,
+                px: 3,
+                borderColor: '#3b82f6',
+                color: '#3b82f6',
+                '&:hover': {
+                  borderColor: '#2563eb',
+                  bgcolor: 'rgba(59, 130, 246, 0.04)',
+                }
+              }}
             >
-              <MenuItem value="">All Statuses</MenuItem>
-              <MenuItem value="active">Active</MenuItem>
-              <MenuItem value="completed">Completed</MenuItem>
-              <MenuItem value="paused">Paused</MenuItem>
-              <MenuItem value="cancelled">Cancelled</MenuItem>
-            </Select>
-          </FormControl>
+              Refresh
+            </Button>
+          </Box>
 
-          <FormControl sx={{ minWidth: 180 }}>
-            <InputLabel>Treatment Type</InputLabel>
-            <Select
-              value={typeFilter}
-              onChange={(e) => setTypeFilter(e.target.value)}
-              label="Treatment Type"
-            >
-              <MenuItem value="">All Types</MenuItem>
-              <MenuItem value="joint_specific">Joint Specific</MenuItem>
-              <MenuItem value="functional">Functional</MenuItem>
-              <MenuItem value="symmetry">Symmetry</MenuItem>
-              <MenuItem value="pain_adapted">Pain Adapted</MenuItem>
-            </Select>
-          </FormControl>
-        </Box>
-      </Paper>
-
-      {/* Results Summary */}
-      <Box sx={{ mb: 2 }}>
-        <Typography variant="body2" color="text.secondary">
-          Showing {paginatedTreatments.length} of {filteredTreatments.length} treatments
-          {statusFilter && (
-            <Chip 
-              label={`Status: ${statusFilter}`} 
-              size="small" 
-              sx={{ ml: 1 }} 
-              onDelete={() => setStatusFilter('')}
+          <Box display="flex" alignItems="center" gap={2} flexWrap="wrap">
+            <TextField
+              placeholder="Search patients by name or email..."
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              InputProps={{
+                startAdornment: (
+                  <InputAdornment position="start">
+                    <SearchIcon />
+                  </InputAdornment>
+                ),
+              }}
+              sx={{ 
+                minWidth: { xs: "100%", sm: 400 },
+                "& .MuiOutlinedInput-root": {
+                  borderRadius: 2,
+                }
+              }}
             />
-          )}
-          {typeFilter && (
-            <Chip 
-              label={`Type: ${getTypeLabel(typeFilter)}`} 
-              size="small" 
-              sx={{ ml: 1 }} 
-              onDelete={() => setTypeFilter('')}
-            />
-          )}
-        </Typography>
-      </Box>
+            <Typography variant="body2" color="text.secondary">
+              {filteredPatients.length} patient{filteredPatients.length !== 1 ? 's' : ''} found
+            </Typography>
+          </Box>
+        </CardContent>
+      </Card>
 
-      {/* Table */}
-      <TableContainer component={Paper} elevation={2}>
-        <Table>
-          <TableHead>
-            <TableRow sx={{ bgcolor: 'grey.50' }}>
-              <TableCell sx={{ fontWeight: 'bold' }}>Treatment</TableCell>
-              <TableCell sx={{ fontWeight: 'bold' }}>Patient</TableCell>
-              <TableCell sx={{ fontWeight: 'bold' }}>Therapist</TableCell>
-              <TableCell sx={{ fontWeight: 'bold' }}>Type</TableCell>
-              <TableCell sx={{ fontWeight: 'bold' }}>Status</TableCell>
-              <TableCell sx={{ fontWeight: 'bold' }}>Start Date</TableCell>
-              <TableCell sx={{ fontWeight: 'bold' }}>Exercises</TableCell>
-              <TableCell sx={{ fontWeight: 'bold' }} align="center">Actions</TableCell>
-            </TableRow>
-          </TableHead>
-          <TableBody>
-            {paginatedTreatments.length === 0 ? (
-              <TableRow>
-                <TableCell colSpan={8} align="center" sx={{ py: 4 }}>
-                  <Alert severity="info">
-                    No treatments found matching your criteria.
-                  </Alert>
-                </TableCell>
+      {/* Patients Table - 遵循User Management设计系统 */}
+      <Card sx={{ borderRadius: 3, border: '1px solid', borderColor: 'grey.200', elevation: 0 }}>
+        <TableContainer>
+          <Table>
+            <TableHead>
+              <TableRow sx={{ bgcolor: "grey.50" }}>
+                <TableCell sx={{ fontWeight: "bold", py: 2 }}>Patient</TableCell>
+                <TableCell sx={{ fontWeight: "bold", py: 2 }}>Email</TableCell>
+                <TableCell sx={{ fontWeight: "bold", py: 2 }}>Contact</TableCell>
+                <TableCell sx={{ fontWeight: "bold", py: 2 }}>Actions</TableCell>
               </TableRow>
-            ) : (
-              paginatedTreatments.map((treatment) => (
-                <TableRow 
-                  key={treatment.treatment_id}
-                  sx={{ '&:hover': { bgcolor: 'grey.50' } }}
-                >
-                  <TableCell>
-                    <Typography variant="subtitle2" sx={{ fontWeight: 'medium' }}>
-                      {treatment.name || 'Unnamed Treatment'}
-                    </Typography>
-                    <Typography variant="caption" color="text.secondary">
-                      ID: {treatment.treatment_id}
-                    </Typography>
+            </TableHead>
+            <TableBody>
+              {loading ? (
+                <TableRow>
+                  <TableCell colSpan={4} sx={{ textAlign: "center", py: 4 }}>
+                    <CircularProgress />
                   </TableCell>
-                  <TableCell>
-                    <Typography variant="body2">
-                      {treatment.patient_name || 'Unknown Patient'}
-                    </Typography>
-                    <Typography variant="caption" color="text.secondary">
-                      ID: {treatment.patient_id}
-                    </Typography>
-                  </TableCell>
-                  <TableCell>
-                    <Typography variant="body2">
-                      {treatment.therapist_name || 'Unknown Therapist'}
-                    </Typography>
-                  </TableCell>
-                  <TableCell>
-                    <Typography variant="body2">
-                      {getTypeLabel(treatment.treatment_type)}
-                    </Typography>
-                    {treatment.treatment_subtype && (
-                      <Typography variant="caption" color="text.secondary" display="block">
-                        {treatment.treatment_subtype.replace('_', ' ')}
+                </TableRow>
+              ) : paginatedPatients.length === 0 ? (
+                <TableRow>
+                  <TableCell colSpan={4} sx={{ textAlign: "center", py: 6 }}>
+                    <Box display="flex" flexDirection="column" alignItems="center" gap={2}>
+                      <MedicalServicesIcon sx={{ fontSize: 48, color: "text.secondary" }} />
+                      <Typography variant="h6" color="text.secondary">
+                        No patients found
                       </Typography>
-                    )}
-                  </TableCell>
-                  <TableCell>
-                    <Chip
-                      label={treatment.status}
-                      color={getStatusColor(treatment.status)}
-                      size="small"
-                      sx={{ textTransform: 'capitalize' }}
-                    />
-                  </TableCell>
-                  <TableCell>
-                    <Typography variant="body2">
-                      {formatDate(treatment.start_date)}
-                    </Typography>
-                    {treatment.frequency && (
-                      <Typography variant="caption" color="text.secondary" display="block">
-                        {treatment.frequency}
+                      <Typography variant="body2" color="text.secondary">
+                        {searchTerm ? "Try adjusting your search terms" : "No patients available"}
                       </Typography>
-                    )}
-                  </TableCell>
-                  <TableCell>
-                    <Typography variant="body2" sx={{ fontWeight: 'medium' }}>
-                      {treatment.exercise_count || 0} exercises
-                    </Typography>
-                  </TableCell>
-                  <TableCell align="center">
-                    <Box sx={{ display: 'flex', gap: 1 }}>
-                      <Tooltip title="View Details">
-                        <IconButton size="small" color="info">
-                          <ViewIcon />
-                        </IconButton>
-                      </Tooltip>
-                      <Tooltip title="Edit Treatment">
-                        <IconButton size="small" color="primary">
-                          <EditIcon />
-                        </IconButton>
-                      </Tooltip>
-                      <Tooltip title="Delete Treatment">
-                        <IconButton 
-                          size="small" 
-                          color="error"
-                          onClick={() => handleDeleteTreatment(treatment.treatment_id)}
-                        >
-                          <DeleteIcon />
-                        </IconButton>
-                      </Tooltip>
                     </Box>
                   </TableCell>
                 </TableRow>
-              ))
-            )}
-          </TableBody>
-        </Table>
-      </TableContainer>
-
-      {/* Pagination */}
-      <TablePagination
-        component="div"
-        count={filteredTreatments.length}
-        page={page}
-        onPageChange={(event, newPage) => setPage(newPage)}
-        rowsPerPage={rowsPerPage}
-        onRowsPerPageChange={(event) => {
-          setRowsPerPage(parseInt(event.target.value, 10));
-          setPage(0);
-        }}
-        rowsPerPageOptions={[5, 10, 25, 50]}
-      />
+              ) : (
+                paginatedPatients.map((patient) => (
+                  <TableRow 
+                    key={patient.id} 
+                    hover
+                    sx={{ 
+                      "&:hover": { 
+                        bgcolor: "grey.50" 
+                      } 
+                    }}
+                  >
+                    <TableCell sx={{ py: 2 }}>
+                      <Box display="flex" alignItems="center" gap={2}>
+                        <Avatar sx={{ bgcolor: "primary.main" }}>
+                          <PersonIcon />
+                        </Avatar>
+                        <Box>
+                          <Typography variant="subtitle2" sx={{ fontWeight: "bold" }}>
+                            {patient.username}
+                          </Typography>
+                          <Typography variant="body2" color="text.secondary">
+                            {patient.first_name && patient.last_name 
+                              ? `${patient.first_name} ${patient.last_name}` 
+                              : patient.username}
+                          </Typography>
+                        </Box>
+                      </Box>
+                    </TableCell>
+                    <TableCell sx={{ py: 2 }}>
+                      <Typography variant="body2">{patient.email}</Typography>
+                    </TableCell>
+                    <TableCell sx={{ py: 2 }}>
+                      <Typography variant="body2">{patient.contact_number || "N/A"}</Typography>
+                    </TableCell>
+                    <TableCell sx={{ py: 2 }}>
+                      <Button
+                        variant="outlined"
+                        size="small"
+                        startIcon={<ViewIcon />}
+                        onClick={() => handleViewPatient(patient.id)}
+                        sx={{ 
+                          borderRadius: 2, 
+                          textTransform: "uppercase",
+                          fontWeight: 600,
+                          px: 3,
+                          "&:hover": {
+                            bgcolor: "primary.50",
+                            borderColor: "primary.main"
+                          }
+                        }}
+                      >
+                        View Details
+                      </Button>
+                    </TableCell>
+                  </TableRow>
+                ))
+              )}
+            </TableBody>
+          </Table>
+        </TableContainer>
+        </Card>
+        
+        {/* 分页组件 - 遵循User Management设计系统 */}
+        <Card sx={{ 
+          mt: 2,
+          borderRadius: 3,
+          border: '1px solid',
+          borderColor: 'grey.200',
+          elevation: 0
+        }}>
+          <TablePagination
+            rowsPerPageOptions={[5, 10, 25]}
+            component="div"
+            count={filteredPatients.length}
+            rowsPerPage={rowsPerPage}
+            page={page}
+            onPageChange={handleChangePage}
+            onRowsPerPageChange={handleChangeRowsPerPage}
+            sx={{
+              backgroundColor: 'grey.50',
+              borderTop: '1px solid',
+              borderColor: 'grey.200',
+              '& .MuiTablePagination-toolbar': {
+                paddingLeft: 3,
+                paddingRight: 3,
+                paddingTop: 2,
+                paddingBottom: 2,
+              },
+              '& .MuiTablePagination-selectLabel': {
+                marginBottom: 0,
+                fontSize: '0.9rem',
+                fontWeight: 500,
+                color: 'text.secondary'
+              },
+              '& .MuiTablePagination-displayedRows': {
+                marginBottom: 0,
+                fontSize: '0.9rem',
+                fontWeight: 500,
+                color: 'text.primary'
+              },
+              '& .MuiTablePagination-select': {
+                fontSize: '0.9rem',
+                fontWeight: 500,
+                backgroundColor: 'white',
+                borderRadius: 2,
+                border: '1px solid',
+                borderColor: 'grey.300',
+                '&:hover': {
+                  borderColor: 'primary.main'
+                }
+              },
+              '& .MuiIconButton-root': {
+                color: 'primary.main',
+                '&:hover': {
+                  backgroundColor: 'primary.50'
+                },
+                '&:disabled': {
+                  color: 'grey.400'
+                }
+              }
+            }}
+          />
+        </Card>
     </Box>
   );
 };
 
-export default TreatmentList; 
+export default TreatmentList;

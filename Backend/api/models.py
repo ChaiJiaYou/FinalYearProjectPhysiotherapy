@@ -276,19 +276,61 @@ class UnavailableSlot(models.Model):
         return f"Unavailable {self.therapist_id.username} - {self.start_at} to {self.end_at}"
 
 class MedicalHistory(models.Model):
-    patient = models.ForeignKey(CustomUser, on_delete=models.CASCADE, related_name="medical_histories",  limit_choices_to={'role': 'patient'} )
-
-    session_date = models.DateField()
-    description = models.TextField()  # Summary of patient symptoms and progress
-    objective_findings = models.TextField(blank=True, null=True)  # Therapist-observed facts
-    treatment = models.TextField(blank=True, null=True)           # What was done in the session
-    remarks = models.TextField(blank=True, null=True)             # Optional comments
-
+    # 患者 - 必填
+    patient_id = models.ForeignKey(
+        CustomUser, 
+        on_delete=models.CASCADE, 
+        related_name="medical_histories", 
+        limit_choices_to={'role': 'patient'}
+    )
+    
+    # 记录者 - 可为空
+    recorded_by_id = models.ForeignKey(
+        CustomUser, 
+        null=True, 
+        blank=True,
+        on_delete=models.SET_NULL, 
+        related_name="entered_histories",
+        limit_choices_to={'role__in': ['therapist', 'admin']}
+    )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
+    # Past Medical History
+    past_medical_history = models.TextField(
+        blank=True, null=True,
+        help_text="Details of any diagnosed medical conditions, including chronic illnesses and past significant illnesses."
+    )
+
+    # Surgical History
+    surgical_history = models.TextField(
+        blank=True, null=True,
+        help_text="List of past surgeries with procedures and dates."
+    )
+
+    # Family History
+    family_history = models.TextField(
+        blank=True, null=True,
+        help_text="Information about health of blood relatives, e.g., cancer, hypertension, diabetes."
+    )
+
+    # Medications
+    medications = models.TextField(
+        blank=True, null=True,
+        help_text="Comprehensive list of current and past medications, including dosage and frequency."
+    )
+
+    # Allergies
+    allergies = models.TextField(
+        blank=True, null=True,
+        help_text="Known allergies to medications, food, or environmental factors."
+    )
+
+    # Optional notes
+    notes = models.TextField(blank=True, null=True)
+
     def __str__(self):
-        return f"History on {self.session_date} - {self.patient.user.username}"
+        return f"Medical History for {self.patient_id.username} ({self.created_at.date()})"
     
 class Notification(models.Model):
     NOTIFICATION_TYPES = (
@@ -354,115 +396,47 @@ class Exercise(models.Model):
         ('advanced', 'Advanced'),
     ]
     
+    CATEGORY_CHOICES = [
+        ('upper_body', 'Upper Body'),
+        ('lower_body', 'Lower Body'),
+        ('full_body', 'Full Body'),
+    ]
+    
     exercise_id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     name = models.CharField(max_length=100, default='Unnamed Exercise')  # e.g., Wall Crawl, Shoulder Flexion
-    body_part = models.CharField(max_length=50, default='general')  # e.g., left_shoulder, right_knee
-    category = models.CharField(max_length=50, default='general')  # e.g., ROM, Strength, Balance
+    category = models.CharField(max_length=20, choices=CATEGORY_CHOICES, default='upper_body')
     difficulty = models.CharField(max_length=20, choices=DIFFICULTY_CHOICES, default='beginner')
-    default_metrics = models.JSONField(default=dict)  # e.g., {"angle": 90, "hold_time": 5}
     instructions = models.TextField(default='No instructions provided')  # Exercise instructions
-    demo_video_url = models.CharField(max_length=255, blank=True, null=True)
-    created_at = models.DateTimeField(auto_now_add=True)
+    action_id = models.ForeignKey('Action', on_delete=models.SET_NULL, null=True, blank=True, related_name="exercises")
     created_by = models.ForeignKey(CustomUser, on_delete=models.CASCADE, related_name="created_exercises", limit_choices_to={'role': 'therapist'}, null=True, blank=True)
-    is_active = models.BooleanField(default=True)
-    detection_rules = models.JSONField(default=dict, blank=True)  # JSON rules for Rule Engine
     
     def __str__(self):
-        return f"{self.name} ({self.body_part})"
+        return f"{self.name} ({self.category})"
     
     class Meta:
         ordering = ['category', 'name']
 
-# 2. TreatmentTemplate - Reusable treatment templates
-class TreatmentTemplate(models.Model):
-    TREATMENT_TYPE_CHOICES = [
-        ('joint_specific', 'Joint Specific'),
-        ('functional', 'Functional'),
-        ('symmetry', 'Symmetry'),
-        ('pain_adapted', 'Pain Adapted'),
-    ]
-    
-    template_id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    name = models.CharField(max_length=100, default='Unnamed Template')  # e.g., "Shoulder ROM Recovery", "Post-Surgery Knee"
-    treatment_type = models.CharField(max_length=20, choices=TREATMENT_TYPE_CHOICES, default='joint_specific')
-    treatment_subtype = models.CharField(max_length=50, blank=True, null=True)
-    condition = models.CharField(max_length=100, default='General Condition')  # e.g., "Frozen Shoulder", "ACL Recovery"
-    description = models.TextField(blank=True, null=True)
-    default_frequency = models.CharField(max_length=20, default='3x/week')  # Default frequency
-    estimated_duration_weeks = models.IntegerField(blank=True, null=True)  # Estimated treatment duration
-    created_at = models.DateTimeField(auto_now_add=True)
-    created_by = models.ForeignKey(CustomUser, on_delete=models.CASCADE, related_name="created_templates", limit_choices_to={'role': 'therapist'}, null=True, blank=True)
-    is_active = models.BooleanField(default=True)
-    
-    def __str__(self):
-        return f"Template: {self.name} ({self.treatment_type})"
-    
-    class Meta:
-        ordering = ['treatment_type', 'name']
-
-# 3. TemplateExercise - Association between templates and exercises
-class TemplateExercise(models.Model):
-    template_exercise_id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    template_id = models.ForeignKey(TreatmentTemplate, on_delete=models.CASCADE, related_name="template_exercises")
-    exercise_id = models.ForeignKey(Exercise, on_delete=models.CASCADE, related_name="template_associations")
-    default_target_metrics = models.JSONField(default=dict)  # Override exercise defaults if needed
-    default_repetitions = models.IntegerField(blank=True, null=True)
-    default_sets = models.IntegerField(blank=True, null=True)
-    default_pain_threshold = models.IntegerField(blank=True, null=True)  # 1-10 scale
-    order_in_template = models.IntegerField(default=1)  # Exercise order in template
-    is_required = models.BooleanField(default=True)  # If false, therapist can optionally include
-    
-    def __str__(self):
-        return f"{self.template_id.name} - {self.exercise_id.name}"
-    
-    class Meta:
-        ordering = ['template_id', 'order_in_template']
-        unique_together = ['template_id', 'exercise_id']
-
-# 4. Treatment - Main treatment records (supports both template and custom)
+# 2. Treatment - Main treatment records
 class Treatment(models.Model):
-    TREATMENT_TYPE_CHOICES = [
-        ('joint_specific', 'Joint Specific'),
-        ('functional', 'Functional'),
-        ('symmetry', 'Symmetry'),
-        ('pain_adapted', 'Pain Adapted'),
-    ]
-    
     STATUS_CHOICES = [
         ('active', 'Active'),
-        ('paused', 'Paused'),
         ('completed', 'Completed'),
-    ]
-    
-    CREATION_METHOD_CHOICES = [
-        ('template', 'From Template'),
-        ('custom', 'Custom Created'),
     ]
     
     treatment_id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     patient_id = models.ForeignKey(CustomUser, on_delete=models.CASCADE, related_name="patient_treatments", limit_choices_to={'role': 'patient'})
     therapist_id = models.ForeignKey(CustomUser, on_delete=models.CASCADE, related_name="therapist_treatments", limit_choices_to={'role': 'therapist'})
     
-    # Template reference (nullable for custom treatments)
-    template_id = models.ForeignKey(TreatmentTemplate, on_delete=models.SET_NULL, null=True, blank=True, related_name="treatments")
-    creation_method = models.CharField(max_length=20, choices=CREATION_METHOD_CHOICES, default='custom')
-    
     # Treatment details
-    name = models.CharField(max_length=100, default='Unnamed Treatment')  # Custom name or template name
-    treatment_type = models.CharField(max_length=20, choices=TREATMENT_TYPE_CHOICES, default='joint_specific')
-    treatment_subtype = models.CharField(max_length=50, blank=True, null=True)
-    condition = models.CharField(max_length=100, blank=True, null=True)  # Patient condition
+    name = models.CharField(max_length=100, default='Unnamed Treatment')  # Treatment plan name
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='active')
-    frequency = models.CharField(max_length=20, blank=True, null=True)  # e.g., daily, 3x/week
     
     # Dates
     start_date = models.DateField()
     end_date = models.DateField(blank=True, null=True)
-    estimated_end_date = models.DateField(blank=True, null=True)
     
     # Notes and goals
-    treatment_goals = models.TextField(blank=True, null=True)
-    notes = models.TextField(blank=True, null=True)
+    goal_notes = models.TextField(blank=True, null=True)
     
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -473,26 +447,23 @@ class Treatment(models.Model):
     class Meta:
         ordering = ['-created_at']
 
-# 5. TreatmentExercise - Individual treatment-exercise associations
+# 3. TreatmentExercise - Association between treatment plans and exercises
 class TreatmentExercise(models.Model):
     treatment_exercise_id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     treatment_id = models.ForeignKey(Treatment, on_delete=models.CASCADE, related_name="treatment_exercises")
     exercise_id = models.ForeignKey(Exercise, on_delete=models.CASCADE, related_name="treatment_assignments")
     
-    # Customizable parameters (can override template/exercise defaults)
-    target_metrics = models.JSONField(default=dict)  # e.g., {"flexion": 90, "hold_sec": 5}
-    repetitions = models.IntegerField(blank=True, null=True)
-    sets = models.IntegerField(blank=True, null=True)
-    pain_threshold = models.IntegerField(blank=True, null=True)  # 1-10 scale
+    # Exercise parameters for this treatment plan
+    reps_per_set = models.IntegerField(blank=True, null=True)
+    sets = models.IntegerField(default=1, help_text="Number of sets for this exercise")
+    duration_per_set = models.IntegerField(blank=True, null=True, help_text="Duration per set in seconds")
+    notes = models.TextField(blank=True, null=True)
     
     # Exercise scheduling
     order_in_treatment = models.IntegerField(default=1)
     is_active = models.BooleanField(default=True)
     start_date = models.DateField(blank=True, null=True)
     end_date = models.DateField(blank=True, null=True)
-    
-    # Progress tracking
-    progress_notes = models.TextField(blank=True, null=True)
     
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -504,7 +475,7 @@ class TreatmentExercise(models.Model):
         ordering = ['treatment_id', 'order_in_treatment']
         unique_together = ['treatment_id', 'exercise_id']
 
-# 6. ExerciseRecord - Performance tracking records
+# 4. ExerciseRecord - Performance tracking records
 class ExerciseRecord(models.Model):
     record_id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     treatment_exercise_id = models.ForeignKey(TreatmentExercise, on_delete=models.CASCADE, related_name="records")

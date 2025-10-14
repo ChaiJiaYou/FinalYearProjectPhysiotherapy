@@ -35,6 +35,7 @@ class DTWRecognizer:
         feature_weights: Optional[List[float]] = None,
         median_len: Optional[int] = None,
         energy_p30: float = 0.2,
+        energy_p50: float = 0.5,
         energy_p70: float = 1.0,
         smoothing_alpha: float = 0.12,
         count_on_entry: bool = True
@@ -112,11 +113,13 @@ class DTWRecognizer:
         self.out_consecutive = 0
         self.median_len = int(median_len) if median_len else 40
         self.energy_p30 = float(energy_p30)
+        self.energy_p50 = float(energy_p50)  # NEW: median energy for entry gate
         self.energy_p70 = float(energy_p70)
         self.min_frames_in = max(2, min(10, int(round(0.10 * self.median_len)))) if min_frames_in <= 1 else min_frames_in
         self.min_frames_out = max(1, min(6, int(round(0.05 * self.median_len)))) if min_frames_out <= 1 else min_frames_out
-        self.cooldown_after_count = max(3, min(12, int(round(0.12 * self.median_len))))
-        self.out_rearm_frames = max(4, min(12, int(round(0.12 * self.median_len))))
+        # OPTIMIZED: Extended cooldown period (15-20 frames) to prevent double counting
+        self.cooldown_after_count = max(15, min(20, int(round(0.40 * self.median_len))))
+        self.out_rearm_frames = max(15, min(20, int(round(0.40 * self.median_len))))
         # Rolling stats for z-score quick exit
         self.roll_values: List[float] = []
         self.roll_maxlen = max(60, self.median_len)
@@ -231,8 +234,10 @@ class DTWRecognizer:
             if self.out_consecutive >= self.out_rearm_frames or motion_energy >= self.energy_p70:
                 self.rearmed_ready = True
             # Require: not in cooldown AND re-armed (or first cycle) AND below enter threshold
+            # OPTIMIZED: Added energy gate - must have sufficient motion energy to enter
             rearmed = self.rearmed_ready or (self.rep_count == 0)
-            if (self.cooldown_frames == 0) and rearmed and (distance_smooth <= self.thr_in):
+            energy_gate_ok = motion_energy >= self.energy_p50  # NEW: energy gate to prevent static false entry
+            if (self.cooldown_frames == 0) and rearmed and (distance_smooth <= self.thr_in) and energy_gate_ok:
                 self.frames_in_state += 1
                 if self.frames_in_state >= self.min_frames_in:
                     self.state = 'IN'
@@ -277,19 +282,14 @@ class DTWRecognizer:
         T1, F1 = seq1.shape
         T2, F2 = seq2.shape
         
-        print(f"DEBUG DTW CALC: seq1 shape {seq1.shape}, seq2 shape {seq2.shape}")
-        print(f"DEBUG DTW CALC: seq1[0][:3] = {seq1[0][:3]}")
-        print(f"DEBUG DTW CALC: seq2[0][:3] = {seq2[0][:3]}")
         
         if F1 != F2:
-            print(f"DEBUG DTW CALC: Feature dimension mismatch: {F1} vs {F2}")
             return 999999.0
         
         # Sakoe-Chiba band constraint - make it more permissive for different lengths
         band_width = max(5, int(self.band_ratio * max(T1, T2)) + abs(T1 - T2) // 2)
         # Ensure the band is large enough to always allow reaching (T1,T2)
         band_width = max(band_width, abs(T1 - T2) + 1)
-        print(f"DEBUG DTW CALC: Band width: {band_width} (T1={T1}, T2={T2})")
         
         # Initialize DTW matrix with large values
         dtw_matrix = np.full((T1 + 1, T2 + 1), 999999.0)
@@ -318,15 +318,10 @@ class DTWRecognizer:
         # Return normalized distance
         final_distance = dtw_matrix[T1, T2]
         normalized_distance = final_distance / max(T1, T2)
-        print(f"DEBUG DTW CALC: Raw distance: {final_distance:.2f}, Normalized: {normalized_distance:.6f}")
-        print(f"DEBUG DTW CALC: DTW matrix shape: {dtw_matrix.shape}, final cell value: {dtw_matrix[T1, T2]:.2f}")
         
         # Check if DTW failed (still has the large initial value)
         if final_distance >= 999999.0:
-            print(f"DEBUG DTW CALC: ❌ DTW computation failed - returned initial value")
-            print(f"DEBUG DTW CALC: Matrix[1,1]: {dtw_matrix[1,1]:.2f}, Matrix[T1//2, T2//2]: {dtw_matrix[T1//2, T2//2]:.2f}")
             # Fallback: compute full DTW without band constraint
-            print("DEBUG DTW CALC: Falling back to full DTW (no band)")
             return self._dtw_distance_full(seq1, seq2)
         
         return normalized_distance
@@ -349,7 +344,6 @@ class DTWRecognizer:
                 )
         final_distance = dtw_matrix[T1, T2]
         normalized = final_distance / max(T1, T2)
-        print(f"DEBUG DTW FULL: Raw {final_distance:.2f}, Normalized {normalized:.6f}")
         return normalized
     
     def _get_output_dict(self, distance: float) -> Dict[str, Any]:
@@ -398,14 +392,13 @@ def initialize_recognizer(
     feature_weights: Optional[List[float]] = None,
     median_len: Optional[int] = None,
     energy_p30: float = 0.2,
+    energy_p50: float = 0.5,
     energy_p70: float = 1.0,
     smoothing_alpha: float = 0.12
 ) -> None:
     """Initialize global DTW recognizer"""
     global _global_recognizer
     
-    print(f"DEBUG: initialize_recognizer called with:")
-    print(f"  - templates count: {len(templates)}")
     print(f"  - thresholds: {thresholds}")
     print(f"  - window_size: {window_size}")
     print(f"  - windows: {windows}")
@@ -419,7 +412,6 @@ def initialize_recognizer(
         thr_in = thresholds.get('thr_in', thresholds.get('median', 0.5))
         thr_out = thresholds.get('thr_out', thresholds.get('median', 1.0) + 0.1)
         
-        print(f"DEBUG: Creating DTWRecognizer with thr_in={thr_in}, thr_out={thr_out}")
         
         _global_recognizer = DTWRecognizer(
             templates=templates,
@@ -432,10 +424,10 @@ def initialize_recognizer(
             feature_weights=feature_weights,
             median_len=median_len,
             energy_p30=energy_p30,
+            energy_p50=energy_p50,
             energy_p70=energy_p70,
             smoothing_alpha=smoothing_alpha
         )
-        print("DEBUG: DTWRecognizer created successfully")
 
         # --- Auto recalibrate thresholds to runtime distance scale ---
         try:
@@ -455,15 +447,13 @@ def initialize_recognizer(
                     # If provided thresholds are far smaller than runtime scale, bump them
                     too_small = (thr_in < 0.5 * base) or (thr_out < 0.6 * base)
                     if too_small:
-                        new_in = max(0.1, 0.95 * base)
-                        new_out = max(new_in + 0.05, 1.05 * base)
+                        # OPTIMIZED: Wider hysteresis gap (0.75x - 1.35x) for stability
+                        new_in = max(0.1, 0.75 * base)
+                        new_out = max(new_in + 0.2, 1.35 * base)
                         _global_recognizer.update_thresholds(new_in, new_out)
-                        print(f"DEBUG: Auto-recalibrated thresholds to runtime scale based on templates: base={base:.3f} → thr_in={new_in:.3f}, thr_out={new_out:.3f}")
         except Exception as cal_e:
-            print(f"DEBUG: Threshold auto-recalibration skipped due to: {cal_e}")
-        
+            pass;
     except Exception as e:
-        print(f"DEBUG: Error creating DTWRecognizer: {e}")
         import traceback
         traceback.print_exc()
         raise
@@ -481,8 +471,6 @@ def dtw_infer_update(payload: Dict[str, Any]) -> Dict[str, Any]:
     """
     global _global_recognizer
     
-    print(f"DEBUG: dtw_infer_update called with payload keys: {list(payload.keys()) if payload else 'None'}")
-    print(f"DEBUG: _global_recognizer is None: {_global_recognizer is None}")
     
     if _global_recognizer is None:
         return {
@@ -508,7 +496,6 @@ def dtw_infer_update(payload: Dict[str, Any]) -> Dict[str, Any]:
             }
             
         features = payload.get('features')
-        print(f"DEBUG: features extracted: {features is not None}, type: {type(features)}")
         
         if features is None:
             return {
@@ -524,13 +511,9 @@ def dtw_infer_update(payload: Dict[str, Any]) -> Dict[str, Any]:
         
         # Convert to numpy array
         features = np.array(features, dtype=np.float32)
-        print(f"DEBUG: Input features shape: {features.shape}")
         
         # Update recognizer
         result = _global_recognizer.update(features)
-        print(f"DEBUG: DTW result - state: {result.get('state')}, reps: {result.get('reps')}, distance: {result.get('distance'):.2f}")
-        print(f"DEBUG: Thresholds - in: {_global_recognizer.thr_in:.2f}, out: {_global_recognizer.thr_out:.2f}")
-        print(f"DEBUG: Buffer size: {len(_global_recognizer.feature_buffer)}, Required: {_global_recognizer.window_size // 2}")
         
         # Handle threshold updates from payload
         if 'update_thresholds' in payload and payload['update_thresholds'] is not None:
@@ -539,7 +522,6 @@ def dtw_infer_update(payload: Dict[str, Any]) -> Dict[str, Any]:
                 new_thresholds.get('thr_in', _global_recognizer.thr_in),
                 new_thresholds.get('thr_out', _global_recognizer.thr_out)
             )
-            print(f"DEBUG: Thresholds updated to in:{_global_recognizer.thr_in:.2f}/out:{_global_recognizer.thr_out:.2f}")
         
         return result
         

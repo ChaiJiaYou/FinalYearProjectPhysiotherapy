@@ -98,23 +98,25 @@ def finalize_action_from_video(action_id: int) -> Dict[str, Any]:
         # Feature weights
         feat_weights = feature_weights_from_pos_neg(pos_concat, neg_concat)
 
-        # Energy stats
+        # Energy stats - OPTIMIZED: Added energy_p50 for entry gate
         energy_p70 = float(np.percentile(pos_energies, 70)) if pos_energies else 1.0
+        energy_p50 = float(np.percentile(pos_energies, 50)) if pos_energies else 0.5  # NEW: median energy threshold
         energy_p30 = float(np.percentile(pos_energies, 30)) if pos_energies else 0.2
 
         # Supervised threshold via pos/neg windows DIST (fallback to baseline if degenerate)
         try:
             dist_pos, dist_neg = _compute_pos_neg_dists(all_templates, windows, feat_weights)
             thr = pick_threshold(dist_pos, dist_neg)
+            # OPTIMIZED: Wider hysteresis gap (0.75x - 1.35x) for stability
+            # Gap = 60% of threshold, much wider than previous 10%
             thresholds = {
-                'thr_in': float(0.95 * thr),
-                'thr_out': float(1.05 * thr),
+                'thr_in': float(0.75 * thr),
+                'thr_out': float(1.35 * thr),
                 'median': float(thr),
                 'iqr': float(np.subtract(*np.percentile(np.r_[dist_pos, dist_neg], [75, 25])))
             }
         except Exception as e:
-            print(f"DEBUG finalize: supervised threshold fallback due to {e}")
-
+            pass
         
         # Update action parameters
         action.params_json = {
@@ -127,6 +129,7 @@ def finalize_action_from_video(action_id: int) -> Dict[str, Any]:
             'total_frames': total_frames_processed,
             'feature_weights': feat_weights.tolist(),
             'energy_p70': energy_p70,
+            'energy_p50': energy_p50,  # NEW: median energy for entry gate
             'energy_p30': energy_p30,
             'use_centroids': False,
             'centroids': []
@@ -327,7 +330,16 @@ def _process_sample_to_templates(sample: ActionSample) -> Tuple[List[Dict], int]
     
     elif sample.video_url:
         # Extract keypoints from video file
-        keypoints_sequence = _extract_keypoints_from_video(sample.video_url)
+        # Handle both relative URLs and absolute paths
+        if sample.video_url.startswith('/media/'):
+            # Relative URL - construct full path
+            from django.conf import settings
+            import os
+            video_path = os.path.join(settings.BASE_DIR, sample.video_url.lstrip('/'))
+        else:
+            # Absolute path (legacy)
+            video_path = sample.video_url
+        keypoints_sequence = _extract_keypoints_from_video(video_path)
     
     else:
         raise ValueError("Sample has no keypoints or video data")
@@ -492,12 +504,9 @@ def setup_action_for_inference(action_id: int) -> Dict[str, Any]:
         _rt_prev_features = None
         _rt_last_root = None
         _rt_last_scale = None
-        print(f"DEBUG: Setting up action {action_id}")
         action = Action.objects.get(id=action_id)
-        print(f"DEBUG: Found action: {action.name}")
         
         templates = ActionTemplate.objects.filter(action=action)
-        print(f"DEBUG: Found {templates.count()} templates")
         
         if not templates.exists():
             return {'success': False, 'error': 'No templates found for action'}
@@ -506,7 +515,6 @@ def setup_action_for_inference(action_id: int) -> Dict[str, Any]:
         template_data = []
         template_lengths = []
         for i, template in enumerate(templates):
-            print(f"DEBUG: Processing template {i}: {template.seq_json.keys() if template.seq_json else 'None'}")
             if template.seq_json and 'data' in template.seq_json:
                 data = template.seq_json['data']
                 template_data.append(data)
@@ -515,9 +523,7 @@ def setup_action_for_inference(action_id: int) -> Dict[str, Any]:
                 except Exception:
                     pass
             else:
-                print(f"DEBUG: Template {i} has invalid data structure")
-        
-        print(f"DEBUG: Prepared {len(template_data)} valid templates")
+                pass
         
         # Get thresholds from action parameters
         thresholds = action.params_json.get('thresholds', {
@@ -547,7 +553,6 @@ def setup_action_for_inference(action_id: int) -> Dict[str, Any]:
             ]
         window_size = max(windows)  # recognizer buffer size uses the largest
         
-        print(f"DEBUG: Using thresholds: {thresholds}, window_size: {window_size}")
         
         # Initialize global recognizer with enhanced context
         initialize_recognizer(
@@ -559,10 +564,10 @@ def setup_action_for_inference(action_id: int) -> Dict[str, Any]:
             feature_weights=action.params_json.get('feature_weights') if action.params_json else None,
             median_len=action.params_json.get('median_len') if action.params_json else None,
             energy_p30=action.params_json.get('energy_p30', 0.2) if action.params_json else 0.2,
+            energy_p50=action.params_json.get('energy_p50', 0.5) if action.params_json else 0.5,
             energy_p70=action.params_json.get('energy_p70', 1.0) if action.params_json else 1.0,
             smoothing_alpha=0.12
         )
-        print("DEBUG: Recognizer initialized successfully")
         
         return {
             'success': True,
@@ -574,10 +579,8 @@ def setup_action_for_inference(action_id: int) -> Dict[str, Any]:
         }
         
     except Action.DoesNotExist:
-        print("DEBUG: Action not found")
         return {'success': False, 'error': 'Action not found'}
     except Exception as e:
-        print(f"DEBUG: Exception in setup_action_for_inference: {e}")
         import traceback
         traceback.print_exc()
         return {'success': False, 'error': str(e)}
