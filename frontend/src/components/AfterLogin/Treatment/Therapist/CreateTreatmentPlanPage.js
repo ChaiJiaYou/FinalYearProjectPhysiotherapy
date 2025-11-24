@@ -74,6 +74,7 @@ const CreateTreatmentPlanPage = () => {
   const [goalNotes, setGoalNotes] = useState('');
   const [selectedExercises, setSelectedExercises] = useState([]);
   const [animatingExercise, setAnimatingExercise] = useState(null);
+  const [originalExerciseIds, setOriginalExerciseIds] = useState([]);
   
   const therapistId = localStorage.getItem("id");
 
@@ -85,6 +86,10 @@ const CreateTreatmentPlanPage = () => {
     if (treatmentId) {
       setIsEditMode(true);
       fetchExistingTreatment();
+    } else {
+      setIsEditMode(false);
+      setOriginalExerciseIds([]);
+      setSelectedExercises([]);
     }
   }, [treatmentId]);
 
@@ -174,9 +179,16 @@ const CreateTreatmentPlanPage = () => {
         const exercisesData = await exercisesResponse.json();
         console.log('Exercises data received:', exercisesData);
         
+        // Track original treatment exercise ids for deletion detection
+        const treatmentExerciseIds = exercisesData
+          .map((exercise) => exercise.treatment_exercise_id)
+          .filter(Boolean);
+        setOriginalExerciseIds(treatmentExerciseIds);
+        
         // Transform the data to match the expected format
         const transformedExercises = exercisesData.map((exercise, index) => ({
-          id: exercise.exercise_id || Date.now() + index, // Use exercise_id as id
+          id: exercise.treatment_exercise_id || exercise.exercise_id || `${Date.now()}_${index}`,
+          treatment_exercise_id: exercise.treatment_exercise_id || null,
           exercise_id: exercise.exercise_id,
           exercise_name: exercise.exercise_name,
           category: exercise.category,
@@ -192,6 +204,7 @@ const CreateTreatmentPlanPage = () => {
       } else {
         console.error('Failed to fetch exercises:', exercisesResponse.status);
         setSelectedExercises([]);
+        setOriginalExerciseIds([]);
       }
       
     } catch (error) {
@@ -255,7 +268,8 @@ const CreateTreatmentPlanPage = () => {
     }
 
     const newExercise = {
-      id: Date.now(),
+      id: `new_${Date.now()}`,
+      treatment_exercise_id: null,
       exercise_id: exercise.exercise_id,
       exercise_name: exercise.name,
       category: exercise.category,
@@ -319,22 +333,41 @@ const CreateTreatmentPlanPage = () => {
           throw new Error("Failed to update treatment");
         }
 
-        // Delete existing exercises and create new ones
-        // First, get existing exercises to delete them
-        const existingExercisesResponse = await fetch(`http://127.0.0.1:8000/api/treatment-exercises/${treatmentId}/`);
-        if (existingExercisesResponse.ok) {
-          const existingExercises = await existingExercisesResponse.json();
-          // Delete existing exercises
-          for (const exercise of existingExercises) {
-            await fetch(`http://127.0.0.1:8000/api/treatment-exercises/${exercise.exercise_id}/`, {
-              method: "DELETE",
-            });
+        // Split exercises into existing and new
+        const existingExercisesToUpdate = selectedExercises.filter((exercise) => !!exercise.treatment_exercise_id);
+        const newExercisesToCreate = selectedExercises.filter((exercise) => !exercise.treatment_exercise_id);
+
+        // Update existing exercises
+        for (let index = 0; index < existingExercisesToUpdate.length; index += 1) {
+          const exercise = existingExercisesToUpdate[index];
+          const exerciseData = {
+            reps_per_set: exercise.reps_per_set,
+            sets: exercise.sets,
+            duration_per_set: exercise.duration_per_set,
+            notes: exercise.notes || null,
+            order_in_treatment: index + 1,
+            is_active: true,
+          };
+
+          const response = await fetch(`http://127.0.0.1:8000/api/update-treatment-exercise/${exercise.treatment_exercise_id}/`, {
+            method: "PATCH",
+            headers: {
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify(exerciseData),
+          });
+
+          if (!response.ok) {
+            const errorText = await response.text();
+            console.error("Failed to update exercise:", exercise.exercise_name, errorText);
+            throw new Error("Failed to update treatment exercise");
           }
         }
 
-        // Create new exercises
-        for (let i = 0; i < selectedExercises.length; i++) {
-          const exercise = selectedExercises[i];
+        // Create newly added exercises (continue order after existing ones)
+        for (let i = 0; i < newExercisesToCreate.length; i += 1) {
+          const exercise = newExercisesToCreate[i];
+          const orderIndex = existingExercisesToUpdate.length + i + 1;
           const exerciseData = {
             treatment_id: treatmentId,
             exercise_id: exercise.exercise_id,
@@ -342,7 +375,7 @@ const CreateTreatmentPlanPage = () => {
             sets: exercise.sets,
             duration_per_set: exercise.duration_per_set,
             notes: exercise.notes || null,
-            order_in_treatment: i + 1,
+            order_in_treatment: orderIndex,
             is_active: true,
           };
 
@@ -355,7 +388,24 @@ const CreateTreatmentPlanPage = () => {
           });
 
           if (!exerciseResponse.ok) {
-            console.error("Failed to create exercise:", exercise.exercise_name);
+            const errorText = await exerciseResponse.text();
+            console.error("Failed to create exercise:", exercise.exercise_name, errorText);
+            throw new Error("Failed to create treatment exercise");
+          }
+        }
+
+        // Handle removed exercises
+        const currentExistingIds = existingExercisesToUpdate.map((exercise) => exercise.treatment_exercise_id);
+        const removedExerciseIds = originalExerciseIds.filter((id) => !currentExistingIds.includes(id));
+
+        for (const removedId of removedExerciseIds) {
+          const deleteResponse = await fetch(`http://127.0.0.1:8000/api/delete-treatment-exercise/${removedId}/`, {
+            method: "DELETE",
+          });
+
+          if (!deleteResponse.ok) {
+            const errorText = await deleteResponse.text();
+            console.error("Failed to delete treatment exercise:", removedId, errorText);
           }
         }
 

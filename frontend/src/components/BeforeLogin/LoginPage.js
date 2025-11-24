@@ -218,20 +218,6 @@ function LoginPage() {
           }}
         />
         
-        <Typography align="right" mb={3} mt={1}>
-          <a 
-            href="/forgot-password" 
-            style={{ 
-              textDecoration: 'none', 
-              color: '#3b82f6',
-              fontSize: '0.875rem',
-              fontWeight: 500
-            }}
-          >
-            Forgot Password?
-          </a>
-        </Typography>
-        
         <Button
           type="submit"
           fullWidth

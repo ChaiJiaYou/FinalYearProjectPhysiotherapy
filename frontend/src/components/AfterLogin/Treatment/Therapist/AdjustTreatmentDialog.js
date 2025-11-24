@@ -128,7 +128,13 @@ const AdjustTreatmentDialog = ({ open, onClose, onSuccess, treatment }) => {
       const response = await fetch(`http://127.0.0.1:8000/api/treatment-exercises/${treatment.treatment_id}/`);
       if (response.ok) {
         const data = await response.json();
-        setExercises(data);
+        const mappedExercises = data.map((exercise) => ({
+          ...exercise,
+          repetitions: exercise.reps_per_set ?? exercise.repetitions ?? 0,
+          sets: exercise.sets ?? 1,
+          duration_per_set: exercise.duration_per_set ?? 0,
+        }));
+        setExercises(mappedExercises);
       } else {
         toast.error("Failed to load treatment exercises");
       }
@@ -157,15 +163,22 @@ const AdjustTreatmentDialog = ({ open, onClose, onSuccess, treatment }) => {
   };
 
   const removeExercise = (exerciseId) => {
-    setExercises(exercises.filter(ex => ex.exercise_id !== exerciseId && ex.id !== exerciseId));
+    setExercises(exercises.filter(ex => {
+      const id = ex.treatment_exercise_id || ex.exercise_id || ex.id;
+      return id !== exerciseId;
+    }));
   };
 
   const updateExercise = (exerciseId, field, value) => {
     setExercises(exercises.map(ex => {
-      const id = ex.exercise_id || ex.id;
+      const id = ex.treatment_exercise_id || ex.exercise_id || ex.id;
       if (id === exerciseId) {
         if (field === 'target_metrics') {
           return { ...ex, target_metrics: { ...ex.target_metrics, ...value } };
+        }
+        if (field === 'repetitions') {
+          const repetitionsValue = value;
+          return { ...ex, repetitions: repetitionsValue, reps_per_set: repetitionsValue };
         }
         return { ...ex, [field]: value };
       }
@@ -237,17 +250,20 @@ const AdjustTreatmentDialog = ({ open, onClose, onSuccess, treatment }) => {
       }
 
       // Handle existing exercise updates
-      for (const exercise of exercises.filter(ex => !ex.isNew && ex.exercise_id)) {
+      for (const exercise of exercises.filter(ex => !ex.isNew && (ex.treatment_exercise_id || ex.exercise_id))) {
         const exerciseData = {
-          exercise_name: exercise.exercise_name,
-          body_part: exercise.body_part,
-          target_metrics: exercise.target_metrics,
-          repetitions: exercise.repetitions,
-          sets: exercise.sets,
-          pain_threshold: exercise.pain_threshold,
+          reps_per_set: exercise.repetitions ?? exercise.reps_per_set ?? 0,
+          sets: exercise.sets ?? 1,
+          duration_per_set: exercise.duration_per_set ?? null,
+          notes: exercise.notes ?? null,
+          pain_threshold: exercise.pain_threshold ?? null,
+          order_in_treatment: exercise.order_in_treatment ?? null,
+          is_active: exercise.is_active ?? true,
         };
 
-        const response = await fetch(`http://127.0.0.1:8000/api/update-treatment-exercise/${exercise.exercise_id}/`, {
+        const targetId = exercise.treatment_exercise_id || exercise.exercise_id;
+
+        const response = await fetch(`http://127.0.0.1:8000/api/update-treatment-exercise/${targetId}/`, {
           method: "PATCH",
           headers: {
             "Content-Type": "application/json",
@@ -445,7 +461,7 @@ const AdjustTreatmentDialog = ({ open, onClose, onSuccess, treatment }) => {
               </Paper>
             ) : (
               exercises.map((exercise) => {
-                const exerciseId = exercise.exercise_id || exercise.id;
+                const exerciseId = exercise.treatment_exercise_id || exercise.exercise_id || exercise.id;
                 const isExpanded = expandedExercise === exerciseId;
                 
                 return (

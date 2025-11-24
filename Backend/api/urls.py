@@ -68,6 +68,12 @@ urlpatterns = [
     path('treatment-exercises/<str:treatment_id>/', views.treatment_exercises, name='treatment-exercises'),
     path('create-treatment-exercise/', views.create_treatment_exercise, name='create-treatment-exercise'),
     path('update-treatment-exercise/<str:exercise_id>/', views.update_treatment_exercise, name='update-treatment-exercise'),
+    path('delete-treatment-exercise/<str:exercise_id>/', views.delete_treatment_exercise, name='delete-treatment-exercise'),
+    path('save-exercise-record/', views.save_exercise_record, name='save-exercise-record'),
+    path('patient-exercise-records/', views.list_patient_exercise_records, name='patient-exercise-records'),
+    path('patient-exercise-records/<str:patient_id>/', views.patient_exercise_records, name='patient-exercise-record-detail'),
+    path('patient-report-summary/', views.patient_report_summary, name='patient-report-summary'),
+    path('patient-report-detail/<str:patient_id>/', views.patient_report_detail, name='patient-report-detail'),
     
     # Exercise Management
     path('exercises/', views.list_exercises, name='list-exercises'),

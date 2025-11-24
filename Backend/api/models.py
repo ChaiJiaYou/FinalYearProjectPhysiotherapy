@@ -418,10 +418,7 @@ class Exercise(models.Model):
 
 # 2. Treatment - Main treatment records
 class Treatment(models.Model):
-    STATUS_CHOICES = [
-        ('active', 'Active'),
-        ('completed', 'Completed'),
-    ]
+    # 移除 STATUS_CHOICES，因为 BooleanField 不需要 choices
     
     treatment_id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     patient_id = models.ForeignKey(CustomUser, on_delete=models.CASCADE, related_name="patient_treatments", limit_choices_to={'role': 'patient'})
@@ -429,7 +426,7 @@ class Treatment(models.Model):
     
     # Treatment details
     name = models.CharField(max_length=100, default='Unnamed Treatment')  # Treatment plan name
-    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='active')
+    is_active = models.BooleanField(default=True)  # True = active, False = completed
     
     # Dates
     start_date = models.DateField()
@@ -482,18 +479,16 @@ class ExerciseRecord(models.Model):
     patient_id = models.ForeignKey(CustomUser, on_delete=models.CASCADE, related_name="exercise_records", limit_choices_to={'role': 'patient'})
     
     # Performance data
-    actual_metrics = models.JSONField(default=dict)  # e.g., {"flexion": 85, "accuracy": 0.9, "hold_time": 4}
     repetitions_completed = models.IntegerField(blank=True, null=True)
     sets_completed = models.IntegerField(blank=True, null=True)
-    pain_level = models.IntegerField(blank=True, null=True)  # 1-10 scale, patient self-report
     
-    # Session information
-    session_duration_minutes = models.IntegerField(blank=True, null=True)
-    completion_percentage = models.FloatField(blank=True, null=True)  # 0.0 to 1.0
-    
-    # Notes and feedback
-    patient_notes = models.TextField(blank=True, null=True)  # Patient feedback
-    therapist_notes = models.TextField(blank=True, null=True)  # Therapist observations
+    # Timing data
+    start_time = models.DateTimeField(blank=True, null=True, help_text="Exercise session start time")
+    end_time = models.DateTimeField(blank=True, null=True, help_text="Exercise session end time")
+    total_duration = models.FloatField(blank=True, null=True, help_text="Total exercise duration in seconds")
+    pause_count = models.IntegerField(default=0, help_text="Number of pauses during exercise")
+    # avg_duration removed - calculated dynamically from repetition_times or start/end time
+    repetition_times = models.JSONField(default=list, blank=True, null=True, help_text="Array of time taken for each repetition in seconds")
     
     recorded_at = models.DateTimeField(auto_now_add=True)
     

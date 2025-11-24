@@ -103,6 +103,26 @@ function HomeLayout() {
     };
   }, [navigate]);
 
+  // Handle default dashboard redirect
+  useEffect(() => {
+    if (role && location.pathname === "/home") {
+      // Redirect to appropriate dashboard based on role
+      switch (role) {
+        case "admin":
+          navigate("/home/admin-dashboard", { replace: true });
+          break;
+        case "therapist":
+          navigate("/home/therapist-dashboard", { replace: true });
+          break;
+        case "patient":
+          navigate("/home/appointments", { replace: true });
+          break;
+        default:
+          break;
+      }
+    }
+  }, [role, location.pathname, navigate]);
+
   const toggleDrawer = () => {
     setDrawerOpen(!drawerOpen);
   };
@@ -136,7 +156,7 @@ function HomeLayout() {
     switch (role) {
       case "admin":
         return [
-          { text: "Dashboard", icon: <Dashboard />, path: "/dashboard" },
+          { text: "Dashboard", icon: <Dashboard />, path: "/admin-dashboard" },
           { text: "User Management", icon: <Group />, path: "/users" },
           { text: "Appointment Overview", icon: <Event />, path: "/admin-appointments" },
           { text: "Treatment Admin", icon: <AdminPanelSettings />, path: "/admin-treatment" },
@@ -147,15 +167,13 @@ function HomeLayout() {
         ];
       case "patient":
         return [
-          { text: "Dashboard", icon: <Dashboard />, path: "/dashboard" },
           { text: "My Appointments", icon: <Event />, path: "/appointments" },
           { text: "Exercise", icon: <FitnessCenter />, path: "/exercise" },
           { text: "Profile", icon: <AccountCircle />, path: "/profile" },
         ];
       case "therapist":
         return [
-          { text: "Dashboard", icon: <Dashboard />, path: "/dashboard" },
-          { text: "My Schedule", icon: <Event />, path: "/schedule" },
+          { text: "Dashboard", icon: <Dashboard />, path: "/therapist-dashboard" },
           { text: "Appointment", icon: <Event />, path: "/therapist-appointments" },
           { text: "Treatment", icon: <MedicalServices />, path: "/treatment" },
           { text: "Patient Information", icon: <HistoryEdu />, path : "/patients" },
@@ -296,7 +314,9 @@ function HomeLayout() {
           >
             {menuItems.map((item) => {
               const isActive = location.pathname === `/home${item.path}` || 
-                              (item.path === "/dashboard" && location.pathname === "/home");
+                              (item.path === "/admin-dashboard" && location.pathname === "/home") ||
+                              (item.path === "/therapist-dashboard" && location.pathname === "/home") ||
+                              (item.path === "/patient-dashboard" && location.pathname === "/home");
               
               return (
                 <ListItem

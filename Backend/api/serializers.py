@@ -1,8 +1,12 @@
 from rest_framework import serializers
-from .models import CustomUser, Appointment, MedicalHistory, Admin, Therapist, Patient, Notification, Exercise
+from .models import CustomUser, Appointment, MedicalHistory, Admin, Therapist, Patient, Notification, Exercise, ExerciseRecord, Treatment, TreatmentExercise
 import base64
 from django.utils import timezone
 import pytz
+import statistics
+from collections import defaultdict
+from django.db.models import Sum, DateField
+from django.db.models.functions import TruncDate, Cast
 
 class AdminProfileSerializer(serializers.ModelSerializer):
     class Meta:
@@ -319,37 +323,281 @@ class ExerciseSerializer(serializers.ModelSerializer):
     def get_created_by_name(self, obj):
         return obj.created_by.username if obj.created_by else None
 
-# class TreatmentTemplateSerializer(serializers.ModelSerializer):
-#     exercises = serializers.SerializerMethodField()
-#     created_by_name = serializers.SerializerMethodField()
-#     
-#     class Meta:
-#         model = TreatmentTemplate
-#         fields = [
-#             'template_id', 'name', 'treatment_type', 'treatment_subtype',
-#             'condition', 'description', 'default_frequency', 
-#             'estimated_duration_weeks', 'created_at', 'created_by', 
-#             'created_by_name', 'is_active', 'exercises'
-#         ]
-#         
-#     def get_created_by_name(self, obj):
-#         return obj.created_by.username if obj.created_by else None
-#         
-#     def get_exercises(self, obj):
-#         template_exercises = obj.template_exercises.all().order_by('order_in_template')
-#         exercises_data = []
-#         for te in template_exercises:
-#             exercise_data = {
-#                 'exercise_name': te.exercise_id.name,
-#                 'body_part': te.exercise_id.body_part,
-#                 'category': te.exercise_id.category,
-#                 'default_target_metrics': te.default_target_metrics or te.exercise_id.default_metrics,
-#                 'default_repetitions': te.default_repetitions,
-#                 'default_sets': te.default_sets,
-#                 'default_pain_threshold': te.default_pain_threshold,
-#                 'order_in_template': te.order_in_template,
-#                 'is_required': te.is_required,
-#                 'instructions': te.exercise_id.instructions,
-#             }
-#             exercises_data.append(exercise_data)
-#         return exercises_data
+
+class PatientReportSummarySerializer(serializers.ModelSerializer):
+    """
+    Serializer for Patient Reports list page
+    Based on CustomUser model, with calculated fields for treatment and exercise data
+    """
+    
+    # Rename fields for frontend
+    patient_id = serializers.CharField(source='id', read_only=True)
+    patient_name = serializers.CharField(source='username', read_only=True)
+    
+    # Custom fields
+    phone = serializers.SerializerMethodField()
+    last_recorded_at = serializers.SerializerMethodField()
+    today_status_state = serializers.SerializerMethodField()
+    today_status_message = serializers.SerializerMethodField()
+    treatment_has_treatment = serializers.SerializerMethodField()
+    treatment_completed_days = serializers.SerializerMethodField()
+    treatment_completion_rate = serializers.SerializerMethodField()
+    treatment_avg_rep_duration = serializers.SerializerMethodField()
+    treatment_consistency_score = serializers.SerializerMethodField()
+    
+    class Meta:
+        model = CustomUser
+        fields = [
+            'patient_id',
+            'patient_name',
+            'phone',
+            'last_recorded_at',
+            'today_status_state',
+            'today_status_message',
+            'treatment_has_treatment',
+            'treatment_completed_days',
+            'treatment_completion_rate',
+            'treatment_avg_rep_duration',
+            'treatment_consistency_score',
+        ]
+    
+    def get_phone(self, obj):
+        """Get patient contact number"""
+        return obj.contact_number
+    
+    def get_last_recorded_at(self, obj):
+        """Get latest exercise record timestamp"""
+        latest_record = ExerciseRecord.objects.filter(
+            patient_id=obj
+        ).order_by('-recorded_at').first()
+        
+        return latest_record.recorded_at.isoformat() if latest_record and latest_record.recorded_at else None
+    
+    def _get_active_treatment(self, obj):
+        """Helper method to get active treatment (cached)"""
+        if not hasattr(obj, '_cached_active_treatment'):
+            obj._cached_active_treatment = Treatment.objects.filter(
+                patient_id=obj,
+                status='active'
+            ).order_by('-created_at').first()
+        return obj._cached_active_treatment
+    
+    def _get_treatment_records(self, obj, active_treatment):
+        """Helper method to get treatment records (cached)"""
+        cache_key = '_cached_treatment_records'
+        if not hasattr(obj, cache_key):
+            if active_treatment:
+                obj._cached_treatment_records = ExerciseRecord.objects.filter(
+                    patient_id=obj,
+                    treatment_exercise_id__treatment_id=active_treatment
+                )
+            else:
+                obj._cached_treatment_records = ExerciseRecord.objects.none()
+        return obj._cached_treatment_records
+    
+    def get_treatment_has_treatment(self, obj):
+        """Check if patient has active treatment"""
+        active_treatment = self._get_active_treatment(obj)
+        return active_treatment is not None
+    
+    def get_treatment_completed_days(self, obj):
+        """Calculate completed days"""
+        active_treatment = self._get_active_treatment(obj)
+        if not active_treatment:
+            return 0
+        
+        treatment_records = self._get_treatment_records(obj, active_treatment)
+        completed_dates = treatment_records.annotate(
+            completion_date=TruncDate('recorded_at')
+        ).values_list('completion_date', flat=True).distinct()
+        
+        return len([date for date in completed_dates if date])
+    
+    def get_treatment_completion_rate(self, obj):
+        """Calculate overall completion rate"""
+        active_treatment = self._get_active_treatment(obj)
+        if not active_treatment:
+            return None
+        
+        treatment_records = self._get_treatment_records(obj, active_treatment)
+        
+        # Get all unique dates with records
+        record_dates = treatment_records.annotate(
+            record_date=Cast('recorded_at', DateField())
+        ).values_list('record_date', flat=True).distinct()
+        
+        # Get all exercises in this treatment
+        exercises = TreatmentExercise.objects.filter(
+            treatment_id=active_treatment
+        )
+        
+        session_completion_rates = []
+        
+        # Calculate completion rate for each date with records
+        for record_date in record_dates:
+            # Calculate total target reps for this date
+            total_target_reps = 0
+            for exercise in exercises:
+                # Check if exercise is scheduled for this date
+                exercise_start = exercise.start_date
+                exercise_end = exercise.end_date
+                if exercise_start and exercise_start > record_date:
+                    continue
+                if exercise_end and exercise_end < record_date:
+                    continue
+                
+                sets = exercise.sets or 0
+                reps_per_set = exercise.reps_per_set or 0
+                total_target_reps += sets * reps_per_set
+            
+            if total_target_reps > 0:
+                # Calculate actual completed reps for this date
+                date_records = treatment_records.filter(recorded_at__date=record_date)
+                actual_completed_reps = date_records.aggregate(
+                    total=Sum('repetitions_completed')
+                )['total'] or 0
+                
+                # Calculate completion rate for this session
+                session_rate = (actual_completed_reps / total_target_reps) * 100
+                session_completion_rates.append(session_rate)
+        
+        # Calculate overall completion rate as mean of all session rates
+        if session_completion_rates:
+            return round(sum(session_completion_rates) / len(session_completion_rates), 1)
+        return None
+    
+    def get_treatment_avg_rep_duration(self, obj):
+        """Calculate average rep duration from repetition_times"""
+        from api.views import calculate_avg_duration
+        
+        active_treatment = self._get_active_treatment(obj)
+        if not active_treatment:
+            return None
+        
+        treatment_records = self._get_treatment_records(obj, active_treatment)
+        
+        avg_durations = []
+        for record in treatment_records:
+            avg_dur = calculate_avg_duration(record)
+            if avg_dur is not None and avg_dur > 0:
+                avg_durations.append(avg_dur)
+        
+        if avg_durations:
+            return round(sum(avg_durations) / len(avg_durations), 2)
+        return None
+    
+    def get_treatment_consistency_score(self, obj):
+        """Calculate consistency score"""
+        active_treatment = self._get_active_treatment(obj)
+        if not active_treatment:
+            return None
+        
+        treatment_records = self._get_treatment_records(obj, active_treatment)
+        
+        all_repetition_times = []
+        for record in treatment_records:
+            if record.repetition_times and isinstance(record.repetition_times, list):
+                all_repetition_times.extend(record.repetition_times)
+        
+        if all_repetition_times and len(all_repetition_times) > 1:
+            mean_rep_time = statistics.mean(all_repetition_times)
+            if mean_rep_time > 0:
+                std_rep_time = statistics.stdev(all_repetition_times)
+                cv = std_rep_time / mean_rep_time
+                consistency_score = round(1 / (1 + cv), 3)
+                consistency_score = max(0, min(1, consistency_score))
+                return consistency_score
+        
+        return None
+    
+    def get_today_status_state(self, obj):
+        """Get today's status state"""
+        active_treatment = self._get_active_treatment(obj)
+        today = timezone.localdate()
+        
+        if not active_treatment:
+            return 'no-treatment'
+        
+        # Check if in date range
+        in_date_range = True
+        if active_treatment.start_date and active_treatment.start_date > today:
+            in_date_range = False
+        if active_treatment.end_date and active_treatment.end_date < today:
+            in_date_range = False
+        
+        if not in_date_range:
+            return 'no-exercises'
+        
+        # Check today's completion status
+        treatment_records = self._get_treatment_records(obj, active_treatment)
+        today_records = treatment_records.filter(recorded_at__date=today)
+        completed_sets_by_exercise = defaultdict(int)
+        for record in today_records:
+            completed_sets_by_exercise[str(record.treatment_exercise_id_id)] += record.sets_completed or 0
+        
+        exercises = TreatmentExercise.objects.filter(
+            treatment_id=active_treatment
+        )
+        
+        has_assignments_today = False
+        all_completed = True
+        
+        for exercise in exercises:
+            # Check if exercise scheduled today
+            exercise_start = exercise.start_date
+            exercise_end = exercise.end_date
+            if exercise_start and exercise_start > today:
+                continue
+            if exercise_end and exercise_end < today:
+                continue
+            
+            has_assignments_today = True
+            required_sets = exercise.sets or 0
+            if required_sets <= 0:
+                continue
+            
+            key = str(exercise.treatment_exercise_id)
+            completed_sets = completed_sets_by_exercise.get(key, 0)
+            if completed_sets < required_sets:
+                all_completed = False
+                break
+        
+        if not has_assignments_today:
+            return 'no-exercises'
+        elif all_completed:
+            return 'completed'
+        else:
+            return 'pending'
+    
+    def get_today_status_message(self, obj):
+        """Get today's status message"""
+        state = self.get_today_status_state(obj)
+        
+        messages = {
+            'no-treatment': 'Patient has no active treatment today',
+            'no-exercises': 'No exercises assigned for today',
+            'completed': 'Patient completed all assigned exercises today',
+            'pending': 'Patient has not completed all assigned sets today',
+        }
+        
+        return messages.get(state, 'Status unavailable')
+
+
+# Serializer for Patient Report Detail Page
+class PatientReportDetailSerializer(serializers.Serializer):
+    """Serializer for patient report detail page - accepts pre-calculated data"""
+    patient = serializers.DictField(read_only=True)
+    active_treatment = serializers.DictField(read_only=True, allow_null=True)
+    previous_treatment = serializers.DictField(read_only=True, allow_null=True)
+    completed_days = serializers.IntegerField(read_only=True)
+    should_completed_days = serializers.IntegerField(read_only=True)
+    sessions_completion_rate = serializers.FloatField(read_only=True, allow_null=True)
+    total_reps_completed = serializers.IntegerField(read_only=True)
+    should_completed_reps = serializers.IntegerField(read_only=True)
+    reps_completion_rate = serializers.FloatField(read_only=True, allow_null=True)
+    avg_rep_duration = serializers.FloatField(read_only=True, allow_null=True)
+    consistency_score = serializers.FloatField(read_only=True, allow_null=True)
+    avg_fatigue_index = serializers.FloatField(read_only=True, allow_null=True)
+    last_exercise_date = serializers.DateTimeField(read_only=True, allow_null=True)
+    exercise_records = serializers.ListField(read_only=True)
+    records = serializers.ListField(read_only=True)

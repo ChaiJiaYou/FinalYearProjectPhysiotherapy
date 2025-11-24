@@ -10,15 +10,57 @@ from django.views.decorators.csrf import csrf_exempt
 from django.middleware.csrf import get_token
 from django.shortcuts import get_object_or_404
 from django.utils.timezone import localtime, now, make_aware
-from .models import CustomUser, Admin, Patient, Therapist, Appointment, Notification, Treatment, TreatmentExercise, Exercise, MedicalHistory
+from .models import CustomUser, Admin, Patient, Therapist, Appointment, Notification, Treatment, TreatmentExercise, Exercise, MedicalHistory, ExerciseRecord
 import time
 import json
-from .serializers import CustomUserSerializer, AppointmentSerializer, PatientHistorySerializer, NotificationSerializer, MedicalHistorySerializer
+import statistics
+from .serializers import CustomUserSerializer, AppointmentSerializer, PatientHistorySerializer, NotificationSerializer, MedicalHistorySerializer, PatientReportSummarySerializer, PatientReportDetailSerializer
 from django.utils.dateparse import parse_datetime
+from collections import defaultdict
 from django.db import transaction
 from django.contrib.auth import login
-from django.db.models import Q
+from django.db.models import Q, Sum, DateField
 import base64
+from django.db.models.functions import TruncDate, Cast
+
+
+# Helper function to calculate avg_duration from record
+def calculate_avg_duration(record):
+    """
+    Calculate average duration per repetition from record.
+    Uses repetition_times with outlier filtering, or falls back to start/end time.
+    """
+    # Try to use repetition_times first (more accurate)
+    if record.repetition_times and isinstance(record.repetition_times, list) and len(record.repetition_times) > 0:
+        rep_times = record.repetition_times
+        
+        # Remove outliers using IQR method if enough data points
+        if len(rep_times) > 4:
+            sorted_times = sorted(rep_times)
+            q1_index = len(sorted_times) // 4
+            q3_index = (3 * len(sorted_times)) // 4
+            q1 = sorted_times[q1_index]
+            q3 = sorted_times[q3_index]
+            iqr = q3 - q1
+            
+            # Filter outliers: values outside [Q1 - 1.5*IQR, Q3 + 1.5*IQR]
+            lower_bound = q1 - 1.5 * iqr
+            upper_bound = q3 + 1.5 * iqr
+            filtered_times = [t for t in rep_times if lower_bound <= t <= upper_bound]
+            
+            # Only use filtered data if we have at least 1 value
+            if len(filtered_times) >= 1:
+                rep_times = filtered_times
+        
+        # Calculate mean
+        return sum(rep_times) / len(rep_times)
+    
+    # Fallback: use start_time and end_time
+    if record.start_time and record.end_time and record.repetitions_completed and record.repetitions_completed > 0:
+        total_duration = (record.end_time - record.start_time).total_seconds()
+        return total_duration / record.repetitions_completed
+    
+    return None
 
 
 @api_view(['POST'])
@@ -1032,7 +1074,8 @@ def treatments(request):
             # Support filtering by patient_id
             patient_id = request.GET.get('patient_id')
             if patient_id:
-                treatments = Treatment.objects.filter(patient_id=patient_id).select_related('patient_id', 'therapist_id').order_by('-created_at')
+                # Explicitly filter by patient_id using the ForeignKey's id field
+                treatments = Treatment.objects.filter(patient_id__id=patient_id).select_related('patient_id', 'therapist_id').order_by('-created_at')
             else:
                 treatments = Treatment.objects.all().select_related('patient_id', 'therapist_id').order_by('-created_at')
             
@@ -1254,6 +1297,726 @@ def create_treatment_exercise(request):
     except Exception as e:
         return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
+@api_view(['POST'])
+def save_exercise_record(request):
+    """Save exercise completion record to database"""
+    try:
+        print("\n" + "=" * 80)
+        print("🔔 API CALLED: save_exercise_record")
+        print("=" * 80)
+        
+        data = request.data
+        print(f"📥 Received data: {data}")
+        
+        # Get required fields
+        treatment_exercise_id = data.get('treatment_exercise_id')
+        patient_id = data.get('patient_id')
+        
+        print(f"🔍 treatment_exercise_id: {treatment_exercise_id}")
+        print(f"🔍 patient_id: {patient_id}")
+        
+        if not treatment_exercise_id or not patient_id:
+            print("❌ ERROR: Missing required fields")
+            return Response({'error': 'treatment_exercise_id and patient_id are required'}, 
+                          status=status.HTTP_400_BAD_REQUEST)
+        
+        # Get related objects
+        print(f"🔍 Looking up TreatmentExercise with ID: {treatment_exercise_id}")
+        try:
+            treatment_exercise = get_object_or_404(TreatmentExercise, treatment_exercise_id=treatment_exercise_id)
+            print(f"✅ Found TreatmentExercise: {treatment_exercise}")
+        except Exception as e:
+            print(f"❌ ERROR finding TreatmentExercise: {e}")
+            raise
+        
+        print(f"🔍 Looking up Patient with ID: {patient_id}")
+        try:
+            patient = get_object_or_404(CustomUser, id=patient_id)
+            print(f"✅ Found Patient: {patient.username}")
+        except Exception as e:
+            print(f"❌ ERROR finding Patient: {e}")
+            raise
+        
+        # Parse datetime strings if provided
+        start_time = data.get('start_time')
+        end_time = data.get('end_time')
+        
+        print(f"🔍 Parsing start_time: {start_time}")
+        print(f"🔍 Parsing end_time: {end_time}")
+        
+        if start_time:
+            start_time = parse_datetime(start_time)
+            if start_time and timezone.is_naive(start_time):
+                start_time = make_aware(start_time, timezone=timezone.get_current_timezone())
+            print(f"✅ Parsed start_time: {start_time}")
+        if end_time:
+            end_time = parse_datetime(end_time)
+            if end_time and timezone.is_naive(end_time):
+                end_time = make_aware(end_time, timezone=timezone.get_current_timezone())
+            print(f"✅ Parsed end_time: {end_time}")
+        
+        # Get repetition_times (no longer saving avg_duration to database)
+        repetition_times = data.get('repetition_times', [])
+        
+        # Prepare record data for printing/logging
+        print("📝 Preparing record data for printing...")
+        record_data = {
+            'treatment_exercise_id': str(treatment_exercise_id),
+            'patient_id': str(patient_id),
+            'repetitions_completed': data.get('repetitions_completed', 0),
+            'sets_completed': data.get('sets_completed', 0),
+            'start_time': start_time.isoformat() if start_time else None,
+            'end_time': end_time.isoformat() if end_time else None,
+            'total_duration': data.get('total_duration'),
+            'pause_count': data.get('pause_count', 0),
+            'repetition_times': repetition_times
+        }
+        
+        # Print exercise record data to terminal (for testing)
+        print("=" * 80)
+        print("📊 EXERCISE RECORD DATA (Saving to database):")
+        print("=" * 80)
+        print(json.dumps(record_data, indent=2, ensure_ascii=False))
+        print("=" * 80)
+        print("✅ Data logged successfully\n")
+        
+        with transaction.atomic():
+            exercise_record = ExerciseRecord.objects.create(
+                treatment_exercise_id=treatment_exercise,
+                patient_id=patient,
+                repetitions_completed=data.get('repetitions_completed', 0),
+                sets_completed=data.get('sets_completed', 0),
+                start_time=start_time,
+                end_time=end_time,
+                total_duration=data.get('total_duration'),
+                pause_count=data.get('pause_count', 0),
+                repetition_times=repetition_times or []
+            )
+            print("💾 ExerciseRecord saved with ID:", exercise_record.record_id)
+        
+        return Response({
+            'message': 'Exercise record saved successfully',
+            'record_id': str(exercise_record.record_id)
+        }, status=status.HTTP_200_OK)
+        
+    except Exception as e:
+        print("=" * 80)
+        print("❌ ERROR in save_exercise_record:")
+        print(f"Error type: {type(e).__name__}")
+        print(f"Error message: {str(e)}")
+        import traceback
+        print("Traceback:")
+        print(traceback.format_exc())
+        print("=" * 80)
+        return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+@api_view(['GET'])
+def list_patient_exercise_records(request):
+    """Return aggregated exercise record summary grouped by patient"""
+    try:
+        records = ExerciseRecord.objects.select_related(
+            'patient_id',
+            'treatment_exercise_id',
+            'treatment_exercise_id__exercise_id',
+            'treatment_exercise_id__treatment_id'
+        ).order_by('-recorded_at')
+        
+        summaries = {}
+        
+        for record in records:
+            patient = record.patient_id
+            patient_key = str(patient.id)
+            
+            if patient_key not in summaries:
+                summaries[patient_key] = {
+                    'patient_id': patient_key,
+                    'patient_name': patient.username,
+                    'patient_email': patient.email,
+                    'total_records': 0,
+                    'total_repetitions': 0,
+                    'total_sets': 0,
+                    'total_duration': 0.0,
+                    'last_recorded_at': None,
+                    'last_exercise_name': None,
+                    'treatments': {}
+                }
+            
+            summary = summaries[patient_key]
+            summary['total_records'] += 1
+            summary['total_repetitions'] += record.repetitions_completed or 0
+            summary['total_sets'] += record.sets_completed or 0
+            summary['total_duration'] += record.total_duration or 0
+
+            treatment = getattr(record.treatment_exercise_id, 'treatment_id', None)
+            if treatment:
+                treatment_key = str(treatment.treatment_id)
+                if treatment_key not in summary['treatments']:
+                    summary['treatments'][treatment_key] = {
+                        'treatment_id': treatment_key,
+                        'treatment_name': treatment.name,
+                        'start_date': treatment.start_date.isoformat() if treatment.start_date else None,
+                        'end_date': treatment.end_date.isoformat() if treatment.end_date else None,
+                        'status': treatment.status,
+                        'completed_dates': set()
+                    }
+                completion_date = record.start_time or record.recorded_at
+                if completion_date:
+                    summary['treatments'][treatment_key]['completed_dates'].add(completion_date.date().isoformat())
+            
+            if summary['last_recorded_at'] is None or record.recorded_at > summary['last_recorded_at']:
+                summary['last_recorded_at'] = record.recorded_at
+                exercise = getattr(record.treatment_exercise_id, 'exercise_id', None)
+                summary['last_exercise_name'] = exercise.name if exercise else None
+        
+        # Convert to list sorted by last_recorded_at desc
+        summary_list = sorted(
+            summaries.values(),
+            key=lambda item: item['last_recorded_at'] or now(),
+            reverse=True
+        )
+        
+        # Serialize datetime fields and sets
+        for item in summary_list:
+            if item['last_recorded_at']:
+                item['last_recorded_at'] = item['last_recorded_at'].isoformat()
+            treatments = []
+            for treatment in item['treatments'].values():
+                treatment['completed_dates'] = sorted(list(treatment['completed_dates']))
+                treatments.append(treatment)
+            item['treatments'] = treatments
+        
+        return Response(summary_list, status=status.HTTP_200_OK)
+    
+    except Exception as e:
+        return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(['GET'])
+def patient_report_summary(request):
+    """Return enriched patient exercise report data for therapist dashboard"""
+    try:
+        patients = CustomUser.objects.filter(role='patient').order_by('username')
+        
+        # Use serializer to get data
+        serializer = PatientReportSummarySerializer(patients, many=True)
+        serializer_data = serializer.data
+        
+        # Transform serializer data to match frontend expected format
+        results = []
+        for item in serializer_data:
+            # Convert flat structure to nested structure for frontend
+            results.append({
+                'patient_id': item['patient_id'],
+                'patient_name': item['patient_name'],
+                'phone': item['phone'],
+                'today_status': {
+                    'state': item['today_status_state'],
+                    'message': item['today_status_message']
+                },
+                'last_recorded_at': item['last_recorded_at'],
+                'treatment': {
+                    'has_treatment': item['treatment_has_treatment'],
+                    'completed_days': item['treatment_completed_days'],
+                    'completion_rate': item['treatment_completion_rate'],
+                    'avg_rep_duration': item['treatment_avg_rep_duration'],
+                    'consistency_score': item['treatment_consistency_score']
+                }
+            })
+        
+        return Response(results, status=status.HTTP_200_OK)
+    
+    except Exception as e:
+        print("Error building patient report summary:", e)
+        import traceback
+        traceback.print_exc()
+        return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+@api_view(['GET'])
+def patient_exercise_records(request, patient_id):
+    """Return detailed exercise records for a given patient"""
+    try:
+        # Start with base query
+        records = ExerciseRecord.objects.filter(
+            patient_id__id=patient_id
+        ).select_related(
+            'treatment_exercise_id',
+            'treatment_exercise_id__exercise_id',
+            'treatment_exercise_id__treatment_id'
+        )
+        
+        # Filter by date range if provided
+        start_date = request.GET.get('start_date')
+        end_date = request.GET.get('end_date')
+        
+        if start_date:
+            from django.utils import timezone
+            from datetime import datetime
+            try:
+                start_datetime = datetime.fromisoformat(start_date.replace('Z', '+00:00'))
+                records = records.filter(recorded_at__gte=start_datetime)
+            except ValueError:
+                pass  # Invalid date format, ignore
+        
+        if end_date:
+            from django.utils import timezone
+            from datetime import datetime
+            try:
+                end_datetime = datetime.fromisoformat(end_date.replace('Z', '+00:00'))
+                records = records.filter(recorded_at__lte=end_datetime)
+            except ValueError:
+                pass  # Invalid date format, ignore
+        
+        records = records.order_by('-recorded_at')
+        
+        data = []
+        for record in records:
+            exercise = getattr(record.treatment_exercise_id, 'exercise_id', None)
+            treatment = getattr(record.treatment_exercise_id, 'treatment_id', None)
+            
+            # Calculate avg_duration from repetition_times
+            avg_dur = calculate_avg_duration(record)
+            
+            data.append({
+                'record_id': str(record.record_id),
+                'treatment_id': str(treatment.treatment_id) if treatment else None,
+                'treatment_name': treatment.name if treatment else None,
+                'exercise_name': exercise.name if exercise else None,
+                'repetitions_completed': record.repetitions_completed,
+                'sets_completed': record.sets_completed,
+                'start_time': record.start_time.isoformat() if record.start_time else None,
+                'end_time': record.end_time.isoformat() if record.end_time else None,
+                'total_duration': record.total_duration,
+                'pause_count': record.pause_count,
+                'avg_duration': avg_dur,
+                'repetition_times': record.repetition_times,
+                'recorded_at': record.recorded_at.isoformat() if record.recorded_at else None,
+            })
+        
+        return Response(data, status=status.HTTP_200_OK)
+    except Exception as e:
+        return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+@api_view(['GET'])
+def patient_report_detail(request, patient_id):
+    """Return comprehensive patient report detail including patient info, active treatment, previous treatment, and exercise records"""
+    try:
+        # Get patient
+        patient = get_object_or_404(CustomUser, id=patient_id, role='patient')
+        
+        # Get active treatment
+        # Step 1: Get all active treatments
+        today = timezone.localdate()
+        active_treatments = Treatment.objects.filter(
+            patient_id=patient,
+            status='active'
+        ).order_by('-created_at')
+        
+        active_treatment = None
+        
+        # Step 2: Find treatment within current date range
+        for treatment in active_treatments:
+            start_date = treatment.start_date
+            end_date = treatment.end_date
+            
+            # Check if today is within date range
+            in_range = True
+            if start_date and start_date > today:
+                in_range = False
+            if end_date and end_date < today:
+                in_range = False
+            
+            if in_range:
+                # Found treatment within current date range
+                active_treatment = treatment
+                break
+        
+        # Step 3: If no treatment in current date range, find the latest non-future active treatment
+        if not active_treatment:
+            for treatment in active_treatments:
+                start_date = treatment.start_date
+                # Exclude future treatments (start_date > today)
+                if not start_date or start_date <= today:
+                    active_treatment = treatment
+                    break
+        
+        # Get previous treatment (most recent completed treatment)
+        previous_treatment = Treatment.objects.filter(
+            patient_id=patient,
+            status='completed'
+        ).order_by('-created_at').first()
+        
+        # Get all exercise records for this patient
+        records = ExerciseRecord.objects.filter(
+            patient_id=patient
+        ).select_related(
+            'treatment_exercise_id',
+            'treatment_exercise_id__exercise_id',
+            'treatment_exercise_id__treatment_id'
+        ).order_by('-recorded_at')
+        
+        # Calculate completion days and rate for active treatment
+        completed_days = 0
+        should_completed_days = 0
+        sessions_completion_rate = None
+        total_reps_completed = 0
+        should_completed_reps = 0
+        reps_completion_rate = None
+        avg_rep_duration = None
+        consistency_score = None
+        avg_fatigue_index = None
+        last_exercise_date = None
+        
+        if active_treatment:
+            # Get records for active treatment
+            active_treatment_records = records.filter(
+                treatment_exercise_id__treatment_id=active_treatment
+            )
+            
+            # Calculate total reps completed for active treatment
+            total_reps_completed = active_treatment_records.aggregate(
+                total=Sum('repetitions_completed')
+            )['total'] or 0
+            
+            # Calculate unique dates with records (completed days)
+            completed_dates_list = []
+            if active_treatment_records.exists():
+                unique_dates = active_treatment_records.annotate(
+                    date=TruncDate('start_time')
+                ).values('date').distinct()
+                # Use set() to ensure true uniqueness
+                completed_dates_set = set(item['date'] for item in unique_dates if item['date'])
+                completed_dates_list = sorted(list(completed_dates_set))
+                completed_days = len(completed_dates_list)
+                
+                # Debug: Print completed dates
+                print("=" * 80)
+                print("🔍 COMPLETED DAYS DEBUG:")
+                print(f"Active Treatment: {active_treatment.name}")
+                print(f"Start Date: {active_treatment.start_date}")
+                print(f"Completed dates list: {completed_dates_list}")
+                print(f"Completed days count: {completed_days}")
+                print("=" * 80)
+            
+            # Calculate should completed reps based on dates that have exercise records
+            should_completed_reps = 0
+            if completed_dates_list:
+                # Get all exercises for this treatment
+                treatment_exercises = TreatmentExercise.objects.filter(
+                    treatment_id=active_treatment.treatment_id,
+                    is_active=True
+                )
+                
+                # Calculate target reps for each date that has records
+                for record_date in completed_dates_list:
+                    daily_target_reps = 0
+                    for exercise in treatment_exercises:
+                        # Check if exercise is scheduled for this date
+                        exercise_start = exercise.start_date
+                        exercise_end = exercise.end_date
+                        if exercise_start and exercise_start > record_date:
+                            continue
+                        if exercise_end and exercise_end < record_date:
+                            continue
+                        
+                        # Add reps for this exercise on this date
+                        sets = exercise.sets or 0
+                        reps_per_set = exercise.reps_per_set or 0
+                        daily_target_reps += sets * reps_per_set
+                    
+                    should_completed_reps += daily_target_reps
+                
+                # Calculate reps completion rate
+                if should_completed_reps > 0:
+                    reps_completion_rate = (total_reps_completed / should_completed_reps) * 100
+            
+            # Calculate average rep duration
+            avg_durations = []
+            for record in active_treatment_records:
+                avg_dur = calculate_avg_duration(record)
+                if avg_dur is not None and avg_dur > 0:
+                    avg_durations.append(avg_dur)
+            
+            if avg_durations:
+                avg_rep_duration = round(sum(avg_durations) / len(avg_durations), 2)
+            
+            # Calculate consistency score
+            all_repetition_times = []
+            for record in active_treatment_records:
+                if record.repetition_times and isinstance(record.repetition_times, list):
+                    all_repetition_times.extend(record.repetition_times)
+            
+            if all_repetition_times and len(all_repetition_times) > 1:
+                mean_rep_time = statistics.mean(all_repetition_times)
+                if mean_rep_time > 0:
+                    std_rep_time = statistics.stdev(all_repetition_times)
+                    cv = std_rep_time / mean_rep_time
+                    consistency_score = round(1 / (1 + cv), 3)
+                    consistency_score = max(0, min(1, consistency_score))
+            
+            # Calculate average fatigue index
+            session_fatigue_indices = []
+            for record in active_treatment_records:
+                if record.repetition_times and isinstance(record.repetition_times, list) and len(record.repetition_times) > 1:
+                    rep_times = record.repetition_times
+                    
+                    # Remove outliers using IQR method
+                    if len(rep_times) > 4:  # Need at least 5 values for IQR to be meaningful
+                        sorted_times = sorted(rep_times)
+                        q1_index = len(sorted_times) // 4
+                        q3_index = (3 * len(sorted_times)) // 4
+                        q1 = sorted_times[q1_index]
+                        q3 = sorted_times[q3_index]
+                        iqr = q3 - q1
+                        
+                        # Filter outliers: values outside [Q1 - 1.5*IQR, Q3 + 1.5*IQR]
+                        lower_bound = q1 - 1.5 * iqr
+                        upper_bound = q3 + 1.5 * iqr
+                        filtered_times = [t for t in rep_times if lower_bound <= t <= upper_bound]
+                        
+                        # Only use filtered data if we have at least 2 values
+                        if len(filtered_times) >= 2:
+                            rep_times = filtered_times
+                    
+                    total_reps = len(rep_times)
+                    if total_reps < 2:
+                        continue
+                    
+                    # Divide into first half and second half
+                    mid_point = total_reps // 2
+                    first_half = rep_times[:mid_point]
+                    second_half = rep_times[mid_point:]
+                    
+                    if first_half and second_half:
+                        avg_first_half = statistics.mean(first_half)
+                        avg_second_half = statistics.mean(second_half)
+                        
+                        # Calculate fatigue index for this session
+                        if avg_first_half > 0:
+                            fatigue_index = ((avg_second_half - avg_first_half) / avg_first_half) * 100
+                            if fatigue_index < 0:
+                                fatigue_index = 0
+                            session_fatigue_indices.append(fatigue_index)
+            
+            # Calculate average fatigue index across all sessions
+            if session_fatigue_indices:
+                avg_fatigue_index = round(statistics.mean(session_fatigue_indices), 2)
+            
+            # Get last exercise date
+            if active_treatment_records.exists():
+                last_record = active_treatment_records.first()
+                if last_record and last_record.start_time:
+                    last_exercise_date = last_record.start_time
+            else:
+                last_exercise_date = None
+            
+            # Calculate should completed days (from start_date to today or end_date, whichever is earlier)
+            start_date = active_treatment.start_date
+            end_date = active_treatment.end_date if active_treatment.end_date else today
+            effective_end_date = end_date if end_date <= today else today
+            
+            # Only calculate if today is within or after the treatment date range
+            if start_date and effective_end_date and start_date <= effective_end_date:
+                should_completed_days = (effective_end_date - start_date).days + 1
+                
+                # Debug: Print should completed days calculation
+                print("=" * 80)
+                print("🔍 SHOULD COMPLETED DAYS DEBUG:")
+                print(f"Start Date: {start_date}")
+                print(f"End Date: {end_date}")
+                print(f"Today: {today}")
+                print(f"Effective End Date: {effective_end_date}")
+                print(f"Should Completed Days: {should_completed_days}")
+                print(f"Calculation: ({effective_end_date} - {start_date}).days + 1 = {(effective_end_date - start_date).days} + 1 = {should_completed_days}")
+                print("=" * 80)
+                
+                # Calculate sessions completion rate: (completed_days / should_completed_days) * 100
+                if should_completed_days > 0:
+                    sessions_completion_rate = (completed_days / should_completed_days) * 100
+                    print("=" * 80)
+                    print("🔍 COMPLETION RATE DEBUG:")
+                    print(f"Sessions Completion Rate: {completed_days} / {should_completed_days} * 100 = {sessions_completion_rate}%")
+                    print("=" * 80)
+            else:
+                # If treatment hasn't started yet (today < start_date), set to 0
+                should_completed_days = 0
+        else:
+            # If no active treatment, get last exercise date from all records
+            if records.exists():
+                last_record = records.first()
+                if last_record and last_record.start_time:
+                    last_exercise_date = last_record.start_time
+        
+        # Build patient data
+        patient_data = {
+            'id': str(patient.id),
+            'username': patient.username,
+            'phone': patient.contact_number or '',
+            'full_name': patient.get_full_name() if hasattr(patient, 'get_full_name') else patient.username,
+        }
+        
+        # Build active treatment data
+        active_treatment_data = None
+        if active_treatment:
+            # Get exercises for active treatment
+            treatment_exercises = TreatmentExercise.objects.filter(
+                treatment_id=active_treatment.treatment_id,
+                is_active=True
+            ).select_related('exercise_id').order_by('order_in_treatment')
+            
+            exercises_data = []
+            for te in treatment_exercises:
+                exercises_data.append({
+                    'treatment_exercise_id': str(te.treatment_exercise_id),
+                    'exercise_name': te.exercise_id.name if te.exercise_id else 'Custom Exercise',
+                    'reps_per_set': te.reps_per_set,
+                    'sets': te.sets,
+                    'duration_per_set': te.duration_per_set,
+                    'order_in_treatment': te.order_in_treatment,
+                })
+            
+            active_treatment_data = {
+                'treatment_id': str(active_treatment.treatment_id),
+                'name': active_treatment.name,
+                'start_date': active_treatment.start_date,
+                'end_date': active_treatment.end_date,
+                'exercises': exercises_data,
+            }
+        
+        # Build previous treatment data
+        previous_treatment_data = None
+        if previous_treatment:
+            previous_treatment_data = {
+                'name': previous_treatment.name,
+            }
+        
+        # Build records data
+        records_data = []
+        for record in records:
+            records_data.append({
+                'start_time': record.start_time,
+                'recorded_at': record.recorded_at,
+            })
+        
+        # Build exercise records data for table
+        exercise_records_data = []
+        for record in records:
+            exercise = getattr(record.treatment_exercise_id, 'exercise_id', None)
+            treatment = getattr(record.treatment_exercise_id, 'treatment_id', None)
+            
+            # Calculate consistency score for this record
+            consistency = None
+            if record.repetition_times and isinstance(record.repetition_times, list) and len(record.repetition_times) > 1:
+                try:
+                    mean_rep_time = statistics.mean(record.repetition_times)
+                    if mean_rep_time > 0:
+                        std_rep_time = statistics.stdev(record.repetition_times)
+                        cv = std_rep_time / mean_rep_time
+                        consistency = round(1 / (1 + cv), 3)
+                        consistency = max(0, min(1, consistency))
+                except:
+                    pass
+            
+            # Calculate fatigue index for this record
+            fatigue = None
+            if record.repetition_times and isinstance(record.repetition_times, list) and len(record.repetition_times) > 1:
+                try:
+                    rep_times = record.repetition_times
+                    
+                    # Remove outliers using IQR method
+                    if len(rep_times) > 4:  # Need at least 5 values for IQR to be meaningful
+                        sorted_times = sorted(rep_times)
+                        q1_index = len(sorted_times) // 4
+                        q3_index = (3 * len(sorted_times)) // 4
+                        q1 = sorted_times[q1_index]
+                        q3 = sorted_times[q3_index]
+                        iqr = q3 - q1
+                        
+                        # Filter outliers: values outside [Q1 - 1.5*IQR, Q3 + 1.5*IQR]
+                        lower_bound = q1 - 1.5 * iqr
+                        upper_bound = q3 + 1.5 * iqr
+                        filtered_times = [t for t in rep_times if lower_bound <= t <= upper_bound]
+                        
+                        # Only use filtered data if we have at least 2 values
+                        if len(filtered_times) >= 2:
+                            rep_times = filtered_times
+                    
+                    total_reps = len(rep_times)
+                    if total_reps < 2:
+                        fatigue = None
+                    else:
+                        mid_point = total_reps // 2
+                        first_half = rep_times[:mid_point]
+                        second_half = rep_times[mid_point:]
+                        
+                        if first_half and second_half:
+                            avg_first_half = statistics.mean(first_half)
+                            avg_second_half = statistics.mean(second_half)
+                            
+                            if avg_first_half > 0:
+                                fatigue = round(((avg_second_half - avg_first_half) / avg_first_half) * 100, 1)
+                                if fatigue < 0:
+                                    fatigue = 0
+                except:
+                    pass
+            
+            # Send full datetime, let frontend format it in local timezone
+            date_str = None
+            if record.start_time:
+                date_str = record.start_time.isoformat()
+            
+            # Calculate avg_time from repetition_times
+            avg_time = calculate_avg_duration(record)
+            if avg_time is not None:
+                avg_time = round(avg_time, 2)
+            
+            # Use actual completed reps and sets (not calculated reps_per_set)
+            # This handles cases where user stops mid-exercise correctly
+            total_reps = record.repetitions_completed or 0
+            sets = record.sets_completed or 0
+            
+            exercise_records_data.append({
+                'record_id': str(record.record_id),
+                'treatment_id': str(treatment.treatment_id) if treatment else None,
+                'date': date_str,
+                'exercise_name': exercise.name if exercise else 'Unknown Exercise',
+                'reps': total_reps,  # Total reps completed (not per set)
+                'sets': sets,  # Sets completed (may be partial)
+                'avg_time': avg_time,
+                'consistency': round(consistency * 100, 1) if consistency is not None else None,
+                'fatigue': fatigue,
+                'pauses': record.pause_count or 0,
+                'repetition_times': record.repetition_times if record.repetition_times else [],
+            })
+        
+        # Build response data
+        response_data = {
+            'patient': patient_data,
+            'active_treatment': active_treatment_data,
+            'previous_treatment': previous_treatment_data,
+            'completed_days': completed_days,
+            'should_completed_days': should_completed_days,
+            'sessions_completion_rate': sessions_completion_rate,
+            'total_reps_completed': total_reps_completed,
+            'should_completed_reps': should_completed_reps,
+            'reps_completion_rate': reps_completion_rate,
+            'avg_rep_duration': avg_rep_duration,
+            'consistency_score': consistency_score,
+            'avg_fatigue_index': avg_fatigue_index,
+            'last_exercise_date': last_exercise_date,
+            'exercise_records': exercise_records_data,
+            'records': records_data,
+        }
+        
+        # Use serializer to serialize the response
+        serializer = PatientReportDetailSerializer(response_data)
+        return Response(serializer.data, status=status.HTTP_200_OK)
+            
+    except Exception as e:
+        print(f"Error in patient_report_detail: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
 @api_view(['GET', 'PATCH', 'DELETE'])
 def treatment_detail(request, treatment_id):
     """Get, update, or delete a treatment"""
@@ -1332,6 +2095,16 @@ def update_treatment_exercise(request, exercise_id):
         
         return Response({'message': 'Treatment exercise updated successfully'}, status=status.HTTP_200_OK)
         
+    except Exception as e:
+        return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+@api_view(['DELETE'])
+def delete_treatment_exercise(request, exercise_id):
+    """Delete a treatment exercise from a plan"""
+    try:
+        exercise = get_object_or_404(TreatmentExercise, treatment_exercise_id=exercise_id)
+        exercise.delete()
+        return Response({'message': 'Treatment exercise deleted successfully'}, status=status.HTTP_200_OK)
     except Exception as e:
         return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 

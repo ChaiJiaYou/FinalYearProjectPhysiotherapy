@@ -37,8 +37,8 @@ def predict_pose_opencv(image_np):
         # Return keypoints as numpy array
         keypoints_np = keypoints.xy[0].cpu().numpy()
         
-        # Debug: print keypoint shape
-        print(f"Detected keypoints shape: {keypoints_np.shape}")
+        # Debug: print keypoint shape (commented out - not needed)
+        # print(f"Detected keypoints shape: {keypoints_np.shape}")
         
         return keypoints_np  # [17, 2] 或 [16, 2]
         
