@@ -70,34 +70,10 @@ def login_view(request):
     user_id = data.get('id')
     password = data.get('password')
 
-    print(f"Login attempt - User ID: {user_id}, Password length: {len(password) if password else 0}")
-
     if not user_id or not password:
-        print("Missing user ID or password")
         return JsonResponse({'success': False, 'error': 'User ID and password are required.'}, status=400)
 
     user = CustomUser.objects.filter(id=user_id).first()
-    print(f"User found: {user is not None}")
-    
-    # List all users for debugging
-    all_users = CustomUser.objects.all()
-    print(f"Total users in database: {all_users.count()}")
-    for u in all_users[:5]:  # Show first 5 users
-        print(f"  - ID: {u.id}, Username: {u.username}, Role: {u.role}, Status: {u.status}")
-    
-    # Check specifically for A0001
-    specific_user = CustomUser.objects.filter(id='A0001').first()
-    if specific_user:
-        password_test = specific_user.check_password('chai030513')
-        print(f"Password test for A0001: {password_test}")
-    else:
-        print("A0001 user not found in database")
-    
-    if user:
-        print(f"User status: {user.status}")
-        password_check = user.check_password(password)
-        print(f"Password check: {password_check}")
-        print(f"User details: ID={user.id}, Username={user.username}, Email={user.email}")
     
     if user and user.check_password(password):
         if not user.status:
@@ -271,10 +247,26 @@ def create_user(request):
                 )
             elif role == "admin":
                 admin_role = request.data.get("admin_role", "General Admin")
-                Admin.objects.create(
-                    user=user,
-                    admin_role=admin_role
-                )
+                try:
+                    Admin.objects.create(
+                        user=user,
+                        admin_role=admin_role
+                    )
+                except Exception as e:
+                    # If duplicate key error, fix sequence and retry
+                    if 'duplicate key' in str(e).lower() or 'violates unique constraint' in str(e).lower():
+                        from django.db import connection
+                        with connection.cursor() as cursor:
+                            cursor.execute("SELECT COALESCE(MAX(id), 0) FROM api_admin")
+                            max_id = cursor.fetchone()[0]
+                            cursor.execute(f"SELECT setval('api_admin_id_seq', {max_id + 1}, false)")
+                        # Retry creation
+                        Admin.objects.create(
+                            user=user,
+                            admin_role=admin_role
+                        )
+                    else:
+                        raise
 
             # Serialize and return the created user
             serializer = CustomUserSerializer(user)
@@ -822,6 +814,36 @@ def list_patients(request):
         } for patient in patients]
         
         return Response(data, status=status.HTTP_200_OK)
+    except Exception as e:
+        return Response(
+            {'error': str(e)}, 
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+        )
+
+@api_view(['GET'])
+def check_patients_treatment_status(request):
+    """Check if patients have active treatment today"""
+    try:
+        from datetime import date
+        
+        today = date.today()
+        
+        # Get all active treatments where today is between start_date and end_date
+        # Also handle cases where end_date might be None (ongoing treatment)
+        active_treatments = Treatment.objects.filter(
+            is_active=True,
+            start_date__lte=today
+        ).filter(
+            Q(end_date__gte=today) | Q(end_date__isnull=True)
+        ).select_related('patient_id')
+        
+        # Create a set of patient IDs who have active treatments
+        patients_with_treatment = set(
+            treatment.patient_id.id for treatment in active_treatments if treatment.patient_id
+        )
+        
+        # Return as list for easier frontend consumption
+        return Response(list(patients_with_treatment), status=status.HTTP_200_OK)
     except Exception as e:
         return Response(
             {'error': str(e)}, 
@@ -2291,7 +2313,7 @@ def detect_pose(request):
 
 # ==================== NEW ACTION LEARNING API VIEWS ====================
 
-from .models import Action, ActionSample, ActionTemplate, ActionSession
+from .models import Action, ActionSample, ActionTemplate
 from .services.pipeline import (
     finalize_action_from_video, 
     dtw_infer_update, 
@@ -2640,7 +2662,6 @@ def action_detail(request, action_id):
         # Get related data
         templates = ActionTemplate.objects.filter(action=action)
         samples = ActionSample.objects.filter(action=action)
-        sessions = ActionSession.objects.filter(action=action).order_by('-started_at')[:10]
         
         template_data = []
         for template in templates:
@@ -2662,15 +2683,6 @@ def action_detail(request, action_id):
                 'created_at': sample.created_at.isoformat()
             })
         
-        session_data = []
-        for session in sessions:
-            session_data.append({
-                'id': session.id,
-                'reps': session.reps,
-                'started_at': session.started_at.isoformat(),
-                'metrics': session.metrics_json
-            })
-        
         return JsonResponse({
             'action': {
                 'id': action.id,
@@ -2681,8 +2693,7 @@ def action_detail(request, action_id):
                 'created_at': action.created_at.isoformat()
             },
             'templates': template_data,
-            'samples': sample_data,
-            'recent_sessions': session_data
+            'samples': sample_data
         })
         
     except Action.DoesNotExist:

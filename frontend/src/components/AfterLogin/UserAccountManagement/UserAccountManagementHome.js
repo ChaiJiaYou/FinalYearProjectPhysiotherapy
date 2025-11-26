@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   Box,
@@ -48,6 +48,8 @@ const UserAccountManagementHome = () => {
   const [roleFilter, setRoleFilter] = useState("all");
   const [statusFilter, setStatusFilter] = useState("active");
   const [openCreateDialog, setOpenCreateDialog] = useState(false);
+  const [orderBy, setOrderBy] = useState('create_date');
+  const [order, setOrder] = useState('desc');
 
   const fetchUsers = async () => {
     try {
@@ -215,10 +217,58 @@ const UserAccountManagementHome = () => {
   // 筛选逻辑现在在applyFilters函数中处理
   const filteredUsers = users;
 
-  const paginatedUsers = filteredUsers.slice(
+  // Sort filtered users before pagination
+  const sortedUsers = useMemo(() => {
+    const comparator = (a, b) => {
+      let aValue = a[orderBy];
+      let bValue = b[orderBy];
+
+      // Handle null/undefined values
+      if (aValue == null) aValue = '';
+      if (bValue == null) bValue = '';
+
+      // Special handling for date fields
+      if (orderBy === 'create_date') {
+        const aDate = aValue ? new Date(aValue).getTime() : 0;
+        const bDate = bValue ? new Date(bValue).getTime() : 0;
+        if (aDate < bDate) {
+          return order === 'asc' ? -1 : 1;
+        }
+        if (aDate > bDate) {
+          return order === 'asc' ? 1 : -1;
+        }
+        return 0;
+      }
+
+      // Handle different data types
+      if (typeof aValue === 'string') aValue = aValue.toLowerCase();
+      if (typeof bValue === 'string') bValue = bValue.toLowerCase();
+
+      if (aValue < bValue) {
+        return order === 'asc' ? -1 : 1;
+      }
+      if (aValue > bValue) {
+        return order === 'asc' ? 1 : -1;
+      }
+      return 0;
+    };
+
+    return [...filteredUsers].sort(comparator);
+  }, [filteredUsers, order, orderBy]);
+
+  // Paginate sorted users
+  const paginatedUsers = sortedUsers.slice(
     page * rowsPerPage,
     page * rowsPerPage + rowsPerPage
   );
+
+  // Handle sort request
+  const handleRequestSort = (property) => {
+    const isAsc = orderBy === property && order === 'asc';
+    setOrder(isAsc ? 'desc' : 'asc');
+    setOrderBy(property);
+    setPage(0); // Reset to first page when sorting changes
+  };
 
   const handleChangePage = (event, newPage) => {
     setPage(newPage);
@@ -247,13 +297,10 @@ const UserAccountManagementHome = () => {
     <Box sx={{ bgcolor: '#f8fafc', minHeight: '100vh', p: { xs: 2, md: 4 } }}>
       <Box sx={{ maxWidth: 'xl', mx: 'auto' }}>
         {/* 页面头部 - 遵循设计系统 */}
-        <Box display="flex" justifyContent="space-between" alignItems="center" mb={4}>
+        <Box display="flex" justifyContent="space-between" alignItems="center" mb={2}>
           <Box>
             <Typography variant="h4" gutterBottom sx={{ color: '#000000', fontWeight: 600 }}>
               User Management
-            </Typography>
-            <Typography variant="body1" color="text.secondary">
-              Manage all user accounts in the system
             </Typography>
           </Box>
           <Box display="flex" gap={2}>
@@ -403,14 +450,17 @@ const UserAccountManagementHome = () => {
           <UserManagementTable 
             users={paginatedUsers} 
             handleToggleStatus={handleToggleStatus} 
-            onViewProfile={handleViewProfile} 
+            onViewProfile={handleViewProfile}
+            orderBy={orderBy}
+            order={order}
+            onRequestSort={handleRequestSort}
           />
           
           {/* Pagination */}
           <Box sx={{ p: 3, borderTop: "1px solid", borderColor: "grey.200" }}>
             <TablePagination
               component="div"
-              count={filteredUsers.length}
+              count={sortedUsers.length}
               page={page}
               onPageChange={handleChangePage}
               rowsPerPage={rowsPerPage}
@@ -439,7 +489,7 @@ const UserAccountManagementHome = () => {
             setAllUsers(prev => [newUser, ...prev]);
             setUsers(prev => [newUser, ...prev]);
             setOpenCreateDialog(false);
-            toast.success("User created successfully!");
+            // Toast is already shown in CreateUserDialog component
           }}
         />
       </Box>

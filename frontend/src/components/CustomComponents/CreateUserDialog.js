@@ -28,7 +28,7 @@ const CreateUserDialog = ({ open, onClose, onSubmit, isSubmitting = false }) => 
     specialization: "", // for therapist
     employment_date: "", // for therapist
     emergency_contact: "", // for patient
-    admin_role: "", // for admin
+    admin_role: "CenterAdmin", // for admin - default to CenterAdmin
   };
 
   const [newUser, setNewUser] = useState(initialUserState);
@@ -36,6 +36,32 @@ const CreateUserDialog = ({ open, onClose, onSubmit, isSubmitting = false }) => 
   const [avatarPreview, setAvatarPreview] = useState(null);
   const [avatarFile, setAvatarFile] = useState(null);
   const [loading, setLoading] = useState(false);
+  const [currentUserAdminRole, setCurrentUserAdminRole] = useState(null); // Store current user's admin role
+
+  // Fetch current user's admin role
+  React.useEffect(() => {
+    const fetchCurrentUserRole = async () => {
+      try {
+        const userId = localStorage.getItem("id");
+        const userRole = localStorage.getItem("role");
+        
+        if (userId && userRole === "admin") {
+          const response = await fetch(`http://127.0.0.1:8000/api/get-user/${userId}/`);
+          if (response.ok) {
+            const data = await response.json();
+            // Access admin_role from nested admin_profile object
+            const adminRole = data.admin_profile?.admin_role || "CenterAdmin";
+            setCurrentUserAdminRole(adminRole);
+          }
+        }
+      } catch (error) {
+        console.error("Error fetching current user role:", error);
+        setCurrentUserAdminRole("CenterAdmin"); // Default to CenterAdmin if error
+      }
+    };
+
+    fetchCurrentUserRole();
+  }, []);
 
   // Reset form when dialog opens/closes
   React.useEffect(() => {
@@ -127,7 +153,7 @@ const CreateUserDialog = ({ open, onClose, onSubmit, isSubmitting = false }) => 
     if (!newUser.ic.trim()) {
       tempErrors.ic = "IC Number is required";
     } else if (!/^\d{12}$/.test(newUser.ic)) {
-      tempErrors.ic = "IC Number must be exactly 12 digits";
+      tempErrors.ic = "IC Number is not valid";
     }
 
     // Contact Number validation
@@ -374,10 +400,9 @@ const CreateUserDialog = ({ open, onClose, onSubmit, isSubmitting = false }) => 
             onChange={handleInputChange}
             error={!!errors.username}
             helperText={errors.username || "Enter user's full name"}
-            placeholder="Michael"
             autoComplete="off"
-            InputProps={{
-              startAdornment: <PersonIcon color="action" sx={{ mr: 1, opacity: 0.6 }} />,
+            inputProps={{
+              maxLength: 150
             }}
           />
         </Grid>
@@ -391,7 +416,6 @@ const CreateUserDialog = ({ open, onClose, onSubmit, isSubmitting = false }) => 
             onChange={handleInputChange} 
             error={!!errors.email} 
             helperText={errors.email || "Enter valid email address"} 
-            placeholder="michael@gmail.com"
             autoComplete="off"
             inputProps={{
               maxLength: 100
@@ -448,8 +472,7 @@ const CreateUserDialog = ({ open, onClose, onSubmit, isSubmitting = false }) => 
             inputProps={{
               inputMode: "numeric",
               pattern: "[0-9]*",
-              maxLength: 12,
-              placeholder: "e.g., 040503024567"
+              maxLength: 12
             }}
             sx={{
               '& .MuiFormHelperText-root': {
@@ -510,13 +533,12 @@ const CreateUserDialog = ({ open, onClose, onSubmit, isSubmitting = false }) => 
             value={newUser.contact_number}
             onChange={handleInputChange}
             error={!!errors.contact_number}
-            helperText={errors.contact_number || "Enter 10-11 digits (e.g., 0123456789)"}
+            helperText={errors.contact_number || "Enter 10-11 digits without '-'"}
             autoComplete="off"
             inputProps={{
               inputMode: "numeric",
               pattern: "[0-9]*",
               maxLength: 11,
-              placeholder: "e.g., 0123456789"
             }}
             sx={{
               '& .MuiFormHelperText-root': {
@@ -592,14 +614,46 @@ const CreateUserDialog = ({ open, onClose, onSubmit, isSubmitting = false }) => 
 
         {newUser.role === "admin" && (
           <Grid item xs={12}>
-            <TextField fullWidth label="Admin Role" name="admin_role" value={newUser.admin_role} onChange={handleRoleSpecificChange} error={!!errors.admin_role} helperText={errors.admin_role} placeholder="e.g. System Administrator, Data Manager" />
+            {currentUserAdminRole === "SuperAdmin" ? (
+              // Super Admin can choose between CenterAdmin and SuperAdmin
+              <FormControl fullWidth error={!!errors.admin_role}>
+                <InputLabel>Admin Role</InputLabel>
+                <Select 
+                  name="admin_role" 
+                  value={newUser.admin_role} 
+                  onChange={handleRoleSpecificChange} 
+                  label="Admin Role"
+                >
+                  <MenuItem value="CenterAdmin">Center Admin</MenuItem>
+                  <MenuItem value="SuperAdmin">Super Admin</MenuItem>
+                </Select>
+                {errors.admin_role && (
+                  <Typography variant="caption" color="error">
+                    {errors.admin_role}
+                  </Typography>
+                )}
+              </FormControl>
+            ) : (
+              // Center Admin can only create Center Admin
+              <TextField 
+                fullWidth 
+                label="Admin Role" 
+                name="admin_role" 
+                value="Center Admin"
+                disabled
+                helperText="Center Admin can only create Center Admin users"
+                InputProps={{
+                  readOnly: true,
+                }}
+              />
+            )}
           </Grid>
         )}
 
         {newUser.role === "therapist" && (
           <>
             <Grid item xs={12} sm={6}>
-              <TextField fullWidth label="Specialization" name="specialization" value={newUser.specialization} onChange={handleRoleSpecificChange} placeholder="e.g. Physical Therapy, Occupational Therapy" />
+              <TextField fullWidth label="Specialization" name="specialization" value={newUser.specialization} onChange={handleRoleSpecificChange} />
             </Grid>
             <Grid item xs={12} sm={6}>
               <TextField 
@@ -749,7 +803,7 @@ const CreateUserDialog = ({ open, onClose, onSubmit, isSubmitting = false }) => 
           color: "white",
           py: 2,
         }}>
-        <Typography variant="h5" fontWeight="500">
+        <Typography variant="h5" component="span" fontWeight="500">
           Create New Account
         </Typography>
       </DialogTitle>

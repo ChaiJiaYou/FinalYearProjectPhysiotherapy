@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { TextField, Button, IconButton, InputAdornment, Typography, Box, Alert, CircularProgress } from '@mui/material';
 import { Visibility, VisibilityOff, Login as LoginIcon } from '@mui/icons-material';
@@ -18,25 +18,6 @@ function LoginPage() {
 
   // Ref to the password input field
   const passwordInputRef = useRef(null);
-
-  // Fetch CSRF token and prefill username from cookies
-  useEffect(() => {
-    const getCookie = (name) => {
-      const cookies = document.cookie.split('; ');
-      for (let cookie of cookies) {
-        const [cookieName, cookieValue] = cookie.split('=');
-        if (cookieName === name) {
-          return decodeURIComponent(cookieValue);
-        }
-      }
-      return '';
-    };
-
-    setFormData((prev) => ({
-      ...prev,
-      id : getCookie('id') || ''
-    }));
-  }, []);
 
   // Handle input changes
   const handleChange = (e) => {

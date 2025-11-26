@@ -239,13 +239,10 @@ const AdminTherapistAppointments = () => {
     <Box sx={{ bgcolor: '#f8fafc', minHeight: '100vh', p: { xs: 2, md: 4 } }}>
       <Box sx={{ maxWidth: 'xl', mx: 'auto' }}>
         {/* 页面头部 - 遵循User Management设计系统 */}
-        <Box display="flex" justifyContent="space-between" alignItems="center" mb={4}>
+        <Box display="flex" justifyContent="space-between" alignItems="center" mb={2}>
           <Box>
             <Typography variant="h4" gutterBottom sx={{ color: '#000000', fontWeight: 600 }}>
-              All Appointments
-            </Typography>
-            <Typography variant="body1" color="text.secondary">
-              Manage and monitor all appointment bookings in the system
+              Appointments Management
             </Typography>
           </Box>
           <Box display="flex" gap={2}>
@@ -301,11 +298,11 @@ const AdminTherapistAppointments = () => {
             </Box>
         <Grid container spacing={2} alignItems="center">
           {/* Date Range Filter */}
-          <Grid item xs={12} md={3}>
-            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
+          <Grid item xs={12} md={4}>
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, flexWrap: 'wrap' }}>
               <Typography variant="subtitle2" sx={{ 
                 color: "text.primary", 
-                minWidth: 80,
+                minWidth: 90,
                 fontWeight: 600,
                 fontSize: '0.9rem'
               }}>
@@ -316,8 +313,11 @@ const AdminTherapistAppointments = () => {
                 value={dateRange.startDate}
                 onChange={(e) => handleDateRangeChange('startDate', e.target.value)}
                 size="small"
+                InputLabelProps={{ shrink: true }}
                 sx={{ 
-                  minWidth: 140,
+                  flex: 1,
+                  minWidth: 160,
+                  maxWidth: 180,
                   '& .MuiOutlinedInput-root': {
                     borderRadius: 2,
                     backgroundColor: 'grey.50',
@@ -331,10 +331,14 @@ const AdminTherapistAppointments = () => {
                       borderColor: 'primary.main',
                       borderWidth: 2
                     }
+                  },
+                  '& input': {
+                    fontSize: '0.9rem',
+                    padding: '8.5px 14px'
                   }
                 }}
               />
-              <Typography variant="body2" sx={{ color: "text.secondary", fontSize: '0.9rem', fontWeight: 500 }}>
+              <Typography variant="body2" sx={{ color: "text.secondary", fontSize: '0.9rem', fontWeight: 500, mx: 0.5 }}>
                 to
               </Typography>
               <TextField
@@ -342,8 +346,11 @@ const AdminTherapistAppointments = () => {
                 value={dateRange.endDate}
                 onChange={(e) => handleDateRangeChange('endDate', e.target.value)}
                 size="small"
+                InputLabelProps={{ shrink: true }}
                 sx={{ 
-                  minWidth: 140,
+                  flex: 1,
+                  minWidth: 160,
+                  maxWidth: 180,
                   '& .MuiOutlinedInput-root': {
                     borderRadius: 2,
                     backgroundColor: 'grey.50',
@@ -357,6 +364,10 @@ const AdminTherapistAppointments = () => {
                       borderColor: 'primary.main',
                       borderWidth: 2
                     }
+                  },
+                  '& input': {
+                    fontSize: '0.9rem',
+                    padding: '8.5px 14px'
                   }
                 }}
               />
@@ -476,12 +487,13 @@ const AdminTherapistAppointments = () => {
                   setTherapistFilter(newValue);
                 }}
                 isOptionEqualToValue={(option, value) => option.username === value?.username}
+                sx={{ flex: 1, minWidth: 200 }}
                 renderInput={(params) => (
                   <TextField
                     {...params}
                     placeholder="Search therapist..."
                     sx={{
-                      minWidth: 160,
+                      width: '100%',
                       '& .MuiOutlinedInput-root': {
                         borderRadius: 2,
                         backgroundColor: 'grey.50',
@@ -529,27 +541,6 @@ const AdminTherapistAppointments = () => {
             </Box>
           </Grid>
 
-          {/* Results Summary */}
-          <Grid item xs={12} md={2}>
-            <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end' }}>
-              <Chip 
-                label={`${filteredAppointments.length} found`}
-                sx={{ 
-                  backgroundColor: 'primary.50',
-                  color: 'primary.main',
-                  fontWeight: 600,
-                  fontSize: '0.8rem',
-                  height: 32,
-                  borderRadius: 2,
-                  border: '1px solid',
-                  borderColor: 'primary.200',
-                  '& .MuiChip-label': {
-                    px: 1.5
-                  }
-                }}
-              />
-            </Box>
-          </Grid>
         </Grid>
           </CardContent>
         </Card>
@@ -585,8 +576,15 @@ const AdminTherapistAppointments = () => {
                 fontSize: "0.9rem", 
                 py: 2, 
                 color: 'text.primary',
-                width: '18%' 
+                width: '15%' 
               }}>Patient</TableCell>
+              <TableCell sx={{ 
+                fontWeight: 700, 
+                fontSize: "0.9rem", 
+                py: 2, 
+                color: 'text.primary',
+                width: '15%' 
+              }}>Therapist</TableCell>
               <TableCell sx={{ 
                 fontWeight: 700, 
                 fontSize: "0.9rem", 
@@ -606,21 +604,21 @@ const AdminTherapistAppointments = () => {
                 fontSize: "0.9rem", 
                 py: 2, 
                 color: 'text.primary',
-                width: '12%' 
+                width: '10%' 
               }}>Status</TableCell>
               <TableCell sx={{ 
                 fontWeight: 700, 
                 fontSize: "0.9rem", 
                 py: 2, 
                 color: 'text.primary',
-                width: '34%' 
+                width: '24%' 
               }}>Actions</TableCell>
             </TableRow>
           </TableHead>
           <TableBody>
             {loading ? (
               <TableRow>
-                <TableCell colSpan={7} align="center" sx={{ py: 3 }}>Loading...</TableCell>
+                <TableCell colSpan={8} align="center" sx={{ py: 3 }}>Loading...</TableCell>
               </TableRow>
             ) : paginatedAppointments.length > 0 ? (
               paginatedAppointments.map((appointment) => {
@@ -664,38 +662,23 @@ const AdminTherapistAppointments = () => {
                       fontWeight: 500,
                       color: 'text.primary'
                     }}>{timeStr}</TableCell>
-                    <TableCell sx={{ py: 1.5, width: '18%' }}>
-                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                        <Box
-                          sx={{
-                            width: 28,
-                            height: 28,
-                            borderRadius: '50%',
-                            backgroundColor: 'primary.100',
-                            display: 'flex',
-                            alignItems: 'center',
-                            justifyContent: 'center',
-                            fontSize: '0.75rem',
-                            fontWeight: 600,
-                            color: 'primary.main',
-                            border: '1px solid',
-                            borderColor: 'primary.200',
-                            flexShrink: 0
-                          }}
-                        >
-                          {appointment.patient.username ? appointment.patient.username.charAt(0).toUpperCase() : 'P'}
-                        </Box>
-                        <Typography variant="body2" sx={{ 
-                          fontWeight: 500, 
-                          color: 'text.primary',
-                          fontSize: '0.85rem',
-                          overflow: 'hidden',
-                          textOverflow: 'ellipsis',
-                          whiteSpace: 'nowrap'
-                        }}>
-                          {appointment.patient.username || 'New Patient'}
-                        </Typography>
-                      </Box>
+                    <TableCell sx={{ 
+                      py: 1.5, 
+                      fontSize: "0.9rem", 
+                      width: '15%',
+                      fontWeight: 500,
+                      color: 'text.primary'
+                    }}>
+                      {appointment.patient.username || 'New Patient'}
+                    </TableCell>
+                    <TableCell sx={{ 
+                      py: 1.5, 
+                      fontSize: "0.9rem", 
+                      width: '15%',
+                      fontWeight: 500,
+                      color: 'text.primary'
+                    }}>
+                      {appointment.therapist?.username || 'N/A'}
                     </TableCell>
                     <TableCell sx={{ 
                       py: 1.5, 
@@ -718,7 +701,7 @@ const AdminTherapistAppointments = () => {
                         }} 
                       />
                     </TableCell>
-                    <TableCell sx={{ py: 1.5, width: '12%' }}>
+                    <TableCell sx={{ py: 1.5, width: '10%' }}>
                       <Chip 
                         label={appointment.status} 
                         size="small"
@@ -740,7 +723,7 @@ const AdminTherapistAppointments = () => {
                         }}
                       />
                     </TableCell>
-                    <TableCell sx={{ py: 1.5, width: '34%' }}>
+                    <TableCell sx={{ py: 1.5, width: '24%' }}>
                       <Box sx={{ display: 'flex', gap: 0.3, alignItems: 'center', flexWrap: 'nowrap' }}>
                         {/* View Details button - always visible */}
                         <IconButton
@@ -833,7 +816,7 @@ const AdminTherapistAppointments = () => {
             })
             ) : (
               <TableRow>
-                <TableCell colSpan={6} align="center">
+                <TableCell colSpan={8} align="center">
                   No appointments found.
                 </TableCell>
               </TableRow>

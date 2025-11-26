@@ -113,8 +113,13 @@ class CustomUser(AbstractUser):
         return f"{self.id} - {self.username} ({self.role})"
     
 class Admin(models.Model):
+    ADMIN_ROLE_CHOICES = [
+        ('CenterAdmin', 'Center Admin'),
+        ('SuperAdmin', 'Super Admin'),
+    ]
+    
     user = models.OneToOneField(CustomUser, on_delete=models.CASCADE, related_name='admin_profile')
-    admin_role = models.CharField(max_length=50, blank=True)
+    admin_role = models.CharField(max_length=50, choices=ADMIN_ROLE_CHOICES, default='CenterAdmin')
 
     def __str__(self):
         return f"Admin: {self.user.id}"
@@ -564,19 +569,3 @@ class ActionTemplate(models.Model):
     class Meta:
         ordering = ['-created_at']
 
-
-class ActionSession(models.Model):
-    """
-    Real-time recognition/counting session results
-    """
-    id = models.AutoField(primary_key=True)
-    action = models.ForeignKey(Action, on_delete=models.CASCADE, related_name='sessions')
-    reps = models.IntegerField(default=0)
-    started_at = models.DateTimeField(auto_now_add=True)
-    metrics_json = models.JSONField(default=dict)  # accuracy, avg_distance, etc.
-    
-    def __str__(self):
-        return f"Session for {self.action.name} - {self.reps} reps"
-    
-    class Meta:
-        ordering = ['-started_at']

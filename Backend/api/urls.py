@@ -19,6 +19,7 @@ urlpatterns = [
     path('change-password/', views.change_password, name='change-password'),
     path('change-user-password/<str:user_id>/', views.change_user_password, name='change-user-password'),
     path('list-patients/', views.list_patients, name='list-patients'),
+    path('check-patients-treatment-status/', views.check_patients_treatment_status, name='check-patients-treatment-status'),
 
     # 新的预约管理API
     path('appointments/', appointment_views.create_appointment, name='create_appointment_new'),

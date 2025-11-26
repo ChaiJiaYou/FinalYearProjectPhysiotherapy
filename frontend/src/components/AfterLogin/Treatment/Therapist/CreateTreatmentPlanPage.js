@@ -67,6 +67,12 @@ const CreateTreatmentPlanPage = () => {
   const [exerciseSearchTerm, setExerciseSearchTerm] = useState('');
   const [exerciseCategoryFilter, setExerciseCategoryFilter] = useState('');
   
+  // User role detection
+  const userRole = localStorage.getItem("role");
+  const currentUserId = localStorage.getItem("id");
+  const isAdmin = userRole === 'admin';
+  const isTherapist = userRole === 'therapist';
+
   // Form data - based on actual model fields
   const [treatmentName, setTreatmentName] = useState('');
   const [startDate, setStartDate] = useState(new Date().toISOString().split('T')[0]);
@@ -75,12 +81,19 @@ const CreateTreatmentPlanPage = () => {
   const [selectedExercises, setSelectedExercises] = useState([]);
   const [animatingExercise, setAnimatingExercise] = useState(null);
   const [originalExerciseIds, setOriginalExerciseIds] = useState([]);
+  const [therapists, setTherapists] = useState([]);
+  const [selectedTherapist, setSelectedTherapist] = useState(isAdmin ? '' : currentUserId);
   
-  const therapistId = localStorage.getItem("id");
+  // Determine therapist_id to use
+  const therapistId = isAdmin ? selectedTherapist : currentUserId;
 
   useEffect(() => {
     fetchPatients();
     fetchExercises();
+    // Fetch therapists for both admin (to select) and therapist (to display current user info)
+    if (isAdmin || isTherapist) {
+      fetchTherapists();
+    }
     
     // Check if we're in edit mode
     if (treatmentId) {
@@ -91,7 +104,7 @@ const CreateTreatmentPlanPage = () => {
       setOriginalExerciseIds([]);
       setSelectedExercises([]);
     }
-  }, [treatmentId]);
+  }, [treatmentId, isAdmin, isTherapist]);
 
   // Set default end date (start date + 2 weeks)
   useEffect(() => {
@@ -141,6 +154,21 @@ const CreateTreatmentPlanPage = () => {
     } catch (error) {
       console.error("Error fetching exercises:", error);
       toast.error("Something went wrong while fetching exercises");
+    }
+  };
+
+  const fetchTherapists = async () => {
+    try {
+      const response = await fetch("http://127.0.0.1:8000/api/list-therapists/");
+      if (response.ok) {
+        const data = await response.json();
+        setTherapists(data || []);
+      } else {
+        toast.error("Failed to load therapists");
+      }
+    } catch (error) {
+      console.error("Error fetching therapists:", error);
+      toast.error("Something went wrong while fetching therapists");
     }
   };
 
@@ -230,6 +258,10 @@ const CreateTreatmentPlanPage = () => {
       case 0:
         if (!treatmentName || !startDate) {
           toast.warn("Please fill in all required fields");
+          return false;
+        }
+        if (isAdmin && !selectedTherapist) {
+          toast.warn("Please select a therapist");
           return false;
         }
         return true;
@@ -511,6 +543,33 @@ const CreateTreatmentPlanPage = () => {
               placeholder="e.g., Post-Surgery Rehabilitation Plan"
               helperText="Give your treatment plan a descriptive name"
             />
+
+            {isAdmin ? (
+              <FormControl fullWidth required>
+                <InputLabel>Select Therapist</InputLabel>
+                <Select
+                  value={selectedTherapist}
+                  onChange={(e) => setSelectedTherapist(e.target.value)}
+                  label="Select Therapist"
+                >
+                  {therapists.map((therapist) => (
+                    <MenuItem key={therapist.id} value={therapist.id}>
+                      {therapist.username} ({therapist.id})
+                    </MenuItem>
+                  ))}
+                </Select>
+              </FormControl>
+            ) : (
+              <TextField
+                fullWidth
+                label="Therapist"
+                value={therapists.find(t => t.id === currentUserId)?.username || currentUserId}
+                InputProps={{
+                  readOnly: true,
+                }}
+                helperText="This treatment will be assigned to you"
+              />
+            )}
 
             <TextField
               fullWidth

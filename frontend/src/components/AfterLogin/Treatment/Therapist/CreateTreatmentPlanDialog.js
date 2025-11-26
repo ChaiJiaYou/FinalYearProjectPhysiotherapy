@@ -72,7 +72,14 @@ const CreateTreatmentPlanDialog = ({ open, onClose, onSuccess }) => {
   const [patients, setPatients] = useState([]);
   const [templates, setTemplates] = useState([]);
   const [exercises, setExercises] = useState([]);
+  const [therapists, setTherapists] = useState([]);
   const [loading, setLoading] = useState(false);
+  
+  // User role detection
+  const userRole = localStorage.getItem("role");
+  const currentUserId = localStorage.getItem("id");
+  const isAdmin = userRole === 'admin';
+  const isTherapist = userRole === 'therapist';
   
   // Creation method
   const [creationMethod, setCreationMethod] = useState('template'); // 'template' or 'custom'
@@ -89,6 +96,7 @@ const CreateTreatmentPlanDialog = ({ open, onClose, onSuccess }) => {
   
   // Form data
   const [selectedPatient, setSelectedPatient] = useState('');
+  const [selectedTherapist, setSelectedTherapist] = useState(isAdmin ? '' : currentUserId);
   const [treatmentType, setTreatmentType] = useState('');
   const [treatmentSubtype, setTreatmentSubtype] = useState('');
   const [frequency, setFrequency] = useState('');
@@ -96,16 +104,21 @@ const CreateTreatmentPlanDialog = ({ open, onClose, onSuccess }) => {
   const [selectedExercises, setSelectedExercises] = useState([]);
   const [expandedExercise, setExpandedExercise] = useState(null);
   
-  const therapistId = localStorage.getItem("id");
+  // Determine therapist_id to use
+  const therapistId = isAdmin ? selectedTherapist : currentUserId;
 
   useEffect(() => {
     if (open) {
       fetchPatients();
       fetchTemplates();
       fetchExercises();
+      // Fetch therapists for both admin (to select) and therapist (to display current user info)
+      if (isAdmin || isTherapist) {
+        fetchTherapists();
+      }
       resetForm();
     }
-  }, [open]);
+  }, [open, isAdmin, isTherapist]);
 
   const fetchPatients = async () => {
     try {
@@ -155,6 +168,21 @@ const CreateTreatmentPlanDialog = ({ open, onClose, onSuccess }) => {
     }
   };
 
+  const fetchTherapists = async () => {
+    try {
+      const response = await fetch("http://127.0.0.1:8000/api/list-therapists/");
+      if (response.ok) {
+        const data = await response.json();
+        setTherapists(data || []);
+      } else {
+        toast.error("Failed to load therapists");
+      }
+    } catch (error) {
+      console.error("Error fetching therapists:", error);
+      toast.error("Something went wrong while fetching therapists");
+    }
+  };
+
   const resetForm = () => {
     setActiveStep(0);
     setCreationMethod('template');
@@ -165,6 +193,7 @@ const CreateTreatmentPlanDialog = ({ open, onClose, onSuccess }) => {
     setExerciseBodyPartFilter('');
     setExerciseCategoryFilter('');
     setSelectedPatient('');
+    setSelectedTherapist(isAdmin ? '' : currentUserId);
     setTreatmentType('');
     setTreatmentSubtype('');
     setFrequency('');
@@ -217,6 +246,10 @@ const CreateTreatmentPlanDialog = ({ open, onClose, onSuccess }) => {
       case 1:
         if (!selectedPatient || !treatmentType || !startDate) {
           toast.warn("Please fill in all required fields");
+          return false;
+        }
+        if (isAdmin && !selectedTherapist) {
+          toast.warn("Please select a therapist");
           return false;
         }
         return true;
@@ -545,6 +578,33 @@ const CreateTreatmentPlanDialog = ({ open, onClose, onSuccess }) => {
                 ))}
               </Select>
             </FormControl>
+
+            {isAdmin ? (
+              <FormControl fullWidth required>
+                <InputLabel>Select Therapist</InputLabel>
+                <Select
+                  value={selectedTherapist}
+                  onChange={(e) => setSelectedTherapist(e.target.value)}
+                  label="Select Therapist"
+                >
+                  {therapists.map((therapist) => (
+                    <MenuItem key={therapist.id} value={therapist.id}>
+                      {therapist.username} ({therapist.id})
+                    </MenuItem>
+                  ))}
+                </Select>
+              </FormControl>
+            ) : (
+              <TextField
+                fullWidth
+                label="Therapist"
+                value={therapists.find(t => t.id === currentUserId)?.username || currentUserId}
+                InputProps={{
+                  readOnly: true,
+                }}
+                helperText="This treatment will be assigned to you"
+              />
+            )}
 
             <FormControl fullWidth required>
               <InputLabel>Treatment Type</InputLabel>

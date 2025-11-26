@@ -40,12 +40,14 @@ const TreatmentList = () => {
   const [searchTerm, setSearchTerm] = useState('');
   const [page, setPage] = useState(0);
   const [rowsPerPage, setRowsPerPage] = useState(10);
+  const [patientsWithTreatment, setPatientsWithTreatment] = useState(new Set());
   const navigate = useNavigate();
   const theme = useTheme();
   const isSmallScreen = useMediaQuery(theme.breakpoints.down("md"));
 
   useEffect(() => {
     fetchPatients();
+    fetchTreatmentStatus();
   }, []);
 
   const fetchPatients = async () => {
@@ -63,6 +65,19 @@ const TreatmentList = () => {
       toast.error('Error fetching patients');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const fetchTreatmentStatus = async () => {
+    try {
+      const response = await fetch('http://127.0.0.1:8000/api/check-patients-treatment-status/');
+      if (response.ok) {
+        const data = await response.json();
+        // API returns an array of patient IDs who have active treatments
+        setPatientsWithTreatment(new Set(data || []));
+      }
+    } catch (error) {
+      console.error('Error fetching treatment status:', error);
     }
   };
 
@@ -112,20 +127,38 @@ const TreatmentList = () => {
       {/* 搜索和过滤 - 遵循User Management设计系统 */}
       <Card sx={{ mb: 3, borderRadius: 3, border: '1px solid', borderColor: 'grey.200', elevation: 0 }}>
         <CardContent sx={{ p: 3 }}>
-          <Box display="flex" alignItems="center" justifyContent="space-between" mb={2}>
-            <Typography variant="h6" sx={{ fontWeight: 600 }}>
-              Search & Filter Patients
-            </Typography>
+          <Box display="flex" alignItems="center" gap={2} flexWrap="wrap">
+            <TextField
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              size="small"
+              InputProps={{
+                startAdornment: (
+                  <InputAdornment position="start">
+                    <SearchIcon />
+                  </InputAdornment>
+                ),
+              }}
+              sx={{ 
+                flex: 1,
+                minWidth: { xs: "100%", sm: 300 },
+                "& .MuiOutlinedInput-root": {
+                  borderRadius: 2,
+                }
+              }}
+            />
             <Button
               variant="outlined"
               startIcon={<RefreshIcon />}
               onClick={fetchPatients}
               disabled={loading}
+              size="small"
               sx={{
                 borderRadius: 2,
                 textTransform: 'uppercase',
                 fontWeight: 600,
                 px: 3,
+                height: '40px',
                 borderColor: '#3b82f6',
                 color: '#3b82f6',
                 '&:hover': {
@@ -136,30 +169,26 @@ const TreatmentList = () => {
             >
               Refresh
             </Button>
-          </Box>
-
-          <Box display="flex" alignItems="center" gap={2} flexWrap="wrap">
-            <TextField
-              placeholder="Search patients by name or email..."
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              InputProps={{
-                startAdornment: (
-                  <InputAdornment position="start">
-                    <SearchIcon />
-                  </InputAdornment>
-                ),
-              }}
-              sx={{ 
-                minWidth: { xs: "100%", sm: 400 },
-                "& .MuiOutlinedInput-root": {
-                  borderRadius: 2,
+            <Button
+              variant="outlined"
+              onClick={() => setSearchTerm('')}
+              size="small"
+              sx={{
+                borderRadius: 2,
+                textTransform: 'uppercase',
+                fontWeight: 600,
+                px: 3,
+                height: '40px',
+                borderColor: '#3b82f6',
+                color: '#3b82f6',
+                '&:hover': {
+                  borderColor: '#2563eb',
+                  bgcolor: 'rgba(59, 130, 246, 0.04)',
                 }
               }}
-            />
-            <Typography variant="body2" color="text.secondary">
-              {filteredPatients.length} patient{filteredPatients.length !== 1 ? 's' : ''} found
-            </Typography>
+            >
+              Clear
+            </Button>
           </Box>
         </CardContent>
       </Card>
@@ -173,19 +202,20 @@ const TreatmentList = () => {
                 <TableCell sx={{ fontWeight: "bold", py: 2 }}>Patient</TableCell>
                 <TableCell sx={{ fontWeight: "bold", py: 2 }}>Email</TableCell>
                 <TableCell sx={{ fontWeight: "bold", py: 2 }}>Contact</TableCell>
+                <TableCell sx={{ fontWeight: "bold", py: 2 }}>Treatment</TableCell>
                 <TableCell sx={{ fontWeight: "bold", py: 2 }}>Actions</TableCell>
               </TableRow>
             </TableHead>
             <TableBody>
               {loading ? (
                 <TableRow>
-                  <TableCell colSpan={4} sx={{ textAlign: "center", py: 4 }}>
+                  <TableCell colSpan={5} sx={{ textAlign: "center", py: 4 }}>
                     <CircularProgress />
                   </TableCell>
                 </TableRow>
               ) : paginatedPatients.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={4} sx={{ textAlign: "center", py: 6 }}>
+                  <TableCell colSpan={5} sx={{ textAlign: "center", py: 6 }}>
                     <Box display="flex" flexDirection="column" alignItems="center" gap={2}>
                       <MedicalServicesIcon sx={{ fontSize: 48, color: "text.secondary" }} />
                       <Typography variant="h6" color="text.secondary">
@@ -230,6 +260,17 @@ const TreatmentList = () => {
                     </TableCell>
                     <TableCell sx={{ py: 2 }}>
                       <Typography variant="body2">{patient.contact_number || "N/A"}</Typography>
+                    </TableCell>
+                    <TableCell sx={{ py: 2 }}>
+                      <Chip
+                        label={patientsWithTreatment.has(patient.id) ? "Have Treatment" : "No Treatment"}
+                        size="small"
+                        color={patientsWithTreatment.has(patient.id) ? "success" : "default"}
+                        sx={{
+                          fontSize: '0.75rem',
+                          fontWeight: 600,
+                        }}
+                      />
                     </TableCell>
                     <TableCell sx={{ py: 2 }}>
                       <Button

@@ -48,6 +48,11 @@ const UserProfilePage = () => {
     return roleColors[role] || "#6b7280";
   };
 
+  const getInitials = (username) => {
+    if (!username) return "U";
+    return username.charAt(0).toUpperCase();
+  };
+
   const getRoleIcon = (role) => {
     switch (role) {
       case "admin":
@@ -212,15 +217,18 @@ const UserProfilePage = () => {
               <CardContent sx={{ p: 3 }}>
                 <Box display="flex" alignItems="center" gap={3}>
                   <Avatar
-                    src={avatarUrl || "/static/images/defaultAvatar.png"}
+                    src={avatarUrl || undefined}
                     sx={{
                       width: 120,
                       height: 120,
                       border: "4px solid",
                       borderColor: alpha(getRoleColor(user?.role), 0.2),
-                      backgroundColor: "grey.100",
+                      backgroundColor: avatarUrl ? "transparent" : alpha(getRoleColor(user?.role), 0.1),
+                      color: avatarUrl ? "inherit" : getRoleColor(user?.role),
+                      fontSize: "3rem",
+                      fontWeight: 600,
                     }}>
-                    {!avatarUrl && <AddIcon sx={{ fontSize: 40, color: "grey.400" }} />}
+                    {!avatarUrl && getInitials(user?.username)}
                   </Avatar>
                   <Box>
                     <Typography variant="h3" sx={{ fontWeight: 600, color: "text.primary", mb: 2 }}>
@@ -428,7 +436,13 @@ const UserProfilePage = () => {
                         Admin Role
                       </Typography>
                       <Typography variant="body2" sx={{ fontWeight: 500, color: "text.primary" }}>
-                        {user?.admin_profile?.admin_role || "Not specified"}
+                        {user?.admin_profile?.admin_role 
+                          ? user.admin_profile.admin_role === "SuperAdmin" 
+                            ? "Super Admin" 
+                            : user.admin_profile.admin_role === "CenterAdmin"
+                            ? "Center Admin"
+                            : user.admin_profile.admin_role
+                          : "Not specified"}
                       </Typography>
                     </Box>
                   </Box>

@@ -128,8 +128,18 @@ const PatientAppointmentPage = () => {
     setShowCreateDialog(false);
   };
 
-  const handleAppointmentCreated = () => {
-    fetchAppointments(); // Refresh the appointments list
+  const handleAppointmentCreated = (newAppointment) => {
+    if (newAppointment) {
+      // 乐观更新：直接添加新预约到状态，而不是重新获取所有数据
+      // 患者创建的预约状态是 Pending
+      setPendingAppointments((prev) => [...prev, newAppointment]);
+      
+      // 添加到 allAppointments
+      setAllAppointments((prev) => [...prev, newAppointment]);
+      
+      // 注意：新创建的 Pending 预约不会显示在 appointments（Scheduled）列表中
+      // 因为 appointments 只包含 Scheduled 状态的预约
+    }
     setShowCreateDialog(false);
   };
 

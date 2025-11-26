@@ -160,6 +160,14 @@ const CreateAppointmentDialog = ({ open, onClose, onSuccess, initialDate }) => {
       toast.warn("Please provide contact name and phone for new patient");
       return;
     }
+    // 验证电话号码：必须是数字，且长度为 10-11 位
+    if (isNewPatient && contactPhone) {
+      const phoneDigits = contactPhone.replace(/\D/g, '');
+      if (phoneDigits.length < 10 || phoneDigits.length > 11) {
+        toast.error("Contact phone must be 10-11 digits");
+        return;
+      }
+    }
     if (!selectedDate) {
       toast.warn("Please select a date");
       return;
@@ -206,9 +214,8 @@ const CreateAppointmentDialog = ({ open, onClose, onSuccess, initialDate }) => {
 
       if (res.ok) {
         toast.success("Appointment created successfully!");
-        // 立即获取更新后的预约列表
-        fetchAppointments();
-        onSuccess();
+        // 将新创建的预约传递给父组件，用于乐观更新
+        onSuccess(data.appointment);
         handleClose();
       } else {
         toast.error(data.error || "Failed to create appointment");
@@ -367,8 +374,16 @@ const CreateAppointmentDialog = ({ open, onClose, onSuccess, initialDate }) => {
                         size="small"
                         label="Contact Phone"
                         value={contactPhone}
-                        onChange={(e) => setContactPhone(e.target.value)}
-                        placeholder="Enter phone number"
+                        onChange={(e) => {
+                          // 只允许数字，限制为 11 位
+                          const value = e.target.value.replace(/\D/g, '').slice(0, 11);
+                          setContactPhone(value);
+                        }}
+                        placeholder="Enter phone number (10-11 digits)"
+                        inputProps={{
+                          maxLength: 11
+                        }}
+                        helperText="Enter 10-11 digit phone number"
                       />
                     </Grid>
                   </>

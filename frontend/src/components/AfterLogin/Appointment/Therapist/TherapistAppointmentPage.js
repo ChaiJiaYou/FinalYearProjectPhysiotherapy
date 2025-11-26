@@ -1,20 +1,16 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import {
   Box,
   Card,
   CardContent,
   Typography,
   Button,
-  Container,
   CircularProgress,
   Alert,
   Chip,
-  Divider,
   Paper,
   Stack,
   TextField,
-  useTheme,
-  useMediaQuery,
   Tabs,
   Tab,
   Dialog,
@@ -33,42 +29,21 @@ import {
   TableContainer,
   TableHead,
   TableRow,
-  Badge,
   Avatar,
-  List,
-  ListItem,
-  ListItemText,
-  ListItemAvatar,
-  ListItemSecondaryAction,
   Tooltip,
-  Fab,
-  SpeedDial,
-  SpeedDialAction,
-  SpeedDialIcon,
 } from '@mui/material';
 import {
   AccessTime as AccessTimeIcon,
   Person as PersonIcon,
-  Notes as NotesIcon,
-  Error as ErrorIcon,
   Today as TodayIcon,
   Add as AddIcon,
   CalendarMonth as CalendarMonthIcon,
   Schedule as ScheduleIcon,
   Pending as PendingIcon,
   Close as CloseIcon,
-  Edit as EditIcon,
   CheckCircle as CheckCircleIcon,
   Cancel as CancelIcon,
-  Phone as PhoneIcon,
-  Email as EmailIcon,
-  MoreVert as MoreVertIcon,
-  ViewList as ViewListIcon,
-  ViewModule as ViewModuleIcon,
-  FilterList as FilterListIcon,
   Refresh as RefreshIcon,
-  Search as SearchIcon,
-  Settings as SettingsIcon,
   Visibility as VisibilityIcon,
 } from '@mui/icons-material';
 import { toast } from 'react-toastify';
@@ -81,22 +56,20 @@ const TherapistAppointmentPage = () => {
   // 状态管理
   const [appointments, setAppointments] = useState([]);
   const [pendingAppointments, setPendingAppointments] = useState([]);
+  const [scheduledAppointments, setScheduledAppointments] = useState([]);
   const [availabilitySlots, setAvailabilitySlots] = useState([]);
-  const [patients, setPatients] = useState([]);
+  const [statsFromAPI, setStatsFromAPI] = useState(null); // 从 API 获取的统计信息
   const [loading, setLoading] = useState(true);
+  const [dataLoading, setDataLoading] = useState(false); // 用于数据刷新时的加载状态
   const [error, setError] = useState(null);
   const [selectedDate, setSelectedDate] = useState(new Date());
   const [tabValue, setTabValue] = useState(0);
-  const [viewMode, setViewMode] = useState('list'); // 'list' or 'grid'
-  const [searchTerm, setSearchTerm] = useState('');
-  const [statusFilter, setStatusFilter] = useState('all');
   const [selectedAppointment, setSelectedAppointment] = useState(null);
   
   // 对话框状态
   const [showCreateAppointment, setShowCreateAppointment] = useState(false);
   const [showCreateSlot, setShowCreateSlot] = useState(false);
   const [showAppointmentDetails, setShowAppointmentDetails] = useState(false);
-  const [showEditNotes, setShowEditNotes] = useState(false);
   const [showCompleteDialog, setShowCompleteDialog] = useState(false);
   const [showCancelDialog, setShowCancelDialog] = useState(false);
   
@@ -109,33 +82,186 @@ const TherapistAppointmentPage = () => {
   // 可用时间管理状态
   const [timeSlots, setTimeSlots] = useState([]);
   
-  const theme = useTheme();
-  const isSmallScreen = useMediaQuery(theme.breakpoints.down('md'));
+  // 用于跟踪是否是初始加载，避免重复 API 调用
+  const isInitialMount = useRef(true);
 
-  // 数据获取
+  // 获取预约数据
+  const fetchAppointments = async () => {
+    try {
+      // 使用本地时区获取日期字符串
+      const year = selectedDate.getFullYear();
+      const month = String(selectedDate.getMonth() + 1).padStart(2, '0');
+      const day = String(selectedDate.getDate()).padStart(2, '0');
+      const dateStr = `${year}-${month}-${day}`;
+      const response = await fetch(
+        `http://127.0.0.1:8000/api/appointments/list/?scope=therapist&user_id=${therapistId}&from=${dateStr}&to=${dateStr}`
+      );
+      
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error('Error fetching appointments:', errorText);
+        throw new Error(`HTTP ${response.status}: ${errorText}`);
+      }
+      
+      const data = await response.json();
+      setAppointments(data.appointments || []);
+      // 如果 API 返回了统计信息，保存它
+      if (data.stats) {
+        setStatsFromAPI(data.stats);
+      }
+    } catch (error) {
+      console.error('Error fetching appointments:', error);
+      throw error;
+    }
+  };
+
+  const fetchAvailabilitySlots = async () => {
+    try {
+      // 使用本地时区获取日期字符串
+      const year = selectedDate.getFullYear();
+      const month = String(selectedDate.getMonth() + 1).padStart(2, '0');
+      const day = String(selectedDate.getDate()).padStart(2, '0');
+      const dateStr = `${year}-${month}-${day}`;
+      const response = await fetch(
+        `http://127.0.0.1:8000/api/availability/?therapist_id=${therapistId}&date=${dateStr}`
+      );
+      const data = await response.json();
+      setAvailabilitySlots(data.slots || []);
+    } catch (error) {
+      console.error('Error fetching availability slots:', error);
+      throw error;
+    }
+  };
+
+  const fetchPendingAppointments = async () => {
+    try {
+      // 只获取 Pending 状态的预约
+      const response = await fetch(
+        `http://127.0.0.1:8000/api/appointments/list/?scope=therapist&user_id=${therapistId}&status=Pending`
+      );
+      
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error('Error fetching pending appointments:', errorText);
+        throw new Error(`HTTP ${response.status}: ${errorText}`);
+      }
+      
+      const data = await response.json();
+      setPendingAppointments(data.appointments || []);
+    } catch (error) {
+      console.error('Error fetching pending appointments:', error);
+      throw error;
+    }
+  };
+
+  const fetchScheduledAppointments = async () => {
+    try {
+      // 获取所有 Scheduled 状态的预约（不限制日期）
+      const response = await fetch(
+        `http://127.0.0.1:8000/api/appointments/list/?scope=therapist&user_id=${therapistId}&status=Scheduled`
+      );
+      
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error('Error fetching scheduled appointments:', errorText);
+        throw new Error(`HTTP ${response.status}: ${errorText}`);
+      }
+      
+      const data = await response.json();
+      setScheduledAppointments(data.appointments || []);
+    } catch (error) {
+      console.error('Error fetching scheduled appointments:', error);
+      throw error;
+    }
+  };
+
+  // 初始数据获取
   useEffect(() => {
     if (!therapistId) {
       setError('Therapist ID not found. Please login again.');
       setLoading(false);
       return;
     }
-    fetchData();
-  }, [therapistId, selectedDate]);
+    const initialFetch = async () => {
+      setLoading(true);
+      try {
+        await Promise.all([
+          fetchAppointments(),
+          fetchPendingAppointments(),
+          fetchScheduledAppointments(),
+          fetchAvailabilitySlots()
+        ]);
+      } catch (error) {
+        console.error('Error fetching data:', error);
+        setError('Failed to load data');
+      } finally {
+        setLoading(false);
+        isInitialMount.current = false; // 标记初始加载完成
+      }
+    };
+    initialFetch();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [therapistId]);
+
+  // 日期变化时只刷新依赖日期的数据，不显示全屏加载
+  useEffect(() => {
+    if (!therapistId || isInitialMount.current) return; // 初始加载时跳过
+    
+    const refreshData = async () => {
+      setDataLoading(true);
+      try {
+        // 使用本地时区获取日期字符串
+        const year = selectedDate.getFullYear();
+        const month = String(selectedDate.getMonth() + 1).padStart(2, '0');
+        const day = String(selectedDate.getDate()).padStart(2, '0');
+        const dateStr = `${year}-${month}-${day}`;
+        
+        // 只获取依赖日期的数据
+        // 1. 获取选中日期的预约（Today Appointments 需要）
+        const appointmentsResponse = await fetch(
+          `http://127.0.0.1:8000/api/appointments/list/?scope=therapist&user_id=${therapistId}&from=${dateStr}&to=${dateStr}`
+        );
+        if (appointmentsResponse.ok) {
+          const appointmentsData = await appointmentsResponse.json();
+          setAppointments(appointmentsData.appointments || []);
+        }
+        
+        // 2. 获取可用时间段（Today Appointments 需要）
+        const availabilityResponse = await fetch(
+          `http://127.0.0.1:8000/api/availability/?therapist_id=${therapistId}&date=${dateStr}`
+        );
+        if (availabilityResponse.ok) {
+          const availabilityData = await availabilityResponse.json();
+          setAvailabilitySlots(availabilityData.slots || []);
+        }
+        
+        // 注意：pendingAppointments 和 scheduledAppointments 不依赖日期
+        // 所以不需要重新获取，它们保持不变
+        
+      } catch (error) {
+        console.error('Error refreshing data:', error);
+        toast.error('Failed to refresh data');
+      } finally {
+        setDataLoading(false);
+      }
+    };
+    refreshData();
+  }, [selectedDate, therapistId]);
 
   const fetchData = async () => {
-    setLoading(true);
+    setDataLoading(true);
     try {
       await Promise.all([
         fetchAppointments(),
         fetchPendingAppointments(),
-        fetchAvailabilitySlots(),
-        fetchPatients()
+        fetchScheduledAppointments(),
+        fetchAvailabilitySlots()
       ]);
     } catch (error) {
       console.error('Error fetching data:', error);
       setError('Failed to load data');
     } finally {
-      setLoading(false);
+      setDataLoading(false);
     }
   };
 
@@ -177,7 +303,8 @@ const TherapistAppointmentPage = () => {
     if (showCreateSlot) {
       loadUnavailableSlots();
     }
-  }, [showCreateSlot]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [showCreateSlot, selectedDate]);
 
   // 加载已保存的unavailable时间段
   const loadUnavailableSlots = async () => {
@@ -318,8 +445,6 @@ const TherapistAppointmentPage = () => {
           console.error('API Error:', txt);
           throw new Error(txt);
         }
-        
-        const result = await createResponse.json();
       }
 
       toast.success('Availability updated successfully');
@@ -338,80 +463,6 @@ const TherapistAppointmentPage = () => {
     return `${String(hours).padStart(2, '0')}:${String(mins).padStart(2, '0')}`;
   };
 
-  const fetchAppointments = async () => {
-    try {
-      // 使用本地时区获取日期字符串
-      const year = selectedDate.getFullYear();
-      const month = String(selectedDate.getMonth() + 1).padStart(2, '0');
-      const day = String(selectedDate.getDate()).padStart(2, '0');
-      const dateStr = `${year}-${month}-${day}`;
-      const response = await fetch(
-        `http://127.0.0.1:8000/api/appointments/list/?scope=therapist&user_id=${therapistId}&from=${dateStr}&to=${dateStr}`
-      );
-      
-      if (!response.ok) {
-        const errorText = await response.text();
-        console.error('Error fetching appointments:', errorText);
-        throw new Error(`HTTP ${response.status}: ${errorText}`);
-      }
-      
-      const data = await response.json();
-      setAppointments(data.appointments || []);
-    } catch (error) {
-      console.error('Error fetching appointments:', error);
-      throw error;
-    }
-  };
-
-  const fetchAvailabilitySlots = async () => {
-    try {
-      // 使用本地时区获取日期字符串
-      const year = selectedDate.getFullYear();
-      const month = String(selectedDate.getMonth() + 1).padStart(2, '0');
-      const day = String(selectedDate.getDate()).padStart(2, '0');
-      const dateStr = `${year}-${month}-${day}`;
-      const response = await fetch(
-        `http://127.0.0.1:8000/api/availability/?therapist_id=${therapistId}&date=${dateStr}`
-      );
-      const data = await response.json();
-      setAvailabilitySlots(data.slots || []);
-    } catch (error) {
-      console.error('Error fetching availability slots:', error);
-      throw error;
-    }
-  };
-
-  const fetchPendingAppointments = async () => {
-    try {
-      // 只获取 Pending 状态的预约
-      const response = await fetch(
-        `http://127.0.0.1:8000/api/appointments/list/?scope=therapist&user_id=${therapistId}&status=Pending`
-      );
-      
-      if (!response.ok) {
-        const errorText = await response.text();
-        console.error('Error fetching pending appointments:', errorText);
-        throw new Error(`HTTP ${response.status}: ${errorText}`);
-      }
-      
-      const data = await response.json();
-      setPendingAppointments(data.appointments || []);
-    } catch (error) {
-      console.error('Error fetching pending appointments:', error);
-      throw error;
-    }
-  };
-
-  const fetchPatients = async () => {
-    try {
-      const response = await fetch('http://127.0.0.1:8000/api/list-patients/');
-      const data = await response.json();
-      setPatients(data);
-    } catch (error) {
-      console.error('Error fetching patients:', error);
-      throw error;
-    }
-  };
 
   // 预约状态更新
   const updateAppointmentStatus = async (appointmentId, action) => {
@@ -430,7 +481,7 @@ const TherapistAppointmentPage = () => {
 
       if (response.ok) {
         toast.success(`Appointment ${action} successfully`);
-        await fetchAppointments();
+        await fetchData();
         setShowAppointmentDetails(false);
       } else {
         const errorData = await response.json();
@@ -461,8 +512,65 @@ const TherapistAppointmentPage = () => {
       if (response.ok) {
         const data = await response.json();
         toast.success(data.message);
-        await fetchPendingAppointments();
-        await fetchData();
+        
+        // 乐观更新：根据 action 更新状态
+        const newStatus = action === 'accept' ? 'Scheduled' : 'Cancelled';
+        
+        // 更新 pendingAppointments（移除该预约）
+        setPendingAppointments((prev) => {
+          const appointment = prev.find(appt => appt.appointment_code === appointmentId);
+          
+          // 如果接受，添加到 scheduledAppointments 并更新统计数据
+          if (action === 'accept' && appointment) {
+            const appointmentToMove = { ...appointment, status: newStatus };
+            setScheduledAppointments((prevScheduled) => {
+              // 检查是否已存在
+              const exists = prevScheduled.some(appt => appt.appointment_code === appointmentId);
+              if (exists) {
+                return prevScheduled.map((appt) =>
+                  appt.appointment_code === appointmentId 
+                    ? { ...appt, status: newStatus }
+                    : appt
+                );
+              } else {
+                return [...prevScheduled, appointmentToMove];
+              }
+            });
+            
+            // 更新统计数据（接受预约）
+            const appointmentDate = new Date(appointment.start_at);
+            const today = new Date();
+            const isToday = appointmentDate.toDateString() === today.toDateString();
+            
+            setStatsFromAPI((prevStats) => {
+              if (!prevStats) return null;
+              return {
+                ...prevStats,
+                pending: Math.max(0, (prevStats.pending || 0) - 1),
+                scheduled: (prevStats.scheduled || 0) + 1,
+                todaySessions: isToday ? (prevStats.todaySessions || 0) + 1 : prevStats.todaySessions,
+              };
+            });
+          } else if (action === 'reject') {
+            // 如果拒绝，从 scheduledAppointments 中移除（如果存在）
+            setScheduledAppointments((prevScheduled) =>
+              prevScheduled.filter((appt) => appt.appointment_code !== appointmentId)
+            );
+            
+            // 更新统计数据（拒绝预约）
+            setStatsFromAPI((prevStats) => {
+              if (!prevStats) return null;
+              return {
+                ...prevStats,
+                pending: Math.max(0, (prevStats.pending || 0) - 1),
+                scheduled: Math.max(0, (prevStats.scheduled || 0) - 1),
+              };
+            });
+          }
+          
+          // 移除该预约（无论是接受还是拒绝）
+          return prev.filter((appt) => appt.appointment_code !== appointmentId);
+        });
       } else {
         const errorData = await response.json();
         toast.error(errorData.error || `Failed to ${action} appointment`);
@@ -513,8 +621,49 @@ const TherapistAppointmentPage = () => {
         toast.success(data.message);
         setShowCompleteDialog(false);
         setSessionNotes('');
+        
+        // 乐观更新：直接更新状态，而不是重新获取所有数据
+        const updatedAppointment = { 
+          ...currentAppointment, 
+          status: 'Completed', 
+          session_notes: sessionNotes 
+        };
+        
+        // 更新 appointments（Today Appointments 标签页）
+        setAppointments((prev) =>
+          prev.map((appt) =>
+            appt.appointment_code === currentAppointment.appointment_code 
+              ? updatedAppointment 
+              : appt
+          )
+        );
+        
+        // 从 scheduledAppointments 中移除（因为不再是 Scheduled 状态）
+        setScheduledAppointments((prev) =>
+          prev.filter((appt) => appt.appointment_code !== currentAppointment.appointment_code)
+        );
+        
+        // 从 pendingAppointments 中移除（如果存在）
+        setPendingAppointments((prev) =>
+          prev.filter((appt) => appt.appointment_code !== currentAppointment.appointment_code)
+        );
+        
+        // 更新统计数据
+        setStatsFromAPI((prev) => {
+          if (!prev) return null;
+          // 检查是否是 scheduled 状态（在移除之前检查）
+          const wasScheduled = scheduledAppointments.some(
+            appt => appt.appointment_code === currentAppointment.appointment_code
+          );
+          
+          return {
+            ...prev,
+            scheduled: wasScheduled ? Math.max(0, (prev.scheduled || 0) - 1) : prev.scheduled,
+            // todaySessions 保持不变，因为完成预约不会减少今天的会话数
+          };
+        });
+        
         setCurrentAppointment(null);
-        await fetchData();
       } else {
         const errorData = await response.json();
         toast.error(errorData.error || 'Failed to complete appointment');
@@ -553,8 +702,54 @@ const TherapistAppointmentPage = () => {
         toast.success(data.message);
         setShowCancelDialog(false);
         setCancelReason('');
+        
+        // 乐观更新：直接更新状态，而不是重新获取所有数据
+        const updatedAppointment = { 
+          ...currentAppointment, 
+          status: 'Cancelled', 
+          cancel_reason: cancelReason 
+        };
+        
+        // 更新 appointments（Today Appointments 标签页）- 由于 filteredAppointments 会过滤掉 Cancelled，这里实际上会从列表中移除
+        setAppointments((prev) =>
+          prev.map((appt) =>
+            appt.appointment_code === currentAppointment.appointment_code 
+              ? updatedAppointment 
+              : appt
+          )
+        );
+        
+        // 从 scheduledAppointments 中移除（因为不再是 Scheduled 状态）
+        setScheduledAppointments((prev) =>
+          prev.filter((appt) => appt.appointment_code !== currentAppointment.appointment_code)
+        );
+        
+        // 从 pendingAppointments 中移除（如果存在）
+        setPendingAppointments((prev) =>
+          prev.filter((appt) => appt.appointment_code !== currentAppointment.appointment_code)
+        );
+        
+        // 更新统计数据
+        setStatsFromAPI((prev) => {
+          if (!prev) return null;
+          // 检查是否是今天的预约
+          const appointmentDate = new Date(currentAppointment.start_at);
+          const today = new Date();
+          const isToday = appointmentDate.toDateString() === today.toDateString();
+          
+          // 检查是否是 scheduled 状态（在移除之前检查）
+          const wasScheduled = scheduledAppointments.some(
+            appt => appt.appointment_code === currentAppointment.appointment_code
+          );
+          
+          return {
+            ...prev,
+            todaySessions: isToday ? Math.max(0, (prev.todaySessions || 0) - 1) : prev.todaySessions,
+            scheduled: wasScheduled ? Math.max(0, (prev.scheduled || 0) - 1) : prev.scheduled,
+          };
+        });
+        
         setCurrentAppointment(null);
-        await fetchData();
       } else {
         const errorData = await response.json();
         toast.error(errorData.error || 'Failed to cancel appointment');
@@ -565,25 +760,24 @@ const TherapistAppointmentPage = () => {
     }
   };
 
-  // 过滤和搜索
-  const filteredAppointments = appointments.filter(appointment => {
-    // 只显示Pending、Scheduled和Completed状态的预约，不显示Cancelled
-    if (!['Pending', 'Scheduled', 'Completed'].includes(appointment.status)) {
-      return false;
+  // 过滤预约列表 - 只显示Pending、Scheduled和Completed状态的预约，不显示Cancelled
+  const filteredAppointments = useMemo(() => {
+    return appointments.filter(appointment => {
+      return ['Pending', 'Scheduled', 'Completed'].includes(appointment.status);
+    });
+  }, [appointments]);
+
+  // scheduledAppointments 现在直接从 API 获取，不需要再过滤
+
+  // 统计数据 - 优先使用从 API 获取的统计信息，如果没有则使用计算的值
+  const stats = useMemo(() => {
+    // 如果 API 返回了统计信息，直接使用
+    if (statsFromAPI) {
+      return statsFromAPI;
     }
     
-    const matchesSearch = !searchTerm || 
-      appointment.patient?.username?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      appointment.contact_name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      appointment.appointment_code.toLowerCase().includes(searchTerm.toLowerCase());
-    
-    const matchesStatus = statusFilter === 'all' || appointment.status === statusFilter;
-    
-    return matchesSearch && matchesStatus;
-  });
-
-  // 统计数据
-    const stats = {
+    // 否则使用计算的值（fallback）
+    return {
       pending: appointments.filter(a => a.status === 'Pending').length,
       todaySessions: appointments.filter(a => {
         const appointmentDate = new Date(a.start_at);
@@ -591,9 +785,13 @@ const TherapistAppointmentPage = () => {
         return appointmentDate.toDateString() === today.toDateString() && 
                a.status !== 'Cancelled';
       }).length,
-      scheduled: appointments.filter(a => a.status === 'Scheduled').length,
+      scheduled: scheduledAppointments.length,
       completed: appointments.filter(a => a.status === 'Completed').length,
     };
+  }, [appointments, scheduledAppointments, statsFromAPI]);
+
+  // 移除 currentTabAppointments 和 currentTabTitle，每个标签页直接使用自己的数据
+  // 这样可以避免切换标签页时不必要的重新计算和渲染
 
   // 工具函数
   const getStatusColor = (status) => {
@@ -671,43 +869,34 @@ const TherapistAppointmentPage = () => {
 
   return (
     <LocalizationProvider dateAdapter={AdapterDateFns}>
-      <Container maxWidth="xl" sx={{ py: 3 }}>
-        {/* 页面头部 */}
-        <Box display="flex" justifyContent="space-between" alignItems="center" mb={3}>
+      <Box sx={{ bgcolor: '#f8fafc', minHeight: '100vh', p: { xs: 2, md: 4 } }}>
+        <Box sx={{ maxWidth: 'xl', mx: 'auto' }}>
+          {/* 页面头部 - 遵循User Management设计系统 */}
+          <Box display="flex" justifyContent="space-between" alignItems="center" mb={4}>
           <Box>
             <Typography variant="h4" gutterBottom sx={{ color: '#000000', fontWeight: 600 }}>
               Appointment Management
             </Typography>
-            <Typography variant="body1" color="text.secondary">
-              Manage your appointments and availability for {selectedDate.toLocaleDateString('en-US', {
-                weekday: 'long',
-                year: 'numeric',
-                month: 'long',
-                day: 'numeric'
-              })}
-              {!isToday(selectedDate) && (
-                <Chip 
-                  label={selectedDate > new Date() ? "Future Date" : "Past Date"} 
-                  size="small" 
-                  color={selectedDate > new Date() ? "info" : "warning"} 
-                  sx={{ ml: 1, fontSize: '0.75rem' }}
-                />
-              )}
-            </Typography>
           </Box>
           <Box display="flex" gap={2} alignItems="center">
             <DatePicker
-              label="Select Date"
+              label="Date"
               value={selectedDate}
               onChange={(newValue) => setSelectedDate(newValue)}
+              inputFormat="dd/MM/yyyy"
+              mask="__/__/____"
               renderInput={(params) => (
                 <TextField 
                   {...params} 
-                  size="small" 
                   sx={{
-                    minWidth: 200,
                     '& .MuiOutlinedInput-root': {
                       borderRadius: 2,
+                      height: '40px',
+                      '& .MuiOutlinedInput-input': {
+                        padding: '12px 14px',
+                        fontSize: '0.875rem',
+                        fontWeight: 500,
+                      },
                       '&:hover .MuiOutlinedInput-notchedOutline': {
                         borderColor: '#3b82f6',
                       },
@@ -716,24 +905,26 @@ const TherapistAppointmentPage = () => {
                         borderWidth: 2,
                       },
                     },
+                    '& .MuiInputLabel-root': {
+                      fontSize: '0.875rem',
+                    },
                   }}
                 />
               )}
               minDate={new Date(2020, 0, 1)}
               maxDate={new Date(new Date().getFullYear() + 1, 11, 31)}
-              format="dd/MM/yyyy"
             />
             <Button
               variant="outlined"
               onClick={() => setSelectedDate(new Date())}
               sx={{
-                minWidth: 120,
+                borderRadius: 2,
                 textTransform: 'uppercase',
                 fontWeight: 600,
+                px: 3,
+                py: 1.5,
                 borderColor: '#3b82f6',
                 color: '#3b82f6',
-                py: 1.5,
-                px: 2,
                 '&:hover': {
                   borderColor: '#2563eb',
                   bgcolor: 'rgba(59, 130, 246, 0.04)',
@@ -746,7 +937,17 @@ const TherapistAppointmentPage = () => {
               variant="contained"
               startIcon={<AddIcon />}
               onClick={() => setShowCreateAppointment(true)}
-              sx={{ minWidth: 150 }}
+              sx={{
+                borderRadius: 2,
+                textTransform: 'uppercase',
+                fontWeight: 600,
+                px: 3,
+                py: 1.5,
+                bgcolor: '#3b82f6',
+                '&:hover': {
+                  bgcolor: '#2563eb',
+                }
+              }}
             >
               New Appointment
             </Button>
@@ -756,7 +957,7 @@ const TherapistAppointmentPage = () => {
         {/* 统计卡片 */}
         <Grid container spacing={3} sx={{ mb: 3 }}>
           {/* Pending Accept */}
-          <Grid item xs={12} sm={6} md={3}>
+          <Grid item xs={12} sm={6} md={4}>
             <Card>
               <CardContent>
                 <Box display="flex" alignItems="center">
@@ -775,7 +976,7 @@ const TherapistAppointmentPage = () => {
           </Grid>
           
           {/* Today's Sessions */}
-          <Grid item xs={12} sm={6} md={3}>
+          <Grid item xs={12} sm={6} md={4}>
             <Card>
               <CardContent>
                 <Box display="flex" alignItems="center">
@@ -794,7 +995,7 @@ const TherapistAppointmentPage = () => {
           </Grid>
           
           {/* Scheduled */}
-          <Grid item xs={12} sm={6} md={3}>
+          <Grid item xs={12} sm={6} md={4}>
             <Card>
               <CardContent>
                 <Box display="flex" alignItems="center">
@@ -811,180 +1012,126 @@ const TherapistAppointmentPage = () => {
               </CardContent>
             </Card>
           </Grid>
-          
-          {/* Completed */}
-          <Grid item xs={12} sm={6} md={3}>
-            <Card>
-              <CardContent>
-                <Box display="flex" alignItems="center">
-                  <Box flex={1}>
-                    <Typography color="textSecondary" gutterBottom>
-                      Completed
-                    </Typography>
-                    <Typography variant="h4" color="success.main">
-                      {stats.completed}
-                    </Typography>
-                  </Box>
-                  <CheckCircleIcon color="success" sx={{ fontSize: 40 }} />
-                </Box>
-              </CardContent>
-            </Card>
-          </Grid>
         </Grid>
 
-        {/* 搜索和过滤 */}
-        <Card sx={{ mb: 3 }}>
-          <CardContent>
-            <Grid container spacing={2} alignItems="center">
-              <Grid item xs={12} md={6}>
-                <TextField
-                  fullWidth
-                  placeholder="Search appointments..."
-                  value={searchTerm}
-                  onChange={(e) => setSearchTerm(e.target.value)}
-                  InputProps={{
-                    startAdornment: <SearchIcon color="action" sx={{ mr: 1 }} />
-                  }}
-                />
-              </Grid>
-              <Grid item xs={12} md={2}>
-                <FormControl fullWidth>
-                  <InputLabel>Status Filter</InputLabel>
-                  <Select
-                    value={statusFilter}
-                    onChange={(e) => setStatusFilter(e.target.value)}
-                    label="Status Filter"
-                  >
-                    <MenuItem value="all">All Status</MenuItem>
-                    <MenuItem value="Scheduled">Scheduled</MenuItem>
-                    <MenuItem value="Completed">Completed</MenuItem>
-                  </Select>
-                </FormControl>
-              </Grid>
-              <Grid item xs={12} md={2}>
-                <FormControl fullWidth>
-                  <InputLabel>View Mode</InputLabel>
-                  <Select
-                    value={viewMode}
-                    onChange={(e) => setViewMode(e.target.value)}
-                    label="View Mode"
-                  >
-                    <MenuItem value="list">List View</MenuItem>
-                    <MenuItem value="grid">Grid View</MenuItem>
-                  </Select>
-                </FormControl>
-              </Grid>
-              <Grid item xs={12} md={2}>
-                <Box display="flex" gap={1}>
-                  <Button
-                    variant="outlined"
-                    startIcon={<RefreshIcon />}
-                    onClick={fetchData}
-                    sx={{
-                      borderRadius: 2,
-                      textTransform: 'uppercase',
-                      fontWeight: 600,
-                      px: 3,
-                      borderColor: '#3b82f6',
-                      color: '#3b82f6',
-                      '&:hover': {
-                        borderColor: '#2563eb',
-                        bgcolor: 'rgba(59, 130, 246, 0.04)',
-                      }
-                    }}
-                  >
-                    Refresh
-                  </Button>
-                </Box>
-              </Grid>
-            </Grid>
-          </CardContent>
-        </Card>
 
-        {/* 标签页 */}
-        <Card sx={{ mb: 3, borderRadius: 3, border: '1px solid', borderColor: 'grey.200', elevation: 0 }}>
-          <Tabs 
-            value={tabValue} 
-            onChange={(e, newValue) => setTabValue(newValue)}
-            sx={{ 
-              borderBottom: 1, 
-              borderColor: 'divider',
-              '& .MuiTab-root': {
-                textTransform: 'uppercase',
-                fontWeight: 600,
-                fontSize: '0.875rem',
-                px: 3,
-                py: 2
-              }
-            }}
-          >
-            <Tab 
-              label={`Today Appointments (${filteredAppointments.length})`} 
-              value={0}
-              icon={<CalendarMonthIcon />}
-              iconPosition="start"
-            />
-            <Tab 
-              label={`Scheduled Appointments (${appointments.filter(a => a.status === 'Scheduled').length})`} 
-              value={1}
-              icon={<CheckCircleIcon />}
-              iconPosition="start"
-            />
-            <Tab 
-              label={`Pending Appointments (${pendingAppointments.length})`} 
-              value={2}
-              icon={<PendingIcon />}
-              iconPosition="start"
-            />
-          </Tabs>
-        </Card>
-
-        {/* 主要内容区域 - 标签页内容 */}
-        {tabValue === 0 ? (
-          /* Today Appointments 标签页 - 包含预约列表和可用时间 */
-          <Grid container spacing={3}>
+        {/* 标签页和内容区域 */}
+        <Paper 
+          elevation={1} 
+          sx={{ 
+            mb: 3,
+            borderRadius: 2, 
+            overflow: 'hidden',
+            border: '1px solid',
+            borderColor: 'grey.200',
+            boxShadow: '0 1px 3px rgba(0,0,0,0.1)'
+          }}
+        >
+          {/* Tab Navigation */}
+          <Box sx={{ 
+            borderBottom: 1, 
+            borderColor: 'grey.200',
+            bgcolor: 'grey.50'
+          }}>
+            <Tabs 
+              value={tabValue} 
+              onChange={(e, newValue) => setTabValue(newValue)}
+              variant="fullWidth"
+              sx={{
+                '& .MuiTabs-indicator': {
+                  height: 3,
+                  borderRadius: '3px 3px 0 0',
+                  bgcolor: 'primary.main',
+                },
+                '& .MuiTab-root': {
+                  minHeight: 64,
+                  fontSize: '0.95rem',
+                  fontWeight: 600,
+                  textTransform: 'uppercase',
+                  letterSpacing: '0.5px',
+                  color: 'text.secondary',
+                  transition: 'all 0.2s ease-in-out',
+                  '&:hover': {
+                    color: 'primary.main',
+                    bgcolor: 'rgba(59, 130, 246, 0.04)',
+                  },
+                  '&.Mui-selected': {
+                    color: 'primary.main',
+                    fontWeight: 700,
+                  },
+                },
+              }}
+            >
+              <Tab 
+                label={`Today Appointments (${filteredAppointments.length})`} 
+                value={0}
+                icon={<TodayIcon />}
+                iconPosition="start"
+                sx={{ 
+                  gap: 1.5,
+                  py: 2,
+                  px: 3,
+                }}
+              />
+              <Tab 
+                label={`Scheduled Appointments (${scheduledAppointments.length})`} 
+                value={1}
+                icon={<CheckCircleIcon />}
+                iconPosition="start"
+                sx={{ 
+                  gap: 1.5,
+                  py: 2,
+                  px: 3,
+                }}
+              />
+              <Tab 
+                label={`Pending Appointments (${pendingAppointments.length})`} 
+                value={2}
+                icon={<PendingIcon />}
+                iconPosition="start"
+                sx={{ 
+                  gap: 1.5,
+                  py: 2,
+                  px: 3,
+                }}
+              />
+            </Tabs>
+          </Box>
+          
+          {/* Tab Content */}
+          <Box sx={{ 
+            bgcolor: 'white',
+            minHeight: 300,
+            p: 3,
+          }}>
+          {/* Today Appointments 标签页 - 使用 display 控制显示，保持组件挂载 */}
+          <Box sx={{ display: tabValue === 0 ? 'block' : 'none' }}>
+            <Grid container spacing={3}>
             {/* 预约列表 */}
             <Grid item xs={12} lg={8}>
               <Card>
                 <CardContent>
                   <Box display="flex" justifyContent="space-between" alignItems="center" mb={2}>
                     <Typography variant="h6">
-                      {tabValue === 0 ? `Today Appointments (${filteredAppointments.length})` : 
-                       tabValue === 1 ? `Scheduled Appointments (${appointments.filter(a => a.status === 'Scheduled').length})` : 
-                       `Pending Appointments (${pendingAppointments.length})`}
+                      Today Appointments ({filteredAppointments.length})
                     </Typography>
-                    <Box display="flex" gap={1}>
-                      <IconButton
-                        onClick={() => setViewMode('list')}
-                        color={viewMode === 'list' ? 'primary' : 'default'}
-                      >
-                        <ViewListIcon />
-                      </IconButton>
-                      <IconButton
-                        onClick={() => setViewMode('grid')}
-                        color={viewMode === 'grid' ? 'primary' : 'default'}
-                      >
-                        <ViewModuleIcon />
-                      </IconButton>
-                    </Box>
                   </Box>
 
-                {(tabValue === 0 ? filteredAppointments : 
-                  tabValue === 1 ? appointments.filter(a => a.status === 'Scheduled') : 
-                  pendingAppointments).length === 0 ? (
+                {dataLoading ? (
+                  <Box display="flex" justifyContent="center" py={4}>
+                    <CircularProgress size={40} />
+                  </Box>
+                ) : filteredAppointments.length === 0 ? (
                   <Box textAlign="center" py={4}>
                     <CalendarMonthIcon sx={{ fontSize: 64, color: 'text.secondary', mb: 2 }} />
                     <Typography variant="h6" color="text.secondary" gutterBottom>
                       No appointments found
                     </Typography>
                     <Typography variant="body2" color="text.secondary">
-                      {searchTerm || statusFilter !== 'all' 
-                        ? 'Try adjusting your search or filter criteria'
-                        : 'Create your first appointment to get started'
-                      }
+                      Create your first appointment to get started
                     </Typography>
                   </Box>
-                ) : viewMode === 'list' ? (
+                ) : (
                   <TableContainer>
                     <Table>
                       <TableHead>
@@ -999,9 +1146,7 @@ const TherapistAppointmentPage = () => {
                         </TableRow>
                       </TableHead>
                       <TableBody>
-                        {(tabValue === 0 ? filteredAppointments : 
-                          tabValue === 1 ? appointments.filter(a => a.status === 'Scheduled') : 
-                          pendingAppointments).map((appointment) => (
+                        {filteredAppointments.map((appointment) => (
                           <TableRow key={appointment.id} hover>
                             <TableCell>
                               <Typography variant="body2">
@@ -1104,61 +1249,6 @@ const TherapistAppointmentPage = () => {
                       </TableBody>
                     </Table>
                   </TableContainer>
-                ) : (
-                  <Grid container spacing={2}>
-                    {(tabValue === 0 ? filteredAppointments : 
-                      tabValue === 1 ? appointments.filter(a => a.status === 'Scheduled') : 
-                      pendingAppointments).map((appointment) => (
-                      <Grid item xs={12} sm={6} md={4} key={appointment.id}>
-                        <Card 
-                          sx={{ 
-                            cursor: 'pointer',
-                            '&:hover': { boxShadow: 4 }
-                          }}
-                          onClick={() => {
-                            setSelectedAppointment(appointment);
-                            setShowAppointmentDetails(true);
-                          }}
-                        >
-                          <CardContent>
-                            <Box display="flex" justifyContent="space-between" alignItems="flex-start" mb={2}>
-                              <Box display="flex" alignItems="center" gap={1}>
-                                <AccessTimeIcon color="action" />
-                                <Typography variant="h6">
-                                  {formatTime(appointment.start_at)}
-                                </Typography>
-                              </Box>
-                              <Chip
-                                label={appointment.status}
-                                size="small"
-                                color={getStatusColor(appointment.status)}
-                              />
-                            </Box>
-                            
-                            <Box display="flex" alignItems="center" gap={1} mb={1}>
-                              {renderPatientAvatar(appointment)}
-                              <Typography variant="body1">
-                                {appointment.patient?.username || appointment.contact_name || 'Unknown'}
-                              </Typography>
-                              {appointment.contact_name && (
-                                <Chip label="New" size="small" color="warning" />
-                              )}
-                            </Box>
-                            
-                            <Typography variant="body2" color="text.secondary" mb={1}>
-                              {appointment.duration_min} min • {appointment.mode}
-                            </Typography>
-                            
-                            {appointment.notes && (
-                              <Typography variant="body2" color="text.secondary" noWrap>
-                                {appointment.notes}
-                              </Typography>
-                            )}
-                          </CardContent>
-                        </Card>
-                      </Grid>
-                    ))}
-                  </Grid>
                 )}
               </CardContent>
             </Card>
@@ -1296,31 +1386,23 @@ const TherapistAppointmentPage = () => {
             </Card>
           </Grid>
         </Grid>
-        ) : tabValue === 1 ? (
-          /* Scheduled Appointments 标签页 - 只包含已确认的预约 */
-          <Card>
+          </Box>
+
+          {/* Scheduled Appointments 标签页 - 使用 display 控制显示，保持组件挂载 */}
+          <Box sx={{ display: tabValue === 1 ? 'block' : 'none' }}>
+            <Card>
             <CardContent>
               <Box display="flex" justifyContent="space-between" alignItems="center" mb={2}>
                 <Typography variant="h6">
-                  Scheduled Appointments ({appointments.filter(a => a.status === 'Scheduled').length})
+                  Scheduled Appointments ({scheduledAppointments.length})
                 </Typography>
-                <Box display="flex" gap={1}>
-                  <IconButton
-                    onClick={() => setViewMode('list')}
-                    color={viewMode === 'list' ? 'primary' : 'default'}
-                  >
-                    <ViewListIcon />
-                  </IconButton>
-                  <IconButton
-                    onClick={() => setViewMode('grid')}
-                    color={viewMode === 'grid' ? 'primary' : 'default'}
-                  >
-                    <ViewModuleIcon />
-                  </IconButton>
-                </Box>
               </Box>
 
-              {appointments.filter(a => a.status === 'Scheduled').length === 0 ? (
+              {dataLoading ? (
+                <Box display="flex" justifyContent="center" py={4}>
+                  <CircularProgress size={40} />
+                </Box>
+              ) : scheduledAppointments.length === 0 ? (
                 <Box textAlign="center" py={4}>
                   <CalendarMonthIcon sx={{ fontSize: 64, color: 'text.secondary', mb: 2 }} />
                   <Typography variant="h6" color="text.secondary" gutterBottom>
@@ -1330,7 +1412,7 @@ const TherapistAppointmentPage = () => {
                     Create your first appointment to get started
                   </Typography>
                 </Box>
-              ) : viewMode === 'list' ? (
+              ) : (
                 <TableContainer>
                   <Table>
                     <TableHead>
@@ -1345,7 +1427,7 @@ const TherapistAppointmentPage = () => {
                       </TableRow>
                     </TableHead>
                     <TableBody>
-                      {appointments.filter(a => a.status === 'Scheduled').map((appointment) => (
+                      {scheduledAppointments.map((appointment) => (
                         <TableRow key={appointment.id} hover>
                           <TableCell>
                             <Typography variant="body2">
@@ -1395,25 +1477,25 @@ const TherapistAppointmentPage = () => {
                                     setShowAppointmentDetails(true);
                                   }}
                                 >
-                                    <VisibilityIcon />
+                                  <VisibilityIcon />
                                 </IconButton>
                               </Tooltip>
                               {appointment.status === 'Scheduled' && (
                                 <>
-                                  <Tooltip title="Complete">
+                                  <Tooltip title="Complete Appointment">
                                     <IconButton
                                       size="small"
                                       color="success"
-                                      onClick={() => updateAppointmentStatus(appointment.appointment_code, 'complete')}
+                                      onClick={() => handleCompleteAppointment(appointment)}
                                     >
                                       <CheckCircleIcon />
                                     </IconButton>
                                   </Tooltip>
-                                  <Tooltip title="Cancel">
+                                  <Tooltip title="Cancel Appointment">
                                     <IconButton
                                       size="small"
                                       color="error"
-                                      onClick={() => updateAppointmentStatus(appointment.appointment_code, 'cancel')}
+                                      onClick={() => handleCancelAppointment(appointment)}
                                     >
                                       <CancelIcon />
                                     </IconButton>
@@ -1427,131 +1509,26 @@ const TherapistAppointmentPage = () => {
                     </TableBody>
                   </Table>
                 </TableContainer>
-              ) : (
-                <Grid container spacing={2}>
-                  {appointments.filter(a => a.status === 'Scheduled').map((appointment) => (
-                    <Grid item xs={12} sm={6} md={4} key={appointment.id}>
-                      <Card 
-                        sx={{ 
-                          cursor: 'pointer',
-                          '&:hover': { boxShadow: 4 }
-                        }}
-                        onClick={() => {
-                          setSelectedAppointment(appointment);
-                          setShowAppointmentDetails(true);
-                        }}
-                      >
-                        <CardContent>
-                          <Box display="flex" justifyContent="space-between" alignItems="flex-start" mb={2}>
-                            <Box>
-                              <Typography variant="h6">
-                                {formatTime(appointment.start_at)}
-                              </Typography>
-                              <Typography variant="body2" color="text.secondary">
-                                {new Date(appointment.start_at).toLocaleDateString('en-GB')}
-                              </Typography>
-                            </Box>
-                            <Chip
-                              label={appointment.status}
-                              size="small"
-                              color={getStatusColor(appointment.status)}
-                            />
-                          </Box>
-                          
-                          <Box display="flex" alignItems="center" gap={1} mb={1}>
-                            <PersonIcon color="action" />
-                            <Typography variant="body1">
-                              {appointment.patient?.username || appointment.contact_name || 'Unknown'}
-                            </Typography>
-                          </Box>
-                          
-                          <Box display="flex" justifyContent="space-between" alignItems="center">
-                            <Typography variant="body2" color="text.secondary">
-                              {appointment.duration_min} min • {appointment.mode}
-                            </Typography>
-                            <Box display="flex" gap={0.5}>
-                              {appointment.status === 'Pending' ? (
-                                <>
-                                  <IconButton
-                                    size="small"
-                                    color="success"
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      respondToAppointment(appointment.appointment_code, 'accept');
-                                    }}
-                                  >
-                                    <CheckCircleIcon />
-                                  </IconButton>
-                                  <IconButton
-                                    size="small"
-                                    color="error"
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      respondToAppointment(appointment.appointment_code, 'reject');
-                                    }}
-                                  >
-                                    <CancelIcon />
-                                  </IconButton>
-                                </>
-                              ) : appointment.status === 'Scheduled' && (
-                                <>
-                                  <IconButton
-                                    size="small"
-                                    color="success"
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      updateAppointmentStatus(appointment.appointment_code, 'complete');
-                                    }}
-                                  >
-                                    <CheckCircleIcon />
-                                  </IconButton>
-                                  <IconButton
-                                    size="small"
-                                    color="error"
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      updateAppointmentStatus(appointment.appointment_code, 'cancel');
-                                    }}
-                                  >
-                                    <CancelIcon />
-                                  </IconButton>
-                                </>
-                              )}
-                            </Box>
-                          </Box>
-                        </CardContent>
-                      </Card>
-                    </Grid>
-                  ))}
-                </Grid>
               )}
             </CardContent>
           </Card>
-        ) : (
-          /* Pending Appointments 标签页 - 只包含待确认的预约 */
-          <Card>
+          </Box>
+
+          {/* Pending Appointments 标签页 - 使用 display 控制显示，保持组件挂载 */}
+          <Box sx={{ display: tabValue === 2 ? 'block' : 'none' }}>
+            <Card>
             <CardContent>
               <Box display="flex" justifyContent="space-between" alignItems="center" mb={2}>
                 <Typography variant="h6">
                   Pending Appointments ({pendingAppointments.length})
                 </Typography>
-                <Box display="flex" gap={1}>
-                  <IconButton
-                    onClick={() => setViewMode('list')}
-                    color={viewMode === 'list' ? 'primary' : 'default'}
-                  >
-                    <ViewListIcon />
-                  </IconButton>
-                  <IconButton
-                    onClick={() => setViewMode('grid')}
-                    color={viewMode === 'grid' ? 'primary' : 'default'}
-                  >
-                    <ViewModuleIcon />
-                  </IconButton>
-                </Box>
               </Box>
 
-              {pendingAppointments.length === 0 ? (
+              {dataLoading ? (
+                <Box display="flex" justifyContent="center" py={4}>
+                  <CircularProgress size={40} />
+                </Box>
+              ) : pendingAppointments.length === 0 ? (
                 <Box textAlign="center" py={4}>
                   <AccessTimeIcon sx={{ fontSize: 64, color: 'text.secondary', mb: 2 }} />
                   <Typography variant="h6" color="text.secondary" gutterBottom>
@@ -1561,7 +1538,7 @@ const TherapistAppointmentPage = () => {
                     All appointment requests have been processed
                   </Typography>
                 </Box>
-              ) : viewMode === 'list' ? (
+              ) : (
                 <TableContainer>
                   <Table>
                     <TableHead>
@@ -1626,7 +1603,7 @@ const TherapistAppointmentPage = () => {
                                     setShowAppointmentDetails(true);
                                   }}
                                 >
-                                    <VisibilityIcon />
+                                  <VisibilityIcon />
                                 </IconButton>
                               </Tooltip>
                               <Tooltip title="Accept Appointment">
@@ -1654,87 +1631,55 @@ const TherapistAppointmentPage = () => {
                     </TableBody>
                   </Table>
                 </TableContainer>
-              ) : (
-                <Grid container spacing={2}>
-                  {pendingAppointments.map((appointment) => (
-                    <Grid item xs={12} sm={6} md={4} key={appointment.id}>
-                      <Card 
-                        sx={{ 
-                          cursor: 'pointer',
-                          '&:hover': { boxShadow: 4 }
-                        }}
-                        onClick={() => {
-                          setSelectedAppointment(appointment);
-                          setShowAppointmentDetails(true);
-                        }}
-                      >
-                        <CardContent>
-                          <Box display="flex" justifyContent="space-between" alignItems="flex-start" mb={2}>
-                            <Box>
-                              <Typography variant="h6">
-                                {formatTime(appointment.start_at)}
-                              </Typography>
-                              <Typography variant="body2" color="text.secondary">
-                                {new Date(appointment.start_at).toLocaleDateString('en-GB')}
-                              </Typography>
-                            </Box>
-                            <Chip
-                              label={appointment.status}
-                              size="small"
-                              color={getStatusColor(appointment.status)}
-                            />
-                          </Box>
-                          
-                          <Box display="flex" alignItems="center" gap={1} mb={1}>
-                            <PersonIcon color="action" />
-                            <Typography variant="body1">
-                              {appointment.patient?.username || appointment.contact_name || 'Unknown'}
-                            </Typography>
-                          </Box>
-                          
-                          <Box display="flex" justifyContent="space-between" alignItems="center">
-                            <Typography variant="body2" color="text.secondary">
-                              {appointment.duration_min} min • {appointment.mode}
-                            </Typography>
-                            <Box display="flex" gap={0.5}>
-                              <IconButton
-                                size="small"
-                                color="success"
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  respondToAppointment(appointment.appointment_code, 'accept');
-                                }}
-                              >
-                                <CheckCircleIcon />
-                              </IconButton>
-                              <IconButton
-                                size="small"
-                                color="error"
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  respondToAppointment(appointment.appointment_code, 'reject');
-                                }}
-                              >
-                                <CancelIcon />
-                              </IconButton>
-                            </Box>
-                          </Box>
-                        </CardContent>
-                      </Card>
-                    </Grid>
-                  ))}
-                </Grid>
               )}
             </CardContent>
           </Card>
-        )}
+          </Box>
+          </Box>
+        </Paper>
 
         {/* 创建预约对话框 */}
         <CreateAppointmentDialog
           open={showCreateAppointment}
           onClose={() => setShowCreateAppointment(false)}
-          onSuccess={() => {
-            fetchData();
+          onSuccess={(newAppointment) => {
+            if (newAppointment) {
+              // 乐观更新：直接添加新预约到状态，而不是重新获取所有数据
+              const appointmentDate = new Date(newAppointment.start_at);
+              const selectedDateStr = `${selectedDate.getFullYear()}-${String(selectedDate.getMonth() + 1).padStart(2, '0')}-${String(selectedDate.getDate()).padStart(2, '0')}`;
+              const appointmentDateStr = `${appointmentDate.getFullYear()}-${String(appointmentDate.getMonth() + 1).padStart(2, '0')}-${String(appointmentDate.getDate()).padStart(2, '0')}`;
+              const isToday = appointmentDateStr === selectedDateStr;
+              
+              // 如果新预约是选中日期的，添加到 appointments
+              if (isToday) {
+                setAppointments((prev) => [...prev, newAppointment]);
+              }
+              
+              // 根据状态添加到相应的列表
+              if (newAppointment.status === 'Scheduled') {
+                setScheduledAppointments((prev) => [...prev, newAppointment]);
+              } else if (newAppointment.status === 'Pending') {
+                setPendingAppointments((prev) => [...prev, newAppointment]);
+              }
+              
+              // 更新统计数据
+              setStatsFromAPI((prev) => {
+                if (!prev) return null;
+                return {
+                  ...prev,
+                  scheduled: newAppointment.status === 'Scheduled' ? (prev.scheduled || 0) + 1 : prev.scheduled,
+                  pending: newAppointment.status === 'Pending' ? (prev.pending || 0) + 1 : prev.pending,
+                  todaySessions: isToday ? (prev.todaySessions || 0) + 1 : prev.todaySessions,
+                };
+              });
+              
+              // 更新可用时间段（标记为已预订）
+              setAvailabilitySlots((prev) => {
+                // 这里不需要更新，因为 availabilitySlots 是从 API 获取的不可用时间段
+                // 新预约不会影响不可用时间段，只影响已预订的时间段显示
+                return prev;
+              });
+            }
             setShowCreateAppointment(false);
           }}
           initialDate={selectedDate}
@@ -2113,7 +2058,8 @@ const TherapistAppointmentPage = () => {
             </Button>
           </DialogActions>
         </Dialog>
-      </Container>
+        </Box>
+      </Box>
     </LocalizationProvider>
   );
 };

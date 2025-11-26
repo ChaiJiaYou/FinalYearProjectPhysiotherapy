@@ -16,6 +16,7 @@ import {
   DialogContent,
   DialogContentText,
   DialogActions,
+  Paper,
 } from "@mui/material";
 import {
   Videocam as VideocamIcon,
@@ -639,11 +640,14 @@ const PatientExercisePage = () => {
           setActiveTreatment(null);
         }
       } else {
-        toast.error('Failed to load treatment plan');
+        // Don't show toast if no treatment plan, just set to null
+        setActiveTreatment(null);
+        console.error('Failed to load treatment plan:', response.status);
       }
     } catch (error) {
       console.error('Error fetching treatment:', error);
-      toast.error('Failed to load treatment plan');
+      // Don't show toast if no treatment plan, just set to null
+      setActiveTreatment(null);
     } finally {
       setIsLoading(false);
     }
@@ -686,16 +690,17 @@ const PatientExercisePage = () => {
           pausedRepsRef.current = 0;
           lastRepsRef.current = 0;
           currentRepStartTimeRef.current = null;
-        } else {
-          // No exercises with linked actions
-          toast.warning('No exercises with linked actions found in this treatment plan');
         }
+        // No toast if no exercises - just show empty state
       } else {
-        toast.error('Failed to load exercises');
+        // Don't show toast if no exercises, just set empty array
+        setTreatmentExercises([]);
+        console.error('Failed to load exercises:', response.status);
       }
     } catch (error) {
       console.error('Error fetching exercises:', error);
-      toast.error('Failed to load exercises');
+      // Don't show toast if no exercises, just set empty array
+      setTreatmentExercises([]);
     }
   };
 
@@ -1137,27 +1142,50 @@ const PatientExercisePage = () => {
     );
   }
 
-  if (!activeTreatment) {
+  if (!activeTreatment || (activeTreatment && treatmentExercises.length === 0)) {
     return (
-      <Box sx={{ p: 3 }}>
-        <Typography variant="h4" gutterBottom>
-          Exercise Center
-        </Typography>
-        <Typography variant="subtitle1" color="text.secondary" gutterBottom>
-          AI-powered action recognition and exercise tracking
-        </Typography>
-        
-        <Card sx={{ mt: 3 }}>
-          <CardContent sx={{ textAlign: 'center', py: 6 }}>
-            <InfoIcon sx={{ fontSize: 64, color: 'text.secondary', mb: 2 }} />
-            <Typography variant="h6" gutterBottom>
-              No Treatment Plans Available
-            </Typography>
-            <Typography variant="body1" color="text.secondary">
-              You don't have any active treatment plans yet. Please contact your therapist to get started.
-            </Typography>
-          </CardContent>
-        </Card>
+      <Box sx={{ bgcolor: '#f8fafc', minHeight: '100vh', p: { xs: 2, md: 4 } }}>
+        <Box sx={{ maxWidth: 'xl', mx: 'auto' }}>
+          {/* Header Section */}
+          <Box display="flex" justifyContent="space-between" alignItems="center" mb={2}>
+            <Box>
+              <Typography variant="h4" gutterBottom sx={{ color: '#000000', fontWeight: 600 }}>
+                Exercise Center
+              </Typography>
+            </Box>
+          </Box>
+
+          {/* Main Content */}
+          <Paper
+            elevation={1}
+            sx={{
+              borderRadius: 2,
+              overflow: 'hidden',
+              border: '1px solid',
+              borderColor: 'grey.200',
+              boxShadow: '0 1px 3px rgba(0,0,0,0.1)'
+            }}
+          >
+            <Box sx={{
+              bgcolor: 'white',
+              minHeight: 300,
+              p: 3,
+            }}>
+              <Box sx={{ textAlign: 'center', py: 6 }}>
+                <InfoIcon sx={{ fontSize: 64, color: 'text.secondary', mb: 2 }} />
+                <Typography variant="h6" gutterBottom sx={{ fontWeight: 600 }}>
+                  No exercise for you
+                </Typography>
+                <Typography variant="body1" color="text.secondary">
+                  {!activeTreatment 
+                    ? "You don't have any active treatment plans yet. Please contact your therapist to get started."
+                    : "There are no exercises assigned to your treatment plan. Please contact your therapist to get started."
+                  }
+                </Typography>
+              </Box>
+            </Box>
+          </Paper>
+        </Box>
       </Box>
     );
   }

@@ -1,9 +1,36 @@
-import { useTheme, Button, Chip, Stack, SvgIcon, Box, Paper, TableContainer, Table, TableHead, TableBody, TableCell, Typography, TableRow, Avatar } from "@mui/material";
+import React from "react";
+import { useTheme, Button, Chip, Stack, SvgIcon, Box, Paper, TableContainer, Table, TableHead, TableBody, TableCell, Typography, TableRow, Avatar, TableSortLabel } from "@mui/material";
 import { Visibility, CheckCircle, Block, Edit, PersonRemove, Person as PersonIcon } from "@mui/icons-material";
 import { alpha } from "@mui/material/styles";
-import { formatDate } from '../../../utils/dateUtils';
+import { formatDate, formatDateTime } from '../../../utils/dateUtils';
 
-const UserManagementTable = ({ users, handleToggleStatus, onViewProfile }) => {
+// Format date as DD/MM/YYYY HH:MM AM/PM
+const formatCreatedDate = (dateString) => {
+  if (!dateString) return '-';
+  
+  try {
+    const date = new Date(dateString);
+    if (isNaN(date.getTime())) return '-';
+    
+    const day = String(date.getDate()).padStart(2, '0');
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const year = date.getFullYear();
+    
+    let hours = date.getHours();
+    const minutes = String(date.getMinutes()).padStart(2, '0');
+    const ampm = hours >= 12 ? 'PM' : 'AM';
+    hours = hours % 12;
+    hours = hours ? hours : 12; // the hour '0' should be '12'
+    const formattedHours = String(hours).padStart(2, '0');
+    
+    return `${day}/${month}/${year} ${formattedHours}:${minutes} ${ampm}`;
+  } catch (error) {
+    console.error('Date formatting error:', error);
+    return '-';
+  }
+};
+
+const UserManagementTable = ({ users, handleToggleStatus, onViewProfile, orderBy, order, onRequestSort }) => {
   const displayValue = (value) => value || "-";
   const capitalizeRole = (role) => (role ? role.charAt(0).toUpperCase() + role.slice(1) : "-");
   const theme = useTheme();
@@ -50,7 +77,24 @@ const UserManagementTable = ({ users, handleToggleStatus, onViewProfile }) => {
               letterSpacing: "0.5px",
               width: "25%"
             }}>
-              User Information
+              <TableSortLabel
+                active={orderBy === 'username'}
+                direction={orderBy === 'username' ? order : 'asc'}
+                onClick={() => onRequestSort('username')}
+                sx={{
+                  '& .MuiTableSortLabel-icon': {
+                    color: '#3b82f6 !important',
+                  },
+                  '&.Mui-active': {
+                    color: 'text.primary',
+                  },
+                  '&:hover': {
+                    color: '#3b82f6',
+                  },
+                }}
+              >
+                User Information
+              </TableSortLabel>
             </TableCell>
             <TableCell sx={{ 
               fontWeight: 700, 
@@ -61,18 +105,24 @@ const UserManagementTable = ({ users, handleToggleStatus, onViewProfile }) => {
               letterSpacing: "0.5px",
               width: "10%"
             }}>
-              User ID
-            </TableCell>
-            <TableCell sx={{ 
-              fontWeight: 700, 
-              color: "text.primary", 
-              py: 3,
-              fontSize: "0.875rem",
-              textTransform: "uppercase",
-              letterSpacing: "0.5px",
-              width: "12%"
-            }}>
-              Contact
+              <TableSortLabel
+                active={orderBy === 'id'}
+                direction={orderBy === 'id' ? order : 'asc'}
+                onClick={() => onRequestSort('id')}
+                sx={{
+                  '& .MuiTableSortLabel-icon': {
+                    color: '#3b82f6 !important',
+                  },
+                  '&.Mui-active': {
+                    color: 'text.primary',
+                  },
+                  '&:hover': {
+                    color: '#3b82f6',
+                  },
+                }}
+              >
+                User ID
+              </TableSortLabel>
             </TableCell>
             <TableCell sx={{ 
               fontWeight: 700, 
@@ -83,7 +133,24 @@ const UserManagementTable = ({ users, handleToggleStatus, onViewProfile }) => {
               letterSpacing: "0.5px",
               width: "8%"
             }}>
-              Role
+              <TableSortLabel
+                active={orderBy === 'role'}
+                direction={orderBy === 'role' ? order : 'asc'}
+                onClick={() => onRequestSort('role')}
+                sx={{
+                  '& .MuiTableSortLabel-icon': {
+                    color: '#3b82f6 !important',
+                  },
+                  '&.Mui-active': {
+                    color: 'text.primary',
+                  },
+                  '&:hover': {
+                    color: '#3b82f6',
+                  },
+                }}
+              >
+                Role
+              </TableSortLabel>
             </TableCell>
             <TableCell sx={{ 
               fontWeight: 700, 
@@ -94,7 +161,24 @@ const UserManagementTable = ({ users, handleToggleStatus, onViewProfile }) => {
               letterSpacing: "0.5px",
               width: "8%"
             }}>
-              Status
+              <TableSortLabel
+                active={orderBy === 'status'}
+                direction={orderBy === 'status' ? order : 'asc'}
+                onClick={() => onRequestSort('status')}
+                sx={{
+                  '& .MuiTableSortLabel-icon': {
+                    color: '#3b82f6 !important',
+                  },
+                  '&.Mui-active': {
+                    color: 'text.primary',
+                  },
+                  '&:hover': {
+                    color: '#3b82f6',
+                  },
+                }}
+              >
+                Status
+              </TableSortLabel>
             </TableCell>
             <TableCell sx={{ 
               fontWeight: 700, 
@@ -105,7 +189,52 @@ const UserManagementTable = ({ users, handleToggleStatus, onViewProfile }) => {
               letterSpacing: "0.5px",
               width: "12%"
             }}>
-              Created By
+              <TableSortLabel
+                active={orderBy === 'created_by'}
+                direction={orderBy === 'created_by' ? order : 'asc'}
+                onClick={() => onRequestSort('created_by')}
+                sx={{
+                  '& .MuiTableSortLabel-icon': {
+                    color: '#3b82f6 !important',
+                  },
+                  '&.Mui-active': {
+                    color: 'text.primary',
+                  },
+                  '&:hover': {
+                    color: '#3b82f6',
+                  },
+                }}
+              >
+                Created By
+              </TableSortLabel>
+            </TableCell>
+            <TableCell sx={{ 
+              fontWeight: 700, 
+              color: "text.primary", 
+              py: 3,
+              fontSize: "0.875rem",
+              textTransform: "uppercase",
+              letterSpacing: "0.5px",
+              width: "12%"
+            }}>
+              <TableSortLabel
+                active={orderBy === 'create_date'}
+                direction={orderBy === 'create_date' ? order : 'asc'}
+                onClick={() => onRequestSort('create_date')}
+                sx={{
+                  '& .MuiTableSortLabel-icon': {
+                    color: '#3b82f6 !important',
+                  },
+                  '&.Mui-active': {
+                    color: 'text.primary',
+                  },
+                  '&:hover': {
+                    color: '#3b82f6',
+                  },
+                }}
+              >
+                Created Date
+              </TableSortLabel>
             </TableCell>
             <TableCell sx={{ 
               fontWeight: 700, 
@@ -188,13 +317,6 @@ const UserManagementTable = ({ users, handleToggleStatus, onViewProfile }) => {
                 </Typography>
               </TableCell>
 
-              {/* Contact */}
-              <TableCell sx={{ py: 1.5 }}>
-                <Typography variant="body2" color="text.primary" fontWeight="500">
-                  {displayValue(user.contact_number)}
-                </Typography>
-              </TableCell>
-
               {/* Role */}
               <TableCell sx={{ py: 1.5 }}>
                 <Chip
@@ -233,6 +355,13 @@ const UserManagementTable = ({ users, handleToggleStatus, onViewProfile }) => {
               <TableCell sx={{ py: 1.5 }}>
                 <Typography variant="body2" color="text.primary" fontWeight="500">
                   {displayValue(user.created_by || "System")}
+                </Typography>
+              </TableCell>
+
+              {/* Created Date */}
+              <TableCell sx={{ py: 1.5 }}>
+                <Typography variant="body2" color="text.primary" fontWeight="500">
+                  {formatCreatedDate(user.create_date)}
                 </Typography>
               </TableCell>
 

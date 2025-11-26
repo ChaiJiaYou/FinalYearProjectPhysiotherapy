@@ -165,41 +165,14 @@ const TreatmentAdminCenter = () => {
       icon: <AssignmentIcon />, 
       component: (
         <Box>
-          {/* Header with Refresh Button */}
-          <Box display="flex" justifyContent="space-between" alignItems="center" mb={3}>
-            <Typography variant="h6" sx={{ fontWeight: 600 }}>
-              All Treatments
-            </Typography>
-            <Button
-              variant="outlined"
-              startIcon={<RefreshIcon />}
-              onClick={fetchTreatments}
-              disabled={loading}
-              sx={{
-                borderRadius: 2,
-                textTransform: 'uppercase',
-                fontWeight: 600,
-                px: 3,
-                borderColor: '#3b82f6',
-                color: '#3b82f6',
-                '&:hover': {
-                  borderColor: '#2563eb',
-                  bgcolor: 'rgba(59, 130, 246, 0.04)',
-                }
-              }}
-            >
-              Refresh
-            </Button>
-          </Box>
-
           {/* Filter Section */}
-          <Box sx={{ mb: 3 }}>
-            <Grid container spacing={2} alignItems="center">
-              <Grid item xs={12} md={4}>
+          <Card sx={{ mb: 3, borderRadius: 3, border: '1px solid', borderColor: 'grey.200', elevation: 0 }}>
+            <CardContent sx={{ p: 3 }}>
+              <Box display="flex" alignItems="center" gap={2} flexWrap="wrap">
                 <TextField
-                  placeholder="Search by patient name or ID..."
                   value={patientFilter}
                   onChange={(e) => setPatientFilter(e.target.value)}
+                  size="small"
                   InputProps={{
                     startAdornment: (
                       <InputAdornment position="start">
@@ -208,55 +181,48 @@ const TreatmentAdminCenter = () => {
                     ),
                   }}
                   sx={{ 
-                    width: '100%',
+                    flex: 1,
+                    minWidth: { xs: "100%", sm: 300 },
                     '& .MuiOutlinedInput-root': {
                       borderRadius: 2,
                     }
                   }}
                 />
-              </Grid>
-              <Grid item xs={12} md={3}>
-                <TextField
-                  type="date"
-                  label="Start Date From"
-                  value={dateFilter.start}
-                  onChange={(e) => setDateFilter({...dateFilter, start: e.target.value})}
-                  InputLabelProps={{ shrink: true }}
-                  sx={{ 
-                    width: '100%',
-                    '& .MuiOutlinedInput-root': {
-                      borderRadius: 2,
+                <Button
+                  variant="outlined"
+                  startIcon={<RefreshIcon />}
+                  onClick={fetchTreatments}
+                  disabled={loading}
+                  size="small"
+                  sx={{
+                    borderRadius: 2,
+                    textTransform: 'uppercase',
+                    fontWeight: 600,
+                    px: 3,
+                    height: '40px',
+                    borderColor: '#3b82f6',
+                    color: '#3b82f6',
+                    '&:hover': {
+                      borderColor: '#2563eb',
+                      bgcolor: 'rgba(59, 130, 246, 0.04)',
                     }
                   }}
-                />
-              </Grid>
-              <Grid item xs={12} md={3}>
-                <TextField
-                  type="date"
-                  label="Start Date To"
-                  value={dateFilter.end}
-                  onChange={(e) => setDateFilter({...dateFilter, end: e.target.value})}
-                  InputLabelProps={{ shrink: true }}
-                  sx={{ 
-                    width: '100%',
-                    '& .MuiOutlinedInput-root': {
-                      borderRadius: 2,
-                    }
-                  }}
-                />
-              </Grid>
-              <Grid item xs={12} md={2}>
+                >
+                  Refresh
+                </Button>
                 <Button
                   variant="outlined"
                   onClick={() => {
                     setPatientFilter('');
                     setDateFilter({ start: '', end: '' });
                   }}
+                  size="small"
                   sx={{ 
-                    width: '100%',
                     borderRadius: 2,
                     textTransform: 'uppercase',
                     fontWeight: 600,
+                    px: 3,
+                    height: '40px',
                     borderColor: '#3b82f6',
                     color: '#3b82f6',
                     '&:hover': {
@@ -267,9 +233,9 @@ const TreatmentAdminCenter = () => {
                 >
                   Clear
                 </Button>
-              </Grid>
-            </Grid>
-          </Box>
+              </Box>
+            </CardContent>
+          </Card>
 
           {/* Treatments Table */}
           <Card sx={{ borderRadius: 3, border: '1px solid', borderColor: 'grey.200', elevation: 0 }}>
@@ -518,13 +484,10 @@ const TreatmentAdminCenter = () => {
     <Box sx={{ bgcolor: '#f8fafc', minHeight: '100vh', p: { xs: 2, md: 4 } }}>
       <Box sx={{ maxWidth: 'xl', mx: 'auto' }}>
         {/* 页面头部 - 遵循User Management设计系统 */}
-        <Box display="flex" justifyContent="space-between" alignItems="center" mb={4}>
+        <Box display="flex" justifyContent="space-between" alignItems="center" mb={2}>
           <Box>
             <Typography variant="h4" gutterBottom sx={{ color: '#000000', fontWeight: 600 }}>
               Treatment Administration
-            </Typography>
-            <Typography variant="body1" color="text.secondary">
-              Manage treatments and templates
             </Typography>
         </Box>
       </Box>

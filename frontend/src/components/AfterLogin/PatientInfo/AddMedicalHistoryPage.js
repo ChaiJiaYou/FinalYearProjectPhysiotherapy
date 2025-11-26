@@ -197,7 +197,6 @@ const AddMedicalHistoryPage = () => {
                   rows={4}
                   value={formData.family_history}
                   onChange={handleInputChange('family_history')}
-                  placeholder="Information about health of blood relatives, e.g., cancer, hypertension, diabetes..."
                   sx={{
                     '& .MuiOutlinedInput-root': {
                       borderRadius: 2,

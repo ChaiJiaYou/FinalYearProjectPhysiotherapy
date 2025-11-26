@@ -15,9 +15,6 @@ const TherapistTreatmentCenter = () => {
             <Typography variant="h4" gutterBottom sx={{ color: '#000000', fontWeight: 600 }}>
               Treatment Management
             </Typography>
-            <Typography variant="body1" color="text.secondary">
-              Manage patient treatments and create treatment plans
-            </Typography>
           </Box>
         </Box>
 

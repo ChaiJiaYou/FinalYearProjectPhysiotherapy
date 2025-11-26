@@ -12,6 +12,10 @@ import {
   Stack,
   CircularProgress,
   InputAdornment,
+  FormControl,
+  InputLabel,
+  Select,
+  MenuItem,
 } from "@mui/material";
 import ArrowBackIcon from "@mui/icons-material/ArrowBack";
 import SaveIcon from "@mui/icons-material/Save";
@@ -50,6 +54,10 @@ const EditUserPage = () => {
   const [therapistDetails, setTherapistDetails] = useState({
     specialization: "",
   });
+  const [adminDetails, setAdminDetails] = useState({
+    admin_role: "",
+  });
+  const [currentUserAdminRole, setCurrentUserAdminRole] = useState(null);
   const [avatarFile, setAvatarFile] = useState(null);
   const [avatarPreview, setAvatarPreview] = useState("");
   const [loading, setLoading] = useState(true);
@@ -112,6 +120,12 @@ const EditUserPage = () => {
           });
         }
 
+        if (data.admin_profile) {
+          setAdminDetails({
+            admin_role: data.admin_profile.admin_role || "",
+          });
+        }
+
         if (data.avatar) {
           const avatarUrl = convertBinaryToUrl(data.avatar);
           setAvatarPreview(avatarUrl);
@@ -124,7 +138,27 @@ const EditUserPage = () => {
       }
     };
 
+    const fetchCurrentUserRole = async () => {
+      try {
+        const currentUserId = localStorage.getItem("id");
+        const userRole = localStorage.getItem("role");
+        
+        if (currentUserId && userRole === "admin") {
+          const response = await fetch(`http://127.0.0.1:8000/api/get-user/${currentUserId}/`);
+          if (response.ok) {
+            const data = await response.json();
+            const adminRole = data.admin_profile?.admin_role || "CenterAdmin";
+            setCurrentUserAdminRole(adminRole);
+          }
+        }
+      } catch (error) {
+        console.error("Error fetching current user role:", error);
+        setCurrentUserAdminRole("CenterAdmin");
+      }
+    };
+
     fetchUserDetails();
+    fetchCurrentUserRole();
   }, [userId]);
 
   const convertBinaryToUrl = (binaryData) => {
@@ -172,6 +206,21 @@ const EditUserPage = () => {
   const handleTherapistDetailsChange = (field, value) => {
     console.log('Therapist details change:', field, value);
     setTherapistDetails(prev => ({
+      ...prev,
+      [field]: value
+    }));
+    
+    // Clear field error when user starts typing
+    if (fieldErrors[field]) {
+      setFieldErrors(prev => ({
+        ...prev,
+        [field]: ''
+      }));
+    }
+  };
+
+  const handleAdminDetailsChange = (field, value) => {
+    setAdminDetails(prev => ({
       ...prev,
       [field]: value
     }));
@@ -276,7 +325,7 @@ const EditUserPage = () => {
       const validationErrors = validateAllFields();
       if (Object.keys(validationErrors).length > 0) {
         setFieldErrors(validationErrors);
-        toast.error("Please fix the validation errors before saving");
+        toast.error("Please fill in all required fields");
         return;
       }
       
@@ -302,6 +351,14 @@ const EditUserPage = () => {
         console.log('Adding therapist details:', therapistDetails);
         Object.keys(therapistDetails).forEach(key => {
           formData.append(`therapist_profile.${key}`, therapistDetails[key]);
+        });
+      }
+
+      // Add admin details if user is an admin and current user is SuperAdmin
+      if (user.role === 'admin' && currentUserAdminRole === 'SuperAdmin') {
+        console.log('Adding admin details:', adminDetails);
+        Object.keys(adminDetails).forEach(key => {
+          formData.append(`admin_profile.${key}`, adminDetails[key]);
         });
       }
 
@@ -743,24 +800,52 @@ const EditUserPage = () => {
                 />
               )}
               {user?.role === 'admin' && (
-                <TextField
-                  label="Admin Level"
-                  value="Super Admin"
-                  fullWidth
-                  disabled
-                  InputProps={{
-                    startAdornment: (
-                      <InputAdornment position="start">
-                        <AdminPanelSettingsIcon sx={{ color: "text.secondary" }} />
-                      </InputAdornment>
-                    ),
-                  }}
-                  sx={{
-                    "& .MuiOutlinedInput-root": {
-                      borderRadius: 2,
-                    },
-                  }}
-                />
+                currentUserAdminRole === 'SuperAdmin' ? (
+                  <TextField
+                    select
+                    label="Admin Level"
+                    value={adminDetails.admin_role}
+                    onChange={(e) => handleAdminDetailsChange('admin_role', e.target.value)}
+                    fullWidth
+                    SelectProps={{
+                      native: false,
+                    }}
+                    InputProps={{
+                      startAdornment: (
+                        <InputAdornment position="start">
+                          <AdminPanelSettingsIcon sx={{ color: "text.secondary" }} />
+                        </InputAdornment>
+                      ),
+                    }}
+                    sx={{
+                      "& .MuiOutlinedInput-root": {
+                        borderRadius: 2,
+                      },
+                    }}
+                  >
+                    <MenuItem value="SuperAdmin">Super Admin</MenuItem>
+                    <MenuItem value="CenterAdmin">Center Admin</MenuItem>
+                  </TextField>
+                ) : (
+                  <TextField
+                    label="Admin Level"
+                    value={adminDetails.admin_role === "SuperAdmin" ? "Super Admin" : adminDetails.admin_role === "CenterAdmin" ? "Center Admin" : adminDetails.admin_role || "Not specified"}
+                    fullWidth
+                    disabled
+                    InputProps={{
+                      startAdornment: (
+                        <InputAdornment position="start">
+                          <AdminPanelSettingsIcon sx={{ color: "text.secondary" }} />
+                        </InputAdornment>
+                      ),
+                    }}
+                    sx={{
+                      "& .MuiOutlinedInput-root": {
+                        borderRadius: 2,
+                      },
+                    }}
+                  />
+                )
               )}
             </Box>
           </Box>

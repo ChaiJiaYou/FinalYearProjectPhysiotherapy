@@ -10,6 +10,7 @@ import {
   CircularProgress,
   Alert,
   Paper,
+  Card,
   Table,
   TableBody,
   TableCell,
@@ -17,7 +18,8 @@ import {
   TableHead,
   TableRow,
   TablePagination,
-  
+  Grid,
+  IconButton,
 } from "@mui/material";
 import {
   Search as SearchIcon,
@@ -26,6 +28,7 @@ import {
   Email as EmailIcon,
   Phone as PhoneIcon,
   Badge as BadgeIcon,
+  Refresh as RefreshIcon,
 } from "@mui/icons-material";
 import { useNavigate } from "react-router-dom";
 import { toast } from "react-toastify";
@@ -152,217 +155,363 @@ const PatientListPage = () => {
   );
 
   return (
-    <Box sx={{ p: { xs: 2, md: 4 }, backgroundColor: "#f8fafc", minHeight: "100vh" }}>
-      {/* Header Section */}
-      <Box sx={{ mb: 3, display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-        <Box>
-          <Typography variant="h4" fontWeight="bold" color="text.primary" gutterBottom>
-            Patient Management
-          </Typography>
-          <Typography variant="body1" color="text.secondary">
-            View and manage active patients in the system
-          </Typography>
+    <Box sx={{ bgcolor: '#f8fafc', minHeight: '100vh', p: { xs: 2, md: 4 } }}>
+      <Box sx={{ maxWidth: 'xl', mx: 'auto' }}>
+        {/* Header Section */}
+        <Box display="flex" justifyContent="space-between" alignItems="center" mb={2}>
+          <Box>
+            <Typography variant="h4" gutterBottom sx={{ color: '#000000', fontWeight: 600 }}>
+              Patient Management
+            </Typography>
+          </Box>
         </Box>
-        
-        {/* Search Section */}
-        <TextField
-          placeholder="Search by name, ID, IC number, or email..."
-          value={searchTerm}
-          onChange={(e) => setSearchTerm(e.target.value)}
-          InputProps={{
-            startAdornment: (
-              <InputAdornment position="start">
-                <SearchIcon />
-              </InputAdornment>
-            ),
-          }}
-          sx={{ 
-            width: 900,
-            '& .MuiOutlinedInput-root': {
-              borderRadius: 2,
-            }
-          }}
-        />
-      </Box>
 
-      {/* Patients Table */}
-      {filteredPatients.length === 0 ? (
-        <Alert severity="info" sx={{ mt: 2 }}>
-          {patients.length === 0 
-            ? "No patients found in the system."
-            : "No active patients match your search criteria."
-          }
-        </Alert>
-      ) : (
-        <Paper
-          elevation={0}
-          sx={{
-            borderRadius: 3,
-            border: "1px solid",
-            borderColor: "grey.200",
-            overflow: "hidden",
+        {/* Main Content */}
+        <Paper 
+          elevation={1} 
+          sx={{ 
+            borderRadius: 2, 
+            overflow: 'hidden',
+            border: '1px solid',
+            borderColor: 'grey.200',
+            boxShadow: '0 1px 3px rgba(0,0,0,0.1)'
           }}
         >
-          <TableContainer>
-            <Table>
-              <TableHead>
-                <TableRow sx={{ bgcolor: "grey.50" }}>
-                  <TableCell sx={{ fontWeight: 600, color: "text.primary" }}>Patient</TableCell>
-                  <TableCell sx={{ fontWeight: 600, color: "text.primary" }}>ID</TableCell>
-                  <TableCell sx={{ fontWeight: 600, color: "text.primary" }}>Gender</TableCell>
-                  <TableCell sx={{ fontWeight: 600, color: "text.primary" }}>Age</TableCell>
-                  <TableCell sx={{ fontWeight: 600, color: "text.primary" }}>Contact</TableCell>
-                  <TableCell sx={{ fontWeight: 600, color: "text.primary" }}>Medical Records</TableCell>
-                  <TableCell sx={{ fontWeight: 600, color: "text.primary" }}>Actions</TableCell>
-                </TableRow>
-              </TableHead>
-              <TableBody>
-                {paginatedPatients.map((patient) => {
-                  const user = patient.user;
-                  const avatarUrl = user.avatar ? convertBinaryToUrl(user.avatar) : null;
-                  
-                  return (
-                    <TableRow 
-                      key={patient.id}
-                      sx={{ 
-                        '&:hover': { 
-                          bgcolor: 'grey.50' 
-                        } 
-                      }}
-                    >
-                      {/* Patient Info */}
-                      <TableCell>
-                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
-                          <Avatar
-                            src={avatarUrl || "/static/images/defaultAvatar.png"}
-                            sx={{
-                              width: 40,
-                              height: 40,
-                              border: "2px solid",
-                              borderColor: alpha(getGenderColor(user.gender), 0.3),
-                            }}
-                          >
-                            <PersonIcon />
-                          </Avatar>
-                          <Box>
-                            <Typography variant="body1" fontWeight="600" color="text.primary">
-                              {user.username}
-                            </Typography>
-                          </Box>
-                        </Box>
-                      </TableCell>
+          <Box sx={{ 
+            bgcolor: 'white',
+            minHeight: 300,
+            p: 3,
+          }}>
+            {/* Header with Refresh Button */}
+            <Box display="flex" justifyContent="space-between" alignItems="center" mb={3}>
+              <Typography variant="h6" sx={{ fontWeight: 600 }}>
+                All Patients
+              </Typography>
+              <Button
+                variant="outlined"
+                startIcon={<RefreshIcon />}
+                onClick={fetchPatients}
+                disabled={loading}
+                sx={{
+                  borderRadius: 2,
+                  textTransform: 'uppercase',
+                  fontWeight: 600,
+                  px: 3,
+                  borderColor: '#3b82f6',
+                  color: '#3b82f6',
+                  '&:hover': {
+                    borderColor: '#2563eb',
+                    bgcolor: 'rgba(59, 130, 246, 0.04)',
+                  }
+                }}
+              >
+                Refresh
+              </Button>
+            </Box>
 
-                      {/* Patient ID */}
-                      <TableCell>
-                        <Typography variant="body2" color="text.primary" fontWeight="500">
-                          {user.id}
-                        </Typography>
-                      </TableCell>
+            {/* Filter Section */}
+            <Box sx={{ mb: 3 }}>
+              <Grid container spacing={2} alignItems="center">
+                <Grid item xs={12} md={10}>
+                  <TextField
+                    placeholder="Search by name, ID, IC number, or email..."
+                    value={searchTerm}
+                    onChange={(e) => setSearchTerm(e.target.value)}
+                    InputProps={{
+                      startAdornment: (
+                        <InputAdornment position="start">
+                          <SearchIcon />
+                        </InputAdornment>
+                      ),
+                    }}
+                    sx={{ 
+                      width: '100%',
+                      '& .MuiOutlinedInput-root': {
+                        borderRadius: 2,
+                      }
+                    }}
+                  />
+                </Grid>
+                <Grid item xs={12} md={2}>
+                  <Button
+                    variant="outlined"
+                    onClick={() => setSearchTerm('')}
+                    sx={{ 
+                      width: '100%',
+                      borderRadius: 2,
+                      textTransform: 'uppercase',
+                      fontWeight: 600,
+                      borderColor: '#3b82f6',
+                      color: '#3b82f6',
+                      '&:hover': {
+                        borderColor: '#2563eb',
+                        bgcolor: 'rgba(59, 130, 246, 0.04)',
+                      }
+                    }}
+                  >
+                    Clear
+                  </Button>
+                </Grid>
+              </Grid>
+            </Box>
 
-                      {/* Gender */}
-                      <TableCell>
-                        {user.gender && (
-                          <Chip
-                            label={user.gender}
-                            size="small"
-                            sx={{
-                              bgcolor: alpha(getGenderColor(user.gender), 0.1),
-                              color: getGenderColor(user.gender),
-                              fontWeight: "600",
-                              height: 32,
-                              borderRadius: 2,
-                            }}
-                          />
+            {/* Patients Table */}
+            {filteredPatients.length === 0 ? (
+              <Alert severity="info" sx={{ mt: 2 }}>
+                {patients.length === 0 
+                  ? "No patients found in the system."
+                  : "No active patients match your search criteria."
+                }
+              </Alert>
+            ) : (
+              <>
+                <Card sx={{ borderRadius: 3, border: '1px solid', borderColor: 'grey.200', elevation: 0 }}>
+                  <TableContainer sx={{ overflowX: 'hidden', width: '100%' }}>
+                    <Table sx={{ width: '100%', tableLayout: 'fixed' }}>
+                      <TableHead>
+                        <TableRow sx={{ 
+                          backgroundColor: 'grey.50',
+                          '& .MuiTableCell-root': {
+                            borderBottom: '2px solid',
+                            borderColor: 'grey.300'
+                          }
+                        }}>
+                          <TableCell sx={{ fontWeight: 700, fontSize: "0.9rem", py: 2, color: 'text.primary', width: '20%' }}>
+                            Patient
+                          </TableCell>
+                          <TableCell sx={{ fontWeight: 700, fontSize: "0.9rem", py: 2, color: 'text.primary', width: '12%' }}>
+                            ID
+                          </TableCell>
+                          <TableCell sx={{ fontWeight: 700, fontSize: "0.9rem", py: 2, color: 'text.primary', width: '10%' }}>
+                            Gender
+                          </TableCell>
+                          <TableCell sx={{ fontWeight: 700, fontSize: "0.9rem", py: 2, color: 'text.primary', width: '8%' }}>
+                            Age
+                          </TableCell>
+                          <TableCell sx={{ fontWeight: 700, fontSize: "0.9rem", py: 2, color: 'text.primary', width: '20%' }}>
+                            Contact
+                          </TableCell>
+                          <TableCell sx={{ fontWeight: 700, fontSize: "0.9rem", py: 2, color: 'text.primary', width: '15%' }}>
+                            Medical Records
+                          </TableCell>
+                          <TableCell sx={{ fontWeight: 700, fontSize: "0.9rem", py: 2, color: 'text.primary', width: '15%' }}>
+                            Actions
+                          </TableCell>
+                        </TableRow>
+                      </TableHead>
+                      <TableBody>
+                        {loading ? (
+                          <TableRow>
+                            <TableCell colSpan={7} align="center" sx={{ py: 3 }}>Loading...</TableCell>
+                          </TableRow>
+                        ) : paginatedPatients.length > 0 ? (
+                          paginatedPatients.map((patient) => {
+                            const user = patient.user;
+                            const avatarUrl = user.avatar ? convertBinaryToUrl(user.avatar) : null;
+                            
+                            return (
+                              <TableRow 
+                                key={patient.id}
+                                hover
+                                sx={{ 
+                                  '&:hover': { 
+                                    backgroundColor: 'primary.50',
+                                    transform: 'scale(1.001)',
+                                    boxShadow: '0 2px 8px rgba(0,0,0,0.1)'
+                                  },
+                                  '&:nth-of-type(even)': { backgroundColor: 'grey.25' },
+                                  transition: 'all 0.2s ease-in-out'
+                                }}
+                              >
+                                {/* Patient Info */}
+                                <TableCell sx={{ py: 1.5, width: '20%' }}>
+                                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                                    <Avatar
+                                      src={avatarUrl || "/static/images/defaultAvatar.png"}
+                                      sx={{
+                                        width: 32,
+                                        height: 32,
+                                        border: "2px solid",
+                                        borderColor: alpha(getGenderColor(user.gender), 0.3),
+                                        flexShrink: 0
+                                      }}
+                                    >
+                                      <PersonIcon sx={{ fontSize: '1rem' }} />
+                                    </Avatar>
+                                    <Typography variant="body2" sx={{ fontWeight: 500, color: 'text.primary', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                      {user.username}
+                                    </Typography>
+                                  </Box>
+                                </TableCell>
+
+                                {/* Patient ID */}
+                                <TableCell sx={{ py: 1.5, fontSize: "0.9rem", fontWeight: 500, color: 'text.primary', width: '12%', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                  {user.id}
+                                </TableCell>
+
+                                {/* Gender */}
+                                <TableCell sx={{ py: 1.5, width: '10%' }}>
+                                  {user.gender && (
+                                    <Chip
+                                      label={user.gender}
+                                      size="small"
+                                      sx={{
+                                        bgcolor: alpha(getGenderColor(user.gender), 0.1),
+                                        color: getGenderColor(user.gender),
+                                        fontWeight: "600",
+                                        fontSize: '0.7rem',
+                                        height: 24,
+                                        borderRadius: 2,
+                                      }}
+                                    />
+                                  )}
+                                </TableCell>
+
+                                {/* Age */}
+                                <TableCell sx={{ py: 1.5, fontSize: "0.9rem", fontWeight: 500, color: 'text.primary', width: '8%' }}>
+                                  {user.dob ? `${calculateAge(user.dob)} years` : 'N/A'}
+                                </TableCell>
+
+                                {/* Contact Info */}
+                                <TableCell sx={{ py: 1.5, width: '20%' }}>
+                                  <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.5 }}>
+                                    {user.email && (
+                                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                                        <EmailIcon sx={{ fontSize: 14, color: 'text.secondary', flexShrink: 0 }} />
+                                        <Typography variant="body2" color="text.secondary" sx={{ fontSize: '0.8rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                          {user.email}
+                                        </Typography>
+                                      </Box>
+                                    )}
+                                    {user.contact_number && (
+                                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                                        <PhoneIcon sx={{ fontSize: 14, color: 'text.secondary', flexShrink: 0 }} />
+                                        <Typography variant="body2" color="text.secondary" sx={{ fontSize: '0.8rem' }}>
+                                          {user.contact_number}
+                                        </Typography>
+                                      </Box>
+                                    )}
+                                  </Box>
+                                </TableCell>
+
+                                {/* Medical Records */}
+                                <TableCell sx={{ py: 1.5, width: '15%' }}>
+                                  <Typography variant="body2" color="text.primary" sx={{ fontWeight: 500, fontSize: '0.9rem' }}>
+                                    {patient.medical_histories ? patient.medical_histories.length : 0} records
+                                  </Typography>
+                                  {patient.medical_histories && patient.medical_histories.length > 0 && (
+                                    <Typography variant="body2" color="text.secondary" sx={{ fontSize: '0.75rem' }}>
+                                      Last: {patient.medical_histories[0].session_date}
+                                    </Typography>
+                                  )}
+                                </TableCell>
+
+                                {/* Actions */}
+                                <TableCell sx={{ py: 1.5, width: '15%' }}>
+                                  <IconButton
+                                    size="small"
+                                    onClick={() => handleViewPatient(patient.user.id)}
+                                    sx={{ 
+                                      color: 'primary.main',
+                                      backgroundColor: 'primary.50',
+                                      border: '1px solid',
+                                      borderColor: 'primary.200',
+                                      minWidth: 32,
+                                      height: 32,
+                                      '&:hover': {
+                                        backgroundColor: 'primary.100',
+                                        transform: 'scale(1.05)'
+                                      },
+                                      transition: 'all 0.2s ease-in-out'
+                                    }}
+                                  >
+                                    <ViewIcon sx={{ fontSize: '0.9rem' }} />
+                                  </IconButton>
+                                </TableCell>
+                              </TableRow>
+                            );
+                          })
+                        ) : (
+                          <TableRow>
+                            <TableCell colSpan={7} align="center" sx={{ py: 3 }}>
+                              No patients found.
+                            </TableCell>
+                          </TableRow>
                         )}
-                      </TableCell>
+                      </TableBody>
+                    </Table>
+                  </TableContainer>
+                </Card>
 
-                      {/* Age */}
-                      <TableCell>
-                        {user.dob && (
-                          <Typography variant="body2" color="text.secondary">
-                            {calculateAge(user.dob)} years
-                          </Typography>
-                        )}
-                      </TableCell>
-
-                      {/* Contact Info */}
-                      <TableCell>
-                        <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.5 }}>
-                          {user.email && (
-                            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                              <EmailIcon sx={{ fontSize: 16, color: 'text.secondary' }} />
-                              <Typography variant="body2" color="text.secondary" noWrap>
-                                {user.email}
-                              </Typography>
-                            </Box>
-                          )}
-                          {user.contact_number && (
-                            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                              <PhoneIcon sx={{ fontSize: 16, color: 'text.secondary' }} />
-                              <Typography variant="body2" color="text.secondary">
-                                {user.contact_number}
-                              </Typography>
-                            </Box>
-                          )}
-                        </Box>
-                      </TableCell>
-
-                      {/* Medical Records */}
-                      <TableCell>
-                        <Typography variant="body2" color="text.secondary">
-                          {patient.medical_histories ? patient.medical_histories.length : 0} records
-                        </Typography>
-                        {patient.medical_histories && patient.medical_histories.length > 0 && (
-                          <Typography variant="body2" color="text.secondary" sx={{ fontSize: '0.75rem' }}>
-                            Last: {patient.medical_histories[0].session_date}
-                          </Typography>
-                        )}
-                      </TableCell>
-
-                      {/* Actions */}
-                      <TableCell>
-                        <Button
-                          variant="contained"
-                          startIcon={<ViewIcon />}
-                          onClick={() => handleViewPatient(patient.user.id)}
-                          sx={{
-                            bgcolor: "#3b82f6",
-                            color: "white",
-                            borderRadius: 2,
-                            textTransform: "uppercase",
-                            fontWeight: 600,
-                            px: 3,
-                            "&:hover": { 
-                              bgcolor: "#2563eb" 
-                            },
-                          }}
-                        >
-                          View Details
-                        </Button>
-                      </TableCell>
-                    </TableRow>
-                  );
-                })}
-              </TableBody>
-            </Table>
-          </TableContainer>
-          
-          {/* Pagination */}
-          <TablePagination
-            rowsPerPageOptions={[5, 10, 25]}
-            component="div"
-            count={filteredPatients.length}
-            rowsPerPage={rowsPerPage}
-            page={page}
-            onPageChange={handleChangePage}
-            onRowsPerPageChange={handleChangeRowsPerPage}
-            sx={{
-              borderTop: 1,
-              borderColor: 'grey.200',
-            }}
-          />
+                {/* Pagination */}
+                <Card sx={{ 
+                  mt: 2,
+                  borderRadius: 3,
+                  border: '1px solid',
+                  borderColor: 'grey.200',
+                  elevation: 0
+                }}>
+                  <TablePagination
+                    rowsPerPageOptions={[5, 10, 25]}
+                    component="div"
+                    count={filteredPatients.length}
+                    rowsPerPage={rowsPerPage}
+                    page={page}
+                    onPageChange={handleChangePage}
+                    onRowsPerPageChange={handleChangeRowsPerPage}
+                    labelDisplayedRows={({ from, to, count }) => 
+                      `${from}-${to} of ${count !== -1 ? count : `more than ${to}`}`
+                    }
+                    sx={{
+                      backgroundColor: 'grey.50',
+                      borderTop: '1px solid',
+                      borderColor: 'grey.200',
+                      '& .MuiTablePagination-toolbar': {
+                        paddingLeft: 3,
+                        paddingRight: 3,
+                        paddingTop: 2,
+                        paddingBottom: 2,
+                      },
+                      '& .MuiTablePagination-selectLabel': {
+                        marginBottom: 0,
+                        fontSize: '0.9rem',
+                        fontWeight: 500,
+                        color: 'text.secondary'
+                      },
+                      '& .MuiTablePagination-select': {
+                        fontSize: '0.9rem',
+                        fontWeight: 500,
+                        backgroundColor: 'white',
+                        borderRadius: 2,
+                        border: '1px solid',
+                        borderColor: 'grey.300',
+                        '&:hover': {
+                          borderColor: 'primary.main'
+                        }
+                      },
+                      '& .MuiTablePagination-displayedRows': {
+                        marginBottom: 0,
+                        fontSize: '0.9rem',
+                        fontWeight: 500,
+                        color: 'text.primary'
+                      },
+                      '& .MuiIconButton-root': {
+                        color: 'primary.main',
+                        '&:hover': {
+                          backgroundColor: 'primary.50'
+                        },
+                        '&:disabled': {
+                          color: 'grey.400'
+                        }
+                      }
+                    }}
+                  />
+                </Card>
+              </>
+            )}
+          </Box>
         </Paper>
-      )}
+      </Box>
     </Box>
   );
 };

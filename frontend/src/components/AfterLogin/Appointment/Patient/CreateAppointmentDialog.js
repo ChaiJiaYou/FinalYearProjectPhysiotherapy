@@ -223,7 +223,8 @@ const CreateAppointmentDialog = ({ open, onClose, onAppointmentCreated }) => {
       if (res.ok) {
         const data = await res.json();
         toast.success("Appointment created successfully! Please wait for therapist confirmation.");
-        onAppointmentCreated();
+        // 将新创建的预约传递给父组件，用于乐观更新
+        onAppointmentCreated(data.appointment);
         onClose();
       } else {
         const errorData = await res.json();

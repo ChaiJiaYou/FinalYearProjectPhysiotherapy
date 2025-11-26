@@ -3,13 +3,10 @@ import {
   Box,
   Typography,
   Paper,
-  Container,
-  Avatar,
   Grid,
   Card,
   CardContent,
   Button,
-  Fab,
   Table,
   TableBody,
   TableCell,
@@ -34,7 +31,8 @@ import {
   CardHeader,
   CardActions,
   Divider,
-  NativeSelect,
+  InputAdornment,
+  Avatar,
 } from "@mui/material";
 import {
   FitnessCenter as ExerciseIcon,
@@ -49,6 +47,7 @@ import {
   Search as SearchIcon,
   FilterList as FilterIcon,
   Clear as ClearIcon,
+  Refresh as RefreshIcon,
 } from "@mui/icons-material";
 import { toast } from "react-toastify";
 
@@ -281,133 +280,192 @@ const ExerciseManagementCenter = () => {
   };
 
   return (
-    <Container maxWidth="xl" sx={{ py: 4 }}>
-      {/* Header */}
-      <Box sx={{ mb: 4 }}>
-        <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, mb: 2 }}>
-          <Avatar sx={{ bgcolor: 'primary.main', width: 56, height: 56 }}>
-            <ExerciseIcon fontSize="large" />
-          </Avatar>
+    <Box sx={{ bgcolor: '#f8fafc', minHeight: '100vh', p: { xs: 2, md: 4 } }}>
+      <Box sx={{ maxWidth: 'xl', mx: 'auto' }}>
+        {/* Header Section */}
+        <Box display="flex" justifyContent="space-between" alignItems="center" mb={2}>
           <Box>
-            <Typography variant="h3" sx={{ fontWeight: 'bold', color: 'primary.main' }}>
+            <Typography variant="h4" gutterBottom sx={{ color: '#000000', fontWeight: 600 }}>
               Exercise Management
-            </Typography>
-            <Typography variant="h6" color="text.secondary">
-              Manage exercise library and exercise records
             </Typography>
           </Box>
         </Box>
-      </Box>
 
-      {/* Filter Controls and Action Buttons */}
-      <Box sx={{ mb: 3, display: 'flex', gap: 2, flexWrap: 'wrap', justifyContent: 'space-between', alignItems: 'center' }}>
-        {/* Filter Controls - Left Side */}
-        <Box sx={{ display: 'flex', gap: 2, flexWrap: 'wrap', alignItems: 'center' }}>
-          <TextField
-            size="small"
-            placeholder="Search exercises..."
-            value={filters.search}
-            onChange={(e) => handleFilterChange('search', e.target.value)}
-            InputProps={{
-              startAdornment: <SearchIcon sx={{ mr: 1, color: 'text.secondary' }} />
-            }}
-            sx={{ minWidth: 200 }}
-          />
-          
-          <FormControl sx={{ minWidth: 120 }}>
-            <InputLabel>Category</InputLabel>
-            <Select
-              value={filters.category}
-              onChange={(e) => handleFilterChange('category', e.target.value)}
-              label="Category"
-            >
-              <MenuItem value="all">All Categories</MenuItem>
-              <MenuItem value="upper_body">Upper Body</MenuItem>
-              <MenuItem value="lower_body">Lower Body</MenuItem>
-              <MenuItem value="full_body">Full Body</MenuItem>
-            </Select>
-          </FormControl>
-          
-          <FormControl sx={{ minWidth: 120 }}>
-            <InputLabel>Difficulty</InputLabel>
-            <Select
-              value={filters.difficulty}
-              onChange={(e) => handleFilterChange('difficulty', e.target.value)}
-              label="Difficulty"
-            >
-              <MenuItem value="all">All Levels</MenuItem>
-              <MenuItem value="beginner">Beginner</MenuItem>
-              <MenuItem value="intermediate">Intermediate</MenuItem>
-              <MenuItem value="advanced">Advanced</MenuItem>
-            </Select>
-          </FormControl>
-          
-          <Button
-            variant="outlined"
-            startIcon={<ClearIcon />}
-            onClick={clearFilters}
-            size="small"
-          >
-            Clear Filters
-          </Button>
-        </Box>
-        
-        {/* Action Button - Right Side */}
-        <Button
-          variant="contained"
-          startIcon={<AddIcon />}
-          onClick={() => setCreateDialogOpen(true)}
-          size="large"
+        {/* Main Content */}
+        <Paper 
+          elevation={1} 
+          sx={{ 
+            borderRadius: 2, 
+            overflow: 'hidden',
+            border: '1px solid',
+            borderColor: 'grey.200',
+            boxShadow: '0 1px 3px rgba(0,0,0,0.1)'
+          }}
         >
-          Create New Exercise
-        </Button>
-      </Box>
-
-      {/* Exercises Table */}
-      <Paper elevation={3} sx={{ borderRadius: 3, overflow: 'hidden' }}>
-        <Box sx={{ p: 3 }}>
-          <Typography variant="h5" fontWeight="600" sx={{ mb: 3 }}>
-            Exercise Library ({filteredExercises.length} of {exercises.length})
-          </Typography>
-
-          {loading ? (
-            <Box sx={{ display: 'flex', justifyContent: 'center', py: 4 }}>
-              <CircularProgress />
-            </Box>
-          ) : filteredExercises.length === 0 ? (
-            <Box sx={{ textAlign: 'center', py: 8 }}>
-              <ExerciseIcon sx={{ fontSize: 64, color: 'text.secondary', mb: 2 }} />
-              <Typography variant="h6" color="text.secondary" gutterBottom>
-                {exercises.length === 0 ? 'No exercises found' : 'No exercises match your filters'}
+          <Box sx={{ 
+            bgcolor: 'white',
+            minHeight: 300,
+            p: 3,
+          }}>
+            {/* Header with Refresh Button */}
+            <Box display="flex" justifyContent="space-between" alignItems="center" mb={3}>
+              <Typography variant="h6" sx={{ fontWeight: 600 }}>
+                Exercise Library ({filteredExercises.length} of {exercises.length})
               </Typography>
-              <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
-                {exercises.length === 0 
-                  ? 'Start by creating your first exercise' 
-                  : 'Try adjusting your search criteria or clear filters'
-                }
-              </Typography>
-              {exercises.length === 0 ? (
+              <Box sx={{ display: 'flex', gap: 2 }}>
+                <Button
+                  variant="outlined"
+                  startIcon={<RefreshIcon />}
+                  onClick={fetchExercises}
+                  disabled={loading}
+                  sx={{
+                    borderRadius: 2,
+                    textTransform: 'uppercase',
+                    fontWeight: 600,
+                    px: 3,
+                    borderColor: '#3b82f6',
+                    color: '#3b82f6',
+                    '&:hover': {
+                      borderColor: '#2563eb',
+                      bgcolor: 'rgba(59, 130, 246, 0.04)',
+                    }
+                  }}
+                >
+                  Refresh
+                </Button>
                 <Button
                   variant="contained"
                   startIcon={<AddIcon />}
                   onClick={() => setCreateDialogOpen(true)}
+                  sx={{
+                    borderRadius: 2,
+                    textTransform: 'uppercase',
+                    fontWeight: 600,
+                    px: 3,
+                    bgcolor: '#3b82f6',
+                    '&:hover': {
+                      bgcolor: '#2563eb',
+                    }
+                  }}
                 >
-                  Create First Exercise
+                  Create Exercise
                 </Button>
-              ) : (
-                <Button
-                  variant="outlined"
-                  startIcon={<ClearIcon />}
-                  onClick={clearFilters}
-                >
-                  Clear Filters
-                </Button>
-              )}
+              </Box>
             </Box>
-          ) : (
-            <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-              {filteredExercises.map((exercise) => (
-                <Card key={exercise.exercise_id} elevation={2} sx={{ borderRadius: 2 }}>
+
+            {/* Filter Section */}
+            <Box sx={{ mb: 3 }}>
+              <Grid container spacing={2} alignItems="center">
+                <Grid item xs={12} md={4}>
+                  <TextField
+                    placeholder="Search exercises..."
+                    value={filters.search}
+                    onChange={(e) => handleFilterChange('search', e.target.value)}
+                    InputProps={{
+                      startAdornment: (
+                        <InputAdornment position="start">
+                          <SearchIcon />
+                        </InputAdornment>
+                      ),
+                    }}
+                    sx={{ 
+                      width: '100%',
+                      '& .MuiOutlinedInput-root': {
+                        borderRadius: 2,
+                      }
+                    }}
+                  />
+                </Grid>
+                <Grid item xs={12} md={3}>
+                  <FormControl fullWidth>
+                    <InputLabel>Category</InputLabel>
+                    <Select
+                      value={filters.category}
+                      onChange={(e) => handleFilterChange('category', e.target.value)}
+                      label="Category"
+                      sx={{ 
+                        borderRadius: 2,
+                      }}
+                    >
+                      <MenuItem value="all">All Categories</MenuItem>
+                      <MenuItem value="upper_body">Upper Body</MenuItem>
+                      <MenuItem value="lower_body">Lower Body</MenuItem>
+                      <MenuItem value="full_body">Full Body</MenuItem>
+                    </Select>
+                  </FormControl>
+                </Grid>
+                <Grid item xs={12} md={3}>
+                  <FormControl fullWidth>
+                    <InputLabel>Difficulty</InputLabel>
+                    <Select
+                      value={filters.difficulty}
+                      onChange={(e) => handleFilterChange('difficulty', e.target.value)}
+                      label="Difficulty"
+                      sx={{ 
+                        borderRadius: 2,
+                      }}
+                    >
+                      <MenuItem value="all">All Levels</MenuItem>
+                      <MenuItem value="beginner">Beginner</MenuItem>
+                      <MenuItem value="intermediate">Intermediate</MenuItem>
+                      <MenuItem value="advanced">Advanced</MenuItem>
+                    </Select>
+                  </FormControl>
+                </Grid>
+                <Grid item xs={12} md={2}>
+                  <Button
+                    variant="outlined"
+                    onClick={clearFilters}
+                    sx={{ 
+                      width: '100%',
+                      borderRadius: 2,
+                      textTransform: 'uppercase',
+                      fontWeight: 600,
+                      borderColor: '#3b82f6',
+                      color: '#3b82f6',
+                      '&:hover': {
+                        borderColor: '#2563eb',
+                        bgcolor: 'rgba(59, 130, 246, 0.04)',
+                      }
+                    }}
+                  >
+                    Clear
+                  </Button>
+                </Grid>
+              </Grid>
+            </Box>
+
+            {/* Exercises List */}
+            <Box>
+
+              {loading ? (
+                <Box sx={{ display: 'flex', justifyContent: 'center', py: 4 }}>
+                  <CircularProgress />
+                </Box>
+              ) : filteredExercises.length === 0 ? (
+                <Alert severity="info" sx={{ mt: 2 }}>
+                  {exercises.length === 0 
+                    ? "No exercises found in the system."
+                    : "No exercises match your search criteria."
+                  }
+                </Alert>
+              ) : (
+                <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                  {filteredExercises.map((exercise) => (
+                    <Card 
+                      key={exercise.exercise_id} 
+                      sx={{ 
+                        borderRadius: 3, 
+                        border: '1px solid', 
+                        borderColor: 'grey.200',
+                        elevation: 0,
+                        '&:hover': {
+                          boxShadow: '0 2px 8px rgba(0,0,0,0.1)',
+                          borderColor: 'primary.main'
+                        },
+                        transition: 'all 0.2s ease-in-out'
+                      }}
+                    >
                   <CardHeader
                     avatar={
                       <Avatar sx={{ bgcolor: 'primary.main' }}>
@@ -535,22 +593,14 @@ const ExerciseManagementCenter = () => {
                       </Grid>
                     </CardContent>
                   </Collapse>
-                </Card>
-              ))}
+                    </Card>
+                  ))}
+                </Box>
+              )}
             </Box>
-          )}
-        </Box>
-      </Paper>
-
-      {/* Floating Action Button */}
-      <Fab 
-        color="primary" 
-        aria-label="add" 
-        sx={{ position: 'fixed', bottom: 16, right: 16 }}
-        onClick={() => setCreateDialogOpen(true)}
-      >
-        <AddIcon />
-      </Fab>
+          </Box>
+        </Paper>
+      </Box>
 
       {/* Create Exercise Dialog */}
       <Dialog open={createDialogOpen} onClose={() => setCreateDialogOpen(false)} maxWidth="md" fullWidth>
@@ -771,7 +821,7 @@ const ExerciseManagementCenter = () => {
           <Button onClick={() => setViewDialogOpen(false)}>Close</Button>
         </DialogActions>
       </Dialog>
-    </Container>
+    </Box>
   );
 };
 

@@ -355,7 +355,6 @@ const AdjustTreatmentDialog = ({ open, onClose, onSuccess, treatment }) => {
                   label="Treatment Subtype"
                   value={treatmentSubtype}
                   onChange={(e) => setTreatmentSubtype(e.target.value)}
-                  placeholder="e.g., shoulder_rom, sit_to_stand"
                 />
               </Grid>
 

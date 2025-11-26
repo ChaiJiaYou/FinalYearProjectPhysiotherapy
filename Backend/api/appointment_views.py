@@ -271,9 +271,31 @@ def list_appointments(request):
         appointments = appointments.order_by('start_at')
         serializer = AppointmentSerializer(appointments, many=True)
         
+        # 计算统计信息（基于所有该治疗师的预约，不应用当前查询的过滤条件）
+        if scope == 'therapist':
+            all_therapist_appointments = Appointment.objects.filter(therapist_id__id=user_id)
+            
+            # 获取今天的日期（马来西亚时区）
+            today = get_malaysia_date()
+            
+            # 计算各种状态的统计
+            stats = {
+                'pending': all_therapist_appointments.filter(status='Pending').count(),
+                'scheduled': all_therapist_appointments.filter(status='Scheduled').count(),
+                'completed': all_therapist_appointments.filter(status='Completed').count(),
+                'todaySessions': all_therapist_appointments.filter(
+                    start_at__date=today,
+                    status__in=['Pending', 'Scheduled', 'Completed']
+                ).count(),
+            }
+        else:
+            # 对于 patient scope，不提供统计信息
+            stats = {}
+        
         return Response({
             'appointments': serializer.data,
-            'count': len(serializer.data)
+            'count': len(serializer.data),
+            'stats': stats
         }, status=status.HTTP_200_OK)
         
     except Exception as e:

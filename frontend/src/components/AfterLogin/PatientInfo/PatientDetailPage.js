@@ -977,7 +977,6 @@ const PatientDetailPage = () => {
                   rows={4}
                   value={editFormData.family_history}
                   onChange={handleEditInputChange('family_history')}
-                  placeholder="Information about health of blood relatives, e.g., cancer, hypertension, diabetes..."
                   variant="outlined"
                   sx={{
                     '& .MuiOutlinedInput-root': {
