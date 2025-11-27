@@ -119,8 +119,10 @@ const PatientDetailPage = () => {
       const response = await fetch("http://127.0.0.1:8000/api/treatments/");
       if (response.ok) {
         const data = await response.json();
-        // Filter treatments for this patient
-        const patientTreatments = data.filter(treatment => treatment.patient_id === patientId);
+        // Filter treatments for this patient and only get active ones
+        const patientTreatments = data.filter(treatment => 
+          treatment.patient_id === patientId && treatment.is_active === true
+        );
         setTreatments(patientTreatments);
       }
     } catch (error) {
@@ -493,7 +495,7 @@ const PatientDetailPage = () => {
               <Grid item xs={6}>
                 <Box textAlign="center">
                   <Typography variant="h4" color="success.main" fontWeight="bold">
-                    {treatments.filter(t => t.status === 'active').length}
+                    {treatments.filter(t => t.is_active === true).length}
                   </Typography>
                   <Typography variant="body2" color="text.secondary">Active Treatments</Typography>
                 </Box>

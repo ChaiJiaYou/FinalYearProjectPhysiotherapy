@@ -3,8 +3,6 @@ import {
   Box,
   Typography,
   Grid,
-  Card,
-  CardContent,
   Button,
   TextField,
   Alert,
@@ -67,15 +65,15 @@ const AddMedicalHistoryPage = () => {
   };
 
   const handleSubmit = async () => {
+    // Check if at least one field is filled
+    const hasData = Object.values(formData).some(value => value.trim() !== '');
+    if (!hasData) {
+      toast.error('Please fill in at least one field');
+      return;
+    }
+
     try {
       setSubmitting(true);
-      
-      // Check if at least one field is filled
-      const hasData = Object.values(formData).some(value => value.trim() !== '');
-      if (!hasData) {
-        toast.error('Please fill in at least one field');
-        return;
-      }
 
       const response = await fetch(`http://127.0.0.1:8000/api/add-medical-history/${patientId}/`, {
         method: 'POST',
@@ -270,7 +268,13 @@ const AddMedicalHistoryPage = () => {
                       borderRadius: 2,
                       textTransform: 'uppercase',
                       fontWeight: 600,
-                      px: 3
+                      px: 3,
+                      borderColor: '#3b82f6',
+                      color: '#3b82f6',
+                      '&:hover': {
+                        borderColor: '#2563eb',
+                        bgcolor: 'rgba(59, 130, 246, 0.04)',
+                      }
                     }}
                   >
                     Cancel
@@ -279,12 +283,19 @@ const AddMedicalHistoryPage = () => {
                     onClick={handleSubmit}
                     variant="contained"
                     disabled={submitting}
-                    startIcon={submitting ? <CircularProgress size={20} /> : <SaveIcon />}
+                    startIcon={submitting ? <CircularProgress size={20} color="inherit" /> : <SaveIcon />}
                     sx={{
                       borderRadius: 2,
                       textTransform: 'uppercase',
                       fontWeight: 600,
-                      px: 3
+                      px: 3,
+                      bgcolor: '#3b82f6',
+                      '&:hover': {
+                        bgcolor: '#2563eb',
+                      },
+                      '&:disabled': {
+                        bgcolor: '#9ca3af',
+                      }
                     }}
                   >
                     {submitting ? "Saving..." : "Save Medical History"}

@@ -634,8 +634,29 @@ const PatientExercisePage = () => {
       if (response.ok) {
         const data = await response.json();
         if (data.length > 0) {
-          setActiveTreatment(data[0]); // Only one active treatment
-          fetchTreatmentExercises(data[0].treatment_id);
+          // Find treatment where today is within start_date and end_date range
+          const today = new Date();
+          today.setHours(0, 0, 0, 0);
+          
+          const currentTreatment = data.find(treatment => {
+            if (!treatment.is_active) return false;
+            
+            const startDate = new Date(treatment.start_date);
+            startDate.setHours(0, 0, 0, 0);
+            
+            // If no end_date, treatment is ongoing
+            if (!treatment.end_date) {
+              return startDate <= today;
+            }
+            
+            const endDate = new Date(treatment.end_date);
+            endDate.setHours(0, 0, 0, 0);
+            
+            return startDate <= today && today <= endDate;
+          }) || data[0]; // If no treatment in current date range, use the first one (latest)
+          
+          setActiveTreatment(currentTreatment);
+          fetchTreatmentExercises(currentTreatment.treatment_id);
         } else {
           setActiveTreatment(null);
         }

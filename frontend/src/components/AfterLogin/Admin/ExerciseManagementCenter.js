@@ -146,13 +146,24 @@ const ExerciseManagementCenter = () => {
   }, [exercises, filters]);
 
   const handleCreateExercise = async () => {
+    if (!formData.action_id || !formData.instructions || formData.instructions.trim() === '') {
+      toast.error('Please fill in required field');
+      return;
+    }
+
     try {
+      const currentUserId = localStorage.getItem('userId');
+      const formDataWithUser = {
+        ...formData,
+        created_by: currentUserId
+      };
+
       const response = await fetch('http://127.0.0.1:8000/api/create-exercise/', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify(formData)
+        body: JSON.stringify(formDataWithUser)
       });
 
       if (response.ok) {
@@ -171,6 +182,11 @@ const ExerciseManagementCenter = () => {
   };
 
   const handleEditExercise = async () => {
+    if (!formData.action_id || !formData.instructions || formData.instructions.trim() === '') {
+      toast.error('Please fill in required field');
+      return;
+    }
+
     try {
       const response = await fetch(`http://127.0.0.1:8000/api/exercises/${selectedExercise.exercise_id}/`, {
         method: 'PUT',
@@ -214,6 +230,17 @@ const ExerciseManagementCenter = () => {
         toast.error('Something went wrong while deleting exercise');
       }
     }
+  };
+
+  const openCreateDialog = () => {
+    setFormData({ 
+      name: '', 
+      category: 'upper_body', 
+      difficulty: 'beginner', 
+      instructions: '', 
+      action_id: '' 
+    });
+    setCreateDialogOpen(true);
   };
 
   const openEditDialog = (exercise) => {
@@ -318,11 +345,13 @@ const ExerciseManagementCenter = () => {
                   startIcon={<RefreshIcon />}
                   onClick={fetchExercises}
                   disabled={loading}
+                  size="small"
                   sx={{
                     borderRadius: 2,
                     textTransform: 'uppercase',
                     fontWeight: 600,
                     px: 3,
+                    height: '40px',
                     borderColor: '#3b82f6',
                     color: '#3b82f6',
                     '&:hover': {
@@ -336,12 +365,14 @@ const ExerciseManagementCenter = () => {
                 <Button
                   variant="contained"
                   startIcon={<AddIcon />}
-                  onClick={() => setCreateDialogOpen(true)}
+                  onClick={openCreateDialog}
+                  size="small"
                   sx={{
                     borderRadius: 2,
                     textTransform: 'uppercase',
                     fontWeight: 600,
                     px: 3,
+                    height: '40px',
                     bgcolor: '#3b82f6',
                     '&:hover': {
                       bgcolor: '#2563eb',
@@ -361,6 +392,7 @@ const ExerciseManagementCenter = () => {
                     placeholder="Search exercises..."
                     value={filters.search}
                     onChange={(e) => handleFilterChange('search', e.target.value)}
+                    size="small"
                     InputProps={{
                       startAdornment: (
                         <InputAdornment position="start">
@@ -372,12 +404,13 @@ const ExerciseManagementCenter = () => {
                       width: '100%',
                       '& .MuiOutlinedInput-root': {
                         borderRadius: 2,
+                        height: '40px',
                       }
                     }}
                   />
                 </Grid>
                 <Grid item xs={12} md={3}>
-                  <FormControl fullWidth>
+                  <FormControl fullWidth size="small">
                     <InputLabel>Category</InputLabel>
                     <Select
                       value={filters.category}
@@ -385,6 +418,7 @@ const ExerciseManagementCenter = () => {
                       label="Category"
                       sx={{ 
                         borderRadius: 2,
+                        height: '40px',
                       }}
                     >
                       <MenuItem value="all">All Categories</MenuItem>
@@ -395,7 +429,7 @@ const ExerciseManagementCenter = () => {
                   </FormControl>
                 </Grid>
                 <Grid item xs={12} md={3}>
-                  <FormControl fullWidth>
+                  <FormControl fullWidth size="small">
                     <InputLabel>Difficulty</InputLabel>
                     <Select
                       value={filters.difficulty}
@@ -403,6 +437,7 @@ const ExerciseManagementCenter = () => {
                       label="Difficulty"
                       sx={{ 
                         borderRadius: 2,
+                        height: '40px',
                       }}
                     >
                       <MenuItem value="all">All Levels</MenuItem>
@@ -416,11 +451,13 @@ const ExerciseManagementCenter = () => {
                   <Button
                     variant="outlined"
                     onClick={clearFilters}
+                    size="small"
                     sx={{ 
                       width: '100%',
                       borderRadius: 2,
                       textTransform: 'uppercase',
                       fontWeight: 600,
+                      height: '40px',
                       borderColor: '#3b82f6',
                       color: '#3b82f6',
                       '&:hover': {
@@ -603,7 +640,10 @@ const ExerciseManagementCenter = () => {
       </Box>
 
       {/* Create Exercise Dialog */}
-      <Dialog open={createDialogOpen} onClose={() => setCreateDialogOpen(false)} maxWidth="md" fullWidth>
+      <Dialog open={createDialogOpen} onClose={() => {
+        setCreateDialogOpen(false);
+        setFormData({ name: '', category: 'upper_body', difficulty: 'beginner', instructions: '', action_id: '' });
+      }} maxWidth="md" fullWidth>
         <DialogTitle>Create New Exercise</DialogTitle>
         <DialogContent>
           <Grid container spacing={2} sx={{ mt: 1 }}>
@@ -645,14 +685,14 @@ const ExerciseManagementCenter = () => {
               </FormControl>
             </Grid>
             <Grid item xs={12}>
-              <FormControl fullWidth>
-                <InputLabel>Link to Action (Optional)</InputLabel>
+              <FormControl fullWidth required>
+                <InputLabel>Link to Action</InputLabel>
                 <Select
                   value={formData.action_id}
                   onChange={(e) => setFormData({ ...formData, action_id: e.target.value })}
-                  label="Link to Action (Optional)"
+                  label="Link to Action"
+                  required
                 >
-                  <MenuItem value="">None (Manual Exercise)</MenuItem>
                   {Array.isArray(actions) && actions.map((action) => (
                     <MenuItem key={action.id} value={action.id}>
                       {action.name} ({action.mode})
@@ -669,12 +709,16 @@ const ExerciseManagementCenter = () => {
                 rows={4}
                 value={formData.instructions}
                 onChange={(e) => setFormData({ ...formData, instructions: e.target.value })}
+                required
               />
             </Grid>
           </Grid>
         </DialogContent>
         <DialogActions>
-          <Button onClick={() => setCreateDialogOpen(false)}>Cancel</Button>
+          <Button onClick={() => {
+            setCreateDialogOpen(false);
+            setFormData({ name: '', category: 'upper_body', difficulty: 'beginner', instructions: '', action_id: '' });
+          }}>Cancel</Button>
           <Button onClick={handleCreateExercise} variant="contained">Create</Button>
         </DialogActions>
       </Dialog>
@@ -722,14 +766,14 @@ const ExerciseManagementCenter = () => {
               </FormControl>
             </Grid>
             <Grid item xs={12}>
-              <FormControl fullWidth>
-                <InputLabel>Link to Action (Optional)</InputLabel>
+              <FormControl fullWidth required>
+                <InputLabel>Link to Action</InputLabel>
                 <Select
                   value={formData.action_id}
                   onChange={(e) => setFormData({ ...formData, action_id: e.target.value })}
-                  label="Link to Action (Optional)"
+                  label="Link to Action"
+                  required
                 >
-                  <MenuItem value="">None (Manual Exercise)</MenuItem>
                   {Array.isArray(actions) && actions.map((action) => (
                     <MenuItem key={action.id} value={action.id}>
                       {action.name} ({action.mode})
@@ -746,6 +790,7 @@ const ExerciseManagementCenter = () => {
                 rows={4}
                 value={formData.instructions}
                 onChange={(e) => setFormData({ ...formData, instructions: e.target.value })}
+                required
               />
             </Grid>
           </Grid>

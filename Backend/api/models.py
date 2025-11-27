@@ -440,6 +440,16 @@ class Treatment(models.Model):
     # Notes and goals
     goal_notes = models.TextField(blank=True, null=True)
     
+    # Track who created this treatment (admin or therapist)
+    created_by = models.ForeignKey(
+        CustomUser, 
+        on_delete=models.SET_NULL, 
+        null=True, 
+        blank=True, 
+        related_name="created_treatments",
+        limit_choices_to={'role__in': ['admin', 'therapist']}
+    )
+    
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
     
@@ -458,7 +468,6 @@ class TreatmentExercise(models.Model):
     # Exercise parameters for this treatment plan
     reps_per_set = models.IntegerField(blank=True, null=True)
     sets = models.IntegerField(default=1, help_text="Number of sets for this exercise")
-    duration_per_set = models.IntegerField(blank=True, null=True, help_text="Duration per set in seconds")
     notes = models.TextField(blank=True, null=True)
     
     # Exercise scheduling

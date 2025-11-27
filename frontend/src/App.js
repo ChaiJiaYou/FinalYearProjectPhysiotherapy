@@ -15,7 +15,6 @@ import PatientAppointmentPage from './components/AfterLogin/Appointment/Patient/
 import TherapistAppointments from './components/AfterLogin/Appointment/Therapist/TherapistAppointments';
 import TherapistAppointmentPage from './components/AfterLogin/Appointment/Therapist/TherapistAppointmentPage';
 import AdminTherapistAppointments from './components/AfterLogin/Appointment/Admin/AdminTherapistAppointments';
-import { TreatmentManagement } from './components/AfterLogin/Treatment/Therapist';
 import CreateTreatmentPlanPage from './components/AfterLogin/Treatment/Therapist/CreateTreatmentPlanPage';
 import TherapistTreatmentCenter from './components/AfterLogin/Treatment/Therapist/TherapistTreatmentCenter';
 import { TreatmentAdminCenter, TreatmentList } from './components/AfterLogin/Treatment/Admin';

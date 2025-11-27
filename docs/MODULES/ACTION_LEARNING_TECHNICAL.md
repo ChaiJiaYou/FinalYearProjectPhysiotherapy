@@ -22,7 +22,7 @@
 │                                                                   │
 │  Video Input (演示视频 3-5 次动作)                                │
 │       ↓                                                           │
-│  YOLOv8 Pose Detection (提取 17 个关键点)                         │
+│  YOLOv8-pose Detection (提取 17 个关键点)                        │
 │       ↓                                                           │
 │  Adaptive Normalization (自适应归一化)                            │
 │       ↓                                                           │
@@ -44,7 +44,7 @@
 │                                                                   │
 │  Live Camera Frame (实时摄像头帧)                                 │
 │       ↓                                                           │
-│  YOLOv8 Pose Detection                                           │
+│  YOLOv8-pose Detection                                           │
 │       ↓                                                           │
 │  Adaptive Normalization (粘性根点/尺度)                           │
 │       ↓                                                           │
@@ -69,7 +69,20 @@
 
 **输入：** 演示视频（3-5 次完整动作，30 FPS，1920×1080）
 
-**处理：** 使用 YOLOv8-pose 模型逐帧检测
+**处理：** 使用 **YOLOv8-pose** 模型（`yolov8n-pose.pt`）逐帧检测
+
+**模型说明：**
+- **模型类型**：**YOLOv8-pose**（专门用于姿态估计，不是普通的目标检测 YOLOv8）
+- **模型加载策略**：
+  1. 优先加载自定义训练的 pose 模型（路径：`C:\Workspace\Jupyter\FinalYearProject\Notebooks\runs\pose\train\weights\best.pt`）
+  2. 如果自定义模型不存在，回退到 Ultralytics 官方预训练的 `yolov8n-pose.pt`（nano 版本，轻量级）
+- **为什么使用 YOLOv8-pose 而不是 YOLOv8**：
+  - YOLOv8：只能检测目标（人、物体等），输出边界框（bounding box）
+  - **YOLOv8-pose**：在目标检测基础上，额外输出人体关键点坐标，这正是动作识别所需的数据
+- **输出格式**：17 个 COCO 格式的关键点坐标 `[17, 2]`（x, y 像素坐标）
+- **检测参数**：
+  - 图像尺寸：`imgsz=224`
+  - 置信度阈值：`conf=0.5`
 
 **输出：** 17 个 COCO 关键点序列
 
@@ -1792,7 +1805,7 @@ motion_energy >= energy_p30  # 更宽松
 
 | 步骤 | 时间复杂度 | 数值示例 |
 |------|-----------|---------|
-| YOLO 检测 | O(N) | N=90 帧 ≈ 1 秒 |
+| YOLOv8-pose 检测 | O(N) | N=90 帧 ≈ 1 秒 |
 | 归一化 | O(N × K) | K=17 点 ≈ 10 ms |
 | 特征提取 | O(N × F) | F=64 维 ≈ 20 ms |
 | 自动分段 | O(N × F) | ≈ 50 ms |
@@ -1804,7 +1817,7 @@ motion_energy >= energy_p30  # 更宽松
 
 | 步骤 | 时间复杂度 | 数值示例 |
 |------|-----------|---------|
-| YOLO 检测 | O(1) | ≈ 30 ms |
+| YOLOv8-pose 检测 | O(1) | ≈ 30 ms |
 | 归一化 | O(K) | ≈ 0.1 ms |
 | 特征提取 | O(F) | ≈ 0.2 ms |
 | DTW (W × M) | O(W × M × T × B × F) | W=3, M=4, T=40, B=6 ≈ 50 ms |
@@ -1893,7 +1906,7 @@ motion_energy >= energy_p30  # 更宽松
 - ⚠️ 极快速度变化（需要更多窗口）
 - ⚠️ 多人同时（需要人物跟踪）
 - ⚠️ 极相似动作（需要更多特征）
-- ⚠️ 复杂背景（YOLO 可能失败）
+- ⚠️ 复杂背景（YOLOv8-pose 可能失败）
 
 ---
 
@@ -1937,7 +1950,8 @@ energy_threshold = 0.3         # 能量阈值（归一化）
 smoothing_window = 5           # 平滑窗口（帧）
 
 # 模板构建
-target_length = median([seg_lengths])  # 目标长度（自动）
+target_length = median([seg_lengths])  # 目标长度（自动，取所有片段长度的中位数）
+median_len = target_length              # 用于后续参数计算
 
 # 阈值估计 (OPTIMIZED)
 thr_in_ratio = 0.75           # 进入阈值倍数
@@ -1948,31 +1962,309 @@ thr_out_ratio = 1.35          # 退出阈值倍数
 
 ```python
 # DTW 参数
-window_size = 60              # 缓冲区大小（帧）
-windows = [20, 40, 56]        # 多窗口尺寸（帧）
+window_size = max(windows)     # 缓冲区大小（帧），使用最大窗口尺寸
+windows = [                    # 多窗口尺寸（帧，动态计算）
+    max(10, min(32, 0.3 * median_len)),  # 小窗口：30% of median_len
+    max(16, min(48, 0.5 * median_len)),  # 中窗口：50% of median_len
+    max(20, min(56, 0.7 * median_len))   # 大窗口：70% of median_len
+]
+# 示例：median_len=40 → windows=[12, 20, 28]
+# 示例：median_len=60 → windows=[18, 30, 42]
 band_ratio = 0.15             # Sakoe-Chiba 带宽比例
 smoothing_alpha = 0.12        # EMA 平滑系数
 
 # 状态机参数 (OPTIMIZED)
-min_frames_in = 2-10          # 进入最小帧数（自动，0.10 × median_len）
-min_frames_out = 1-6          # 退出最小帧数（自动，0.05 × median_len）
-cooldown_after_count = 15-20  # 冷却期（自动，0.40 × median_len）
-out_rearm_frames = 15-20      # 重新装填期（自动，0.40 × median_len）
+min_frames_in = max(2, min(10, round(0.10 * median_len)))    # 进入最小帧数
+min_frames_out = max(1, min(6, round(0.05 * median_len)))   # 退出最小帧数
+cooldown_after_count = max(15, min(20, round(0.40 * median_len)))  # 冷却期
+out_rearm_frames = max(15, min(20, round(0.40 * median_len)))       # 重新装填期
 
 # 能量参数 (OPTIMIZED)
-energy_p30 = 0.2              # 低能量阈值
-energy_p50 = 0.5              # 中位能量阈值（NEW）
-energy_p70 = 1.0              # 高能量阈值
+energy_p30 = 0.2              # 低能量阈值（30百分位）
+energy_p50 = 0.5              # 中位能量阈值（50百分位，用于进入门控）
+energy_p70 = 1.0              # 高能量阈值（70百分位，用于重新装填）
 
 # Z-score 参数
-roll_maxlen = max(60, median_len)  # 滚动窗口
-z_threshold = 1.9             # 快速退出阈值
+roll_maxlen = max(60, median_len)  # 滚动窗口大小
+z_threshold = 1.9             # 快速退出阈值（Z-score > 1.9 时快速退出）
 ```
 
 ---
 
-**文档版本：** v2.0  
-**最后更新：** 2025-10-08  
+## 🔌 第六部分：API 接口文档
+
+### 21. Action Learning API 端点
+
+#### 21.1 动作管理
+
+**创建新动作**
+```
+POST /api/actions/create/
+Content-Type: application/json
+
+Request Body:
+{
+  "name": "Arm Raise",
+  "description": "Standard arm raise action",
+  "created_by": 1  // optional
+}
+
+Response:
+{
+  "id": 42,
+  "name": "Arm Raise",
+  "description": "Standard arm raise action",
+  "mode": "dtw",
+  "created_at": "2025-11-26T10:00:00Z"
+}
+```
+
+**列出所有动作**
+```
+GET /api/actions/
+
+Response:
+{
+  "actions": [
+    {
+      "id": 42,
+      "name": "Arm Raise",
+      "description": "Standard arm raise action",
+      "mode": "dtw",
+      "template_count": 4,
+      "sample_count": 1,
+      "created_at": "2025-11-26T10:00:00Z"
+    }
+  ]
+}
+```
+
+**获取动作详情**
+```
+GET /api/actions/<action_id>/
+
+Response:
+{
+  "action": {
+    "id": 42,
+    "name": "Arm Raise",
+    "description": "Standard arm raise action",
+    "mode": "dtw",
+    "params": {...},
+    "created_at": "2025-11-26T10:00:00Z"
+  },
+  "templates": [...],
+  "samples": [...]
+}
+```
+
+**更新动作（名称和描述）**
+```
+PATCH /api/actions/<action_id>/
+Content-Type: application/json
+
+Request Body:
+{
+  "name": "Updated Name",  // optional
+  "description": "Updated description"  // optional
+}
+
+Response:
+{
+  "id": 42,
+  "name": "Updated Name",
+  "description": "Updated description",
+  "mode": "dtw",
+  "message": "Action updated successfully"
+}
+```
+
+**删除动作**
+```
+DELETE /api/actions/<action_id>/delete/
+
+Response:
+{
+  "message": "Action deleted successfully",
+  "details": {
+    "templates_deleted": 4,
+    "samples_deleted": 1,
+    "videos_deleted": 1,
+    "exercises_unlinked": 2
+  }
+}
+```
+
+#### 21.2 训练流程
+
+**上传演示视频/关键点**
+```
+POST /api/actions/<action_id>/record/
+Content-Type: multipart/form-data
+
+Form Data:
+- video: <video_file>  // 视频文件
+- fps: 30  // 帧率（可选，默认30）
+// 或者
+- keypoints: <json_string>  // 直接上传关键点数据
+
+Response:
+{
+  "sample_id": 15,
+  "video_saved": true,
+  "video_path": "/media/action_videos/action_42_1234567890.mp4"
+}
+```
+
+**完成训练（生成模板）**
+```
+POST /api/actions/<action_id>/finalize/
+
+Response:
+{
+  "success": true,
+  "action_id": 42,
+  "templates_count": 4,
+  "thresholds": {
+    "thr_in": 0.75,
+    "thr_out": 1.35,
+    "median": 1.0,
+    "iqr": 0.3
+  },
+  "frames_processed": 90,
+  "median_len": 40,
+  "windows": [20, 40, 56],
+  "energy_stats": {
+    "p30": 0.2,
+    "p50": 0.5,
+    "p70": 1.0
+  },
+  "feature_weights": [...]
+}
+```
+
+#### 21.3 实时推理
+
+**设置推理环境**
+```
+POST /api/actions/<action_id>/setup/
+
+Response:
+{
+  "success": true,
+  "action_id": 42,
+  "templates_count": 4,
+  "thresholds": {
+    "thr_in": 0.75,
+    "thr_out": 1.35
+  }
+}
+```
+
+**实时推理（流式）**
+```
+POST /api/infer/stream/
+Content-Type: multipart/form-data
+
+Form Data:
+- frame: <image_file>  // 摄像头帧图像
+- thr_in: 0.75  // 可选：动态调整进入阈值
+- thr_out: 1.35  // 可选：动态调整退出阈值
+
+// 或者 JSON 格式
+Content-Type: application/json
+
+{
+  "features": [[...], ...],  // 64维特征向量数组
+  "update_thresholds": {  // 可选
+    "thr_in": 0.75,
+    "thr_out": 1.35
+  }
+}
+
+Response:
+{
+  "state": "IN",
+  "distance": 0.65,
+  "smoothed_distance": 0.68,
+  "reps": 3,
+  "motion_energy": 0.8,
+  "z_score": -1.2,
+  "debug_info": {...}
+}
+```
+
+**获取推理状态**
+```
+GET /api/infer/status/
+
+Response:
+{
+  "active": true,
+  "action_id": 42,
+  "state": "IN",
+  "reps": 3,
+  "distance": 0.65
+}
+```
+
+**重置推理状态**
+```
+POST /api/infer/reset/
+
+Response:
+{
+  "success": true,
+  "message": "Recognizer reset"
+}
+```
+
+#### 21.4 Legacy 模式支持
+
+**获取 Legacy 模式状态**
+```
+GET /api/legacy/mode-status/
+
+Response:
+{
+  "legacy_enabled": false
+}
+```
+
+**Legacy 姿态检测**
+```
+POST /api/legacy/detect-pose/
+Content-Type: multipart/form-data
+
+Form Data:
+- image: <image_file>
+
+Response:
+{
+  "keypoints": [...],
+  "bbox": {...}
+}
+```
+
+### 22. 错误处理
+
+所有 API 端点遵循统一的错误响应格式：
+
+```json
+{
+  "error": "Error message description"
+}
+```
+
+**常见错误码：**
+- `400`: 请求参数错误
+- `404`: 资源未找到
+- `500`: 服务器内部错误
+
+---
+
+**文档版本：** v2.1  
+**最后更新：** 2025-11-26  
 **作者：** AI Assistant  
-**状态：** ✅ 已完成阶段 1 优化
+**状态：** ✅ 已完成阶段 1 优化，包含 API 文档更新
 

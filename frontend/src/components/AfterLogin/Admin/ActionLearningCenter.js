@@ -3,13 +3,10 @@ import {
   Box,
   Typography,
   Paper,
-  Container,
-  Avatar,
   Grid,
   Card,
   CardContent,
   Button,
-  Fab,
   IconButton,
   Dialog,
   DialogTitle,
@@ -19,18 +16,19 @@ import {
   Chip,
   Tooltip,
   CardActions,
+  TextField,
 } from "@mui/material";
 import {
-  FitnessCenter as ExerciseIcon,
   Add as AddIcon,
   SmartToy as SmartToyIcon,
   VideoLibrary as VideoIcon,
-  Analytics as AnalyticsIcon,
   Delete as DeleteIcon,
   PlayArrow as PlayIcon,
   PlayCircleOutline as PlayCircleOutlineIcon,
   VideocamOff as VideocamOffIcon,
   Close as CloseIcon,
+  Refresh as RefreshIcon,
+  Edit as EditIcon,
 } from "@mui/icons-material";
 import { toast } from "react-toastify";
 
@@ -50,6 +48,12 @@ const ActionLearningCenter = () => {
   const [showDemoVideo, setShowDemoVideo] = useState(false);
   const [demoVideoUrl, setDemoVideoUrl] = useState(null);
   const [demoVideoLoading, setDemoVideoLoading] = useState(false);
+  
+  // Edit description states
+  const [editDialogOpen, setEditDialogOpen] = useState(false);
+  const [actionToEdit, setActionToEdit] = useState(null);
+  const [editDescription, setEditDescription] = useState('');
+  const [updating, setUpdating] = useState(false);
 
   // 获取所有动作列表
   const fetchActions = async () => {
@@ -123,6 +127,47 @@ const ActionLearningCenter = () => {
     }
   };
 
+  // Open edit description dialog
+  const handleEditDescription = (action) => {
+    setActionToEdit(action);
+    setEditDescription(action.description || '');
+    setEditDialogOpen(true);
+  };
+
+  // Update action description
+  const handleUpdateDescription = async () => {
+    if (!actionToEdit) return;
+
+    setUpdating(true);
+    try {
+      const response = await fetch(`http://127.0.0.1:8000/api/actions/${actionToEdit.id}/`, {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          description: editDescription
+        })
+      });
+
+      if (response.ok) {
+        toast.success('Action description updated successfully!');
+        setEditDialogOpen(false);
+        setActionToEdit(null);
+        setEditDescription('');
+        fetchActions(); // Refresh the list
+      } else {
+        const errorData = await response.json();
+        toast.error(errorData.error || 'Failed to update description');
+      }
+    } catch (error) {
+      console.error('Error updating description:', error);
+      toast.error('Something went wrong while updating description');
+    } finally {
+      setUpdating(false);
+    }
+  };
+
   // View demo video function
   const viewDemoVideo = async (actionId) => {
     setDemoVideoLoading(true);
@@ -166,117 +211,198 @@ const ActionLearningCenter = () => {
   };
 
   return (
-    <Container maxWidth="xl" sx={{ py: 4 }}>
-      {/* Header */}
-      <Box sx={{ mb: 4 }}>
-        <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, mb: 2 }}>
-          <Avatar sx={{ bgcolor: 'primary.main', width: 56, height: 56 }}>
-            <ExerciseIcon fontSize="large" />
-          </Avatar>
+    <Box sx={{ bgcolor: '#f8fafc', minHeight: '100vh', p: { xs: 2, md: 4 } }}>
+      <Box sx={{ maxWidth: 'xl', mx: 'auto' }}>
+        {/* 页面头部 - 遵循User Management设计系统 */}
+        <Box display="flex" justifyContent="space-between" alignItems="center" mb={4}>
           <Box>
-            <Typography variant="h3" sx={{ fontWeight: 'bold', color: 'primary.main' }}>
+            <Typography variant="h4" gutterBottom sx={{ color: '#000000', fontWeight: 600 }}>
               Action Learning
             </Typography>
-            <Typography variant="h6" color="text.secondary">
-              AI-powered action recognition and learning system
-            </Typography>
+          </Box>
+          <Box display="flex" gap={2}>
+            <Button
+              variant="outlined"
+              startIcon={<RefreshIcon />}
+              onClick={fetchActions}
+              sx={{
+                borderRadius: 2,
+                textTransform: 'uppercase',
+                fontWeight: 600,
+                px: 3,
+                borderColor: '#3b82f6',
+                color: '#3b82f6',
+                '&:hover': {
+                  borderColor: '#2563eb',
+                  bgcolor: 'rgba(59, 130, 246, 0.04)',
+                }
+              }}
+            >
+              Refresh
+            </Button>
+            <Button
+              variant="contained"
+              startIcon={<AddIcon />}
+              onClick={() => setShowNewActionWizard(true)}
+              sx={{
+                borderRadius: 2,
+                textTransform: 'uppercase',
+                fontWeight: 600,
+                px: 3,
+                bgcolor: '#3b82f6',
+                '&:hover': {
+                  bgcolor: '#2563eb',
+                }
+              }}
+            >
+              Create Action
+            </Button>
           </Box>
         </Box>
-      </Box>
 
-      {/* Quick Actions */}
-      <Grid container spacing={3} sx={{ mb: 4 }}>
-        <Grid item xs={12} md={4}>
-          <Card 
-            sx={{ 
-              cursor: 'pointer',
-              transition: 'all 0.2s',
-              '&:hover': {
-                transform: 'translateY(-4px)',
-                boxShadow: 4
-              }
-            }}
-            onClick={() => setShowNewActionWizard(true)}
-          >
-            <CardContent sx={{ textAlign: 'center', py: 4 }}>
-              <AddIcon sx={{ fontSize: 48, color: 'primary.main', mb: 2 }} />
-              <Typography variant="h6" fontWeight="600" gutterBottom>
-                Create New Action
-              </Typography>
-              <Typography variant="body2" color="text.secondary">
-                Record demo video and create AI-powered action recognition
-              </Typography>
-            </CardContent>
-          </Card>
+        {/* Quick Actions */}
+        <Grid container spacing={3} sx={{ mb: 4 }}>
+          <Grid item xs={12} md={6}>
+            <Card 
+              sx={{ 
+                cursor: 'pointer',
+                transition: 'all 0.3s ease',
+                height: '100%',
+                border: '1px solid',
+                borderColor: 'grey.200',
+                '&:hover': {
+                  transform: 'translateY(-8px)',
+                  boxShadow: '0 12px 24px rgba(0,0,0,0.15)',
+                  borderColor: '#3b82f6',
+                }
+              }}
+              onClick={() => setShowNewActionWizard(true)}
+            >
+              <CardContent sx={{ textAlign: 'center', py: 5, px: 3 }}>
+                <Box
+                  sx={{
+                    width: 80,
+                    height: 80,
+                    borderRadius: '50%',
+                    bgcolor: 'rgba(59, 130, 246, 0.1)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    mx: 'auto',
+                    mb: 3,
+                  }}
+                >
+                  <AddIcon sx={{ fontSize: 48, color: '#3b82f6' }} />
+                </Box>
+                <Typography variant="h5" fontWeight="600" gutterBottom sx={{ color: '#1e293b' }}>
+                  Create New Action
+                </Typography>
+                <Typography variant="body1" color="text.secondary" sx={{ mt: 1 }}>
+                  Record demo video and create AI-powered action recognition
+                </Typography>
+              </CardContent>
+            </Card>
+          </Grid>
+
+          <Grid item xs={12} md={6}>
+            <Card 
+              sx={{ 
+                cursor: 'pointer',
+                transition: 'all 0.3s ease',
+                height: '100%',
+                border: '1px solid',
+                borderColor: 'grey.200',
+                '&:hover': {
+                  transform: 'translateY(-8px)',
+                  boxShadow: '0 12px 24px rgba(0,0,0,0.15)',
+                  borderColor: '#8b5cf6',
+                }
+              }}
+              onClick={() => setShowRealTimeTest(true)}
+            >
+              <CardContent sx={{ textAlign: 'center', py: 5, px: 3 }}>
+                <Box
+                  sx={{
+                    width: 80,
+                    height: 80,
+                    borderRadius: '50%',
+                    bgcolor: 'rgba(139, 92, 246, 0.1)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    mx: 'auto',
+                    mb: 3,
+                  }}
+                >
+                  <SmartToyIcon sx={{ fontSize: 48, color: '#8b5cf6' }} />
+                </Box>
+                <Typography variant="h5" fontWeight="600" gutterBottom sx={{ color: '#1e293b' }}>
+                  Real-time Testing
+                </Typography>
+                <Typography variant="body1" color="text.secondary" sx={{ mt: 1 }}>
+                  Test action recognition and counting in real-time
+                </Typography>
+              </CardContent>
+            </Card>
+          </Grid>
         </Grid>
 
-        <Grid item xs={12} md={4}>
-          <Card 
-            sx={{ 
-              cursor: 'pointer',
-              transition: 'all 0.2s',
-              '&:hover': {
-                transform: 'translateY(-4px)',
-                boxShadow: 4
-              }
-            }}
-            onClick={() => setShowRealTimeTest(true)}
-          >
-            <CardContent sx={{ textAlign: 'center', py: 4 }}>
-              <SmartToyIcon sx={{ fontSize: 48, color: 'secondary.main', mb: 2 }} />
-              <Typography variant="h6" fontWeight="600" gutterBottom>
-                Real-time Testing
-              </Typography>
-              <Typography variant="body2" color="text.secondary">
-                Test action recognition and counting in real-time
-              </Typography>
-            </CardContent>
-          </Card>
-        </Grid>
-
-        <Grid item xs={12} md={4}>
-          <Card>
-            <CardContent sx={{ textAlign: 'center', py: 4 }}>
-              <AnalyticsIcon sx={{ fontSize: 48, color: 'info.main', mb: 2 }} />
-              <Typography variant="h6" fontWeight="600" gutterBottom>
-                Analytics
-              </Typography>
-              <Typography variant="body2" color="text.secondary">
-                View usage statistics and performance metrics
-              </Typography>
-            </CardContent>
-          </Card>
-        </Grid>
-      </Grid>
-
-      {/* Actions List */}
-      <Paper elevation={3} sx={{ borderRadius: 3, p: 3 }}>
-        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
-          <Typography variant="h5" fontWeight="600">
-            Existing Actions ({actions.length})
-          </Typography>
-          <Button
-            variant="contained"
-            startIcon={<AddIcon />}
-            onClick={() => setShowNewActionWizard(true)}
-          >
-            Create Action
-          </Button>
-        </Box>
+        {/* Actions List */}
+        <Paper 
+          elevation={1} 
+          sx={{ 
+            borderRadius: 2, 
+            overflow: 'hidden',
+            border: '1px solid',
+            borderColor: 'grey.200',
+            boxShadow: '0 1px 3px rgba(0,0,0,0.1)',
+            p: 3 
+          }}
+        >
+          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
+            <Typography variant="h6" sx={{ fontWeight: 600 }}>
+              Existing Actions ({actions.length})
+            </Typography>
+          </Box>
 
         {actions.length === 0 ? (
-          <Box sx={{ textAlign: 'center', py: 8 }}>
-            <VideoIcon sx={{ fontSize: 64, color: 'text.secondary', mb: 2 }} />
-            <Typography variant="h6" color="text.secondary" gutterBottom>
+          <Box sx={{ textAlign: 'center', py: 10 }}>
+            <Box
+              sx={{
+                width: 100,
+                height: 100,
+                borderRadius: '50%',
+                bgcolor: 'rgba(59, 130, 246, 0.1)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                mx: 'auto',
+                mb: 3,
+              }}
+            >
+              <VideoIcon sx={{ fontSize: 56, color: '#3b82f6' }} />
+            </Box>
+            <Typography variant="h5" fontWeight="600" sx={{ color: '#1e293b', mb: 1 }}>
               No actions created yet
             </Typography>
-            <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
+            <Typography variant="body1" color="text.secondary" sx={{ mb: 4, maxWidth: 400, mx: 'auto' }}>
               Start by creating your first AI-powered action recognition
             </Typography>
             <Button
               variant="contained"
               startIcon={<AddIcon />}
               onClick={() => setShowNewActionWizard(true)}
+              sx={{
+                borderRadius: 2,
+                textTransform: 'uppercase',
+                fontWeight: 600,
+                px: 4,
+                py: 1.5,
+                bgcolor: '#3b82f6',
+                '&:hover': {
+                  bgcolor: '#2563eb',
+                }
+              }}
             >
               Create First Action
             </Button>
@@ -291,10 +417,13 @@ const ActionLearningCenter = () => {
                     height: '100%',
                     display: 'flex',
                     flexDirection: 'column',
-                    transition: 'all 0.2s',
+                    border: '1px solid',
+                    borderColor: 'grey.200',
+                    transition: 'all 0.3s ease',
                     '&:hover': {
-                      boxShadow: 3,
-                      transform: 'translateY(-2px)'
+                      boxShadow: '0 8px 16px rgba(0,0,0,0.1)',
+                      transform: 'translateY(-4px)',
+                      borderColor: '#3b82f6',
                     }
                   }}
                 >
@@ -343,6 +472,15 @@ const ActionLearningCenter = () => {
                   </CardContent>
                   
                   <CardActions sx={{ justifyContent: 'flex-end', px: 2, pb: 2 }}>
+                    <Tooltip title="Edit description">
+                      <IconButton 
+                        size="small" 
+                        color="default"
+                        onClick={() => handleEditDescription(action)}
+                      >
+                        <EditIcon />
+                      </IconButton>
+                    </Tooltip>
                     <Tooltip title="View demo video">
                       <IconButton 
                         size="small" 
@@ -378,15 +516,6 @@ const ActionLearningCenter = () => {
         )}
       </Paper>
 
-      {/* Floating Action Button */}
-      <Fab 
-        color="primary" 
-        aria-label="add" 
-        sx={{ position: 'fixed', bottom: 16, right: 16 }}
-        onClick={() => setShowNewActionWizard(true)}
-      >
-        <AddIcon />
-      </Fab>
 
       {/* New Action Wizard */}
       <NewActionWizard
@@ -565,7 +694,74 @@ const ActionLearningCenter = () => {
           )}
         </DialogContent>
       </Dialog>
-    </Container>
+
+      {/* Edit Description Dialog */}
+      <Dialog 
+        open={editDialogOpen} 
+        onClose={() => !updating && setEditDialogOpen(false)} 
+        maxWidth="sm" 
+        fullWidth
+      >
+        <DialogTitle>
+          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <Typography variant="h6">Edit Action Description</Typography>
+            <IconButton 
+              onClick={() => setEditDialogOpen(false)}
+              disabled={updating}
+              size="small"
+            >
+              <CloseIcon />
+            </IconButton>
+          </Box>
+        </DialogTitle>
+        <DialogContent>
+          {actionToEdit && (
+            <Box sx={{ mt: 1 }}>
+              <Typography variant="body2" color="text.secondary" gutterBottom>
+                Action: <strong>{actionToEdit.name}</strong>
+              </Typography>
+              <TextField
+                fullWidth
+                multiline
+                rows={4}
+                label="Description"
+                value={editDescription}
+                onChange={(e) => setEditDescription(e.target.value)}
+                placeholder="Enter action description..."
+                sx={{ mt: 2 }}
+                disabled={updating}
+              />
+            </Box>
+          )}
+        </DialogContent>
+        <DialogActions sx={{ px: 3, pb: 2 }}>
+          <Button 
+            onClick={() => {
+              setEditDialogOpen(false);
+              setActionToEdit(null);
+              setEditDescription('');
+            }}
+            disabled={updating}
+          >
+            Cancel
+          </Button>
+          <Button 
+            onClick={handleUpdateDescription} 
+            variant="contained"
+            disabled={updating}
+            sx={{
+              bgcolor: '#3b82f6',
+              '&:hover': {
+                bgcolor: '#2563eb',
+              }
+            }}
+          >
+            {updating ? 'Updating...' : 'Update'}
+          </Button>
+        </DialogActions>
+      </Dialog>
+      </Box>
+    </Box>
   );
 };
 

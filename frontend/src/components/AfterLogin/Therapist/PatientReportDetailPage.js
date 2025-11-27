@@ -564,7 +564,6 @@ const PatientReportDetailPage = () => {
                 exercise_name: ex.exercise_name,
                 reps_per_set: ex.reps_per_set,
                 sets: ex.sets,
-                duration_per_set: ex.duration_per_set,
                 order_in_treatment: ex.order_in_treatment,
               }))
             : [];
@@ -928,11 +927,6 @@ const PatientReportDetailPage = () => {
                                         {exercise.sets && (
                                           <Typography variant="caption" color="text.secondary">
                                             Sets: {exercise.sets}
-                                          </Typography>
-                                        )}
-                                        {exercise.duration_per_set && (
-                                          <Typography variant="caption" color="text.secondary">
-                                            Duration: {exercise.duration_per_set}s
                                           </Typography>
                                         )}
                                       </Stack>

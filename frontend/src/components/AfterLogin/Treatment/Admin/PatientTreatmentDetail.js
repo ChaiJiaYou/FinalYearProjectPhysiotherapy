@@ -50,6 +50,10 @@ const PatientTreatmentDetail = () => {
   const theme = useTheme();
   const isSmallScreen = useMediaQuery(theme.breakpoints.down("md"));
 
+  // Get current logged in user ID and role
+  const currentUserId = localStorage.getItem('id') || localStorage.getItem('userId');
+  const currentUserRole = localStorage.getItem('userRole') || localStorage.getItem('role');
+
   const [patient, setPatient] = useState(null);
   const [treatments, setTreatments] = useState([]);
   const [appointments, setAppointments] = useState([]);
@@ -198,7 +202,7 @@ const PatientTreatmentDetail = () => {
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ status: 'inactive' }),
+        body: JSON.stringify({ is_active: false }),
       });
 
       if (response.ok) {
@@ -299,14 +303,9 @@ const PatientTreatmentDetail = () => {
           <IconButton onClick={handleBack} sx={{ mr: 1 }}>
             <ArrowBackIcon />
           </IconButton>
-          <Box>
-            <Typography variant="h4" gutterBottom sx={{ color: '#000000', fontWeight: 600 }}>
-              Patient Treatment Management
-            </Typography>
-            <Typography variant="body1" color="text.secondary">
-              Manage treatments for {patient?.username || 'Patient'}
-            </Typography>
-          </Box>
+          <Typography variant="h4" sx={{ color: '#000000', fontWeight: 600 }}>
+            Patient Treatment Management
+          </Typography>
         </Box>
         <Button
           variant="outlined"
@@ -417,12 +416,15 @@ const PatientTreatmentDetail = () => {
             const today = new Date();
             today.setHours(0, 0, 0, 0);
             
-            const currentActiveTreatment = treatments.find(treatment => {
-              if (treatment.status !== 'active') return false;
+            // Find current active treatment
+            // Case 1: Today is within start_date and end_date range
+            let currentActiveTreatment = treatments.find(treatment => {
+              if (!treatment.is_active) return false;
               
               const startDate = new Date(treatment.start_date);
               startDate.setHours(0, 0, 0, 0);
               
+              // If no end_date, treatment is ongoing (check if started)
               if (!treatment.end_date) {
                 return startDate <= today;
               }
@@ -432,41 +434,65 @@ const PatientTreatmentDetail = () => {
               
               return startDate <= today && today <= endDate;
             });
+            
+            // Case 2: If no treatment for today, find future treatment (start_date > today)
+            if (!currentActiveTreatment) {
+              currentActiveTreatment = treatments.find(treatment => {
+                if (!treatment.is_active) return false;
+                
+                const startDate = new Date(treatment.start_date);
+                startDate.setHours(0, 0, 0, 0);
+                
+                return startDate > today;
+              });
+            }
 
             if (currentActiveTreatment) {
-              return (
-                <Box sx={{ display: 'flex', gap: 2 }}>
-                  <Button
-                    variant="contained"
-                    startIcon={<EditIcon />}
-                    onClick={() => handleEditTreatment(currentActiveTreatment.treatment_id)}
-                    sx={{
-                      bgcolor: 'warning.main',
-                      '&:hover': {
-                        bgcolor: 'warning.dark',
-                      },
-                    }}
-                  >
-                    Edit Treatment
-                  </Button>
-                  <Button
-                    variant="outlined"
-                    startIcon={<DeleteIcon />}
-                    onClick={() => handleRemoveTreatment(currentActiveTreatment.treatment_id)}
-                    sx={{
-                      borderColor: 'error.main',
-                      color: 'error.main',
-                      '&:hover': {
-                        borderColor: 'error.dark',
-                        backgroundColor: 'error.light',
-                        color: 'error.dark',
-                      },
-                    }}
-                  >
-                    Remove
-                  </Button>
-                </Box>
-              );
+              // Admin can always edit and remove, therapist can only if they are the PIC
+              const isAdmin = currentUserRole === 'admin';
+              const isCurrentUserTherapist = currentActiveTreatment.therapist_id && 
+                                             currentUserId && 
+                                             String(currentActiveTreatment.therapist_id) === String(currentUserId);
+              
+              // Show Edit and Remove buttons if user is admin OR if user is the therapist (PIC)
+              if (isAdmin || isCurrentUserTherapist) {
+                return (
+                  <Box sx={{ display: 'flex', gap: 2 }}>
+                    <Button
+                      variant="contained"
+                      startIcon={<EditIcon />}
+                      onClick={() => handleEditTreatment(currentActiveTreatment.treatment_id)}
+                      sx={{
+                        bgcolor: 'warning.main',
+                        '&:hover': {
+                          bgcolor: 'warning.dark',
+                        },
+                      }}
+                    >
+                      Edit Treatment
+                    </Button>
+                    <Button
+                      variant="outlined"
+                      startIcon={<DeleteIcon />}
+                      onClick={() => handleRemoveTreatment(currentActiveTreatment.treatment_id)}
+                      sx={{
+                        borderColor: 'error.main',
+                        color: 'error.main',
+                        '&:hover': {
+                          borderColor: 'error.dark',
+                          backgroundColor: 'error.light',
+                          color: 'error.dark',
+                        },
+                      }}
+                    >
+                      Remove
+                    </Button>
+                  </Box>
+                );
+              } else {
+                // If current user is not admin and not the therapist, don't show any buttons
+                return null;
+              }
             } else {
               return (
                 <Button
@@ -491,14 +517,15 @@ const PatientTreatmentDetail = () => {
           const today = new Date();
           today.setHours(0, 0, 0, 0); // Start of today
           
-          // Find current active treatment (today is within start_date and end_date range)
-          const currentActiveTreatment = treatments.find(treatment => {
-            if (treatment.status !== 'active') return false;
+          // Find current active treatment
+          // Case 1: Today is within start_date and end_date range
+          let currentActiveTreatment = treatments.find(treatment => {
+            if (!treatment.is_active) return false;
             
             const startDate = new Date(treatment.start_date);
             startDate.setHours(0, 0, 0, 0);
             
-            // If no end_date, treatment is ongoing
+            // If no end_date, treatment is ongoing (check if started)
             if (!treatment.end_date) {
               return startDate <= today;
             }
@@ -508,6 +535,22 @@ const PatientTreatmentDetail = () => {
             
             return startDate <= today && today <= endDate;
           });
+          
+          // Case 2: If no treatment for today, find future treatment (start_date > today)
+          let isFutureTreatment = false;
+          if (!currentActiveTreatment) {
+            currentActiveTreatment = treatments.find(treatment => {
+              if (!treatment.is_active) return false;
+              
+              const startDate = new Date(treatment.start_date);
+              startDate.setHours(0, 0, 0, 0);
+              
+              return startDate > today;
+            });
+            if (currentActiveTreatment) {
+              isFutureTreatment = true;
+            }
+          }
 
           if (!currentActiveTreatment) {
             return (
@@ -525,8 +568,21 @@ const PatientTreatmentDetail = () => {
 
           return (
             <Box>
-              <Typography variant="h6" fontWeight="bold" gutterBottom>
-                {currentActiveTreatment.name}
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
+                <Typography variant="h6" fontWeight="bold">
+                  {currentActiveTreatment.name}
+                </Typography>
+                {isFutureTreatment && (
+                  <Chip 
+                    label="Upcoming" 
+                    size="small" 
+                    color="info" 
+                    variant="filled"
+                  />
+                )}
+              </Box>
+              <Typography variant="subtitle1" fontWeight="bold" gutterBottom sx={{ mt: 1 }}>
+                Therapist: {currentActiveTreatment.therapist_name || 'Unknown'}
               </Typography>
               <Typography variant="body2" color="text.secondary" gutterBottom>
                 Start Date: {new Date(currentActiveTreatment.start_date).toLocaleDateString('en-GB')}
@@ -541,11 +597,11 @@ const PatientTreatmentDetail = () => {
               {/* Display Exercises List */}
               <Box sx={{ mt: 2 }}>
                 <Typography variant="subtitle2" fontWeight="bold" gutterBottom>
-                  Exercises ({currentActiveTreatment.exercise_count || 0})
+                  Exercises ({currentActiveTreatment.exercises ? currentActiveTreatment.exercises.filter(ex => ex.is_active !== false).length : 0})
                 </Typography>
-                {currentActiveTreatment.exercises && currentActiveTreatment.exercises.length > 0 ? (
+                {currentActiveTreatment.exercises && currentActiveTreatment.exercises.filter(ex => ex.is_active !== false).length > 0 ? (
                   <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
-                    {currentActiveTreatment.exercises.map((exercise, index) => (
+                    {currentActiveTreatment.exercises.filter(ex => ex.is_active !== false).map((exercise, index) => (
                       <Box 
                         key={index}
                         sx={{ 
@@ -562,7 +618,6 @@ const PatientTreatmentDetail = () => {
                         <Typography variant="caption" color="text.secondary">
                           {exercise.reps_per_set && `Reps: ${exercise.reps_per_set}`}
                           {exercise.sets && ` | Sets: ${exercise.sets}`}
-                          {exercise.duration_per_set && ` | Duration: ${exercise.duration_per_set}s`}
                         </Typography>
                         {exercise.notes && (
                           <Typography variant="caption" color="text.secondary" display="block">
@@ -620,29 +675,45 @@ const PatientTreatmentDetail = () => {
           console.log('- Today appointment:', todayAppointment);
           console.log('- Appointments array:', appointmentsArray);
           
+          // Find the treatment that would be shown in Current Active Plan
+          // Case 1: Today is within start_date and end_date range
+          let currentActiveTreatment = treatments.find(treatment => {
+            if (!treatment.is_active) return false;
+            
+            const startDate = new Date(treatment.start_date);
+            startDate.setHours(0, 0, 0, 0);
+            
+            // If no end_date, treatment is ongoing (check if started)
+            if (!treatment.end_date) {
+              return startDate <= currentDate;
+            }
+            
+            const endDate = new Date(treatment.end_date);
+            endDate.setHours(0, 0, 0, 0);
+            
+            return startDate <= currentDate && currentDate <= endDate;
+          });
+          
+          // Case 2: If no treatment for today, find future treatment (start_date > currentDate)
+          if (!currentActiveTreatment) {
+            currentActiveTreatment = treatments.find(treatment => {
+              if (!treatment.is_active) return false;
+              
+              const startDate = new Date(treatment.start_date);
+              startDate.setHours(0, 0, 0, 0);
+              
+              return startDate > currentDate;
+            });
+          }
+          
           const historyTreatments = treatments.filter(treatment => {
-            const endDate = treatment.end_date ? new Date(treatment.end_date) : 
-                           treatment.estimated_end_date ? new Date(treatment.estimated_end_date) : null;
-            
-            // Exclude inactive treatments from history
-            if (treatment.status === 'inactive') {
+            // Exclude the treatment that is shown in Current Active Plan
+            if (currentActiveTreatment && treatment.treatment_id === currentActiveTreatment.treatment_id) {
               return false;
             }
             
-            // If there's an appointment today, exclude active treatments from history
-            if (todayAppointment && treatment.status === 'active' && 
-                (!endDate || endDate >= currentDate)) {
-              return false;
-            }
-            
-            // If no appointment today, show all treatments (active, completed, expired) except inactive
-            if (!todayAppointment) {
-              return treatment.status !== 'inactive';
-            }
-            
-            // If there's an appointment today, only show completed or expired treatments
-            return treatment.status === 'completed' || 
-                   (endDate && endDate < currentDate);
+            // Show all other treatments in history (completed, expired, inactive, or other active treatments)
+            return true;
           });
 
           console.log('- Filtered history treatments:', historyTreatments.length);
@@ -684,13 +755,25 @@ const PatientTreatmentDetail = () => {
                       sx={{ 
                         "&:hover": { 
                           bgcolor: "grey.50" 
-                        } 
+                        },
+                        opacity: treatment.is_active === false ? 0.7 : 1,
+                        bgcolor: treatment.is_active === false ? 'error.50' : 'transparent'
                       }}
                     >
                     <TableCell sx={{ py: 2 }}>
-                      <Typography variant="subtitle2" sx={{ fontWeight: "bold" }}>
-                        {treatment.name}
-                      </Typography>
+                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: treatment.goal_notes ? 0.5 : 0 }}>
+                        <Typography variant="subtitle2" sx={{ fontWeight: "bold" }}>
+                          {treatment.name}
+                        </Typography>
+                        {treatment.is_active === false && (
+                          <Chip 
+                            label="Deleted" 
+                            size="small" 
+                            color="error" 
+                            variant="filled"
+                          />
+                        )}
+                      </Box>
                       {treatment.goal_notes && (
                         <Typography variant="body2" color="text.secondary">
                           {treatment.goal_notes.length > 50 ? treatment.goal_notes.substring(0, 50) + '...' : treatment.goal_notes}

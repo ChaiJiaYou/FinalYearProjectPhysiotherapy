@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef, useMemo } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import {
   Box,
@@ -67,11 +67,11 @@ const CreateTreatmentPlanPage = () => {
   const [exerciseSearchTerm, setExerciseSearchTerm] = useState('');
   const [exerciseCategoryFilter, setExerciseCategoryFilter] = useState('');
   
-  // User role detection
-  const userRole = localStorage.getItem("role");
-  const currentUserId = localStorage.getItem("id");
-  const isAdmin = userRole === 'admin';
-  const isTherapist = userRole === 'therapist';
+  // User role detection - use useMemo to prevent unnecessary re-renders
+  const userRole = useMemo(() => localStorage.getItem("role"), []);
+  const currentUserId = useMemo(() => localStorage.getItem("id"), []);
+  const isAdmin = useMemo(() => userRole === 'admin', [userRole]);
+  const isTherapist = useMemo(() => userRole === 'therapist', [userRole]);
 
   // Form data - based on actual model fields
   const [treatmentName, setTreatmentName] = useState('');
@@ -81,8 +81,12 @@ const CreateTreatmentPlanPage = () => {
   const [selectedExercises, setSelectedExercises] = useState([]);
   const [animatingExercise, setAnimatingExercise] = useState(null);
   const [originalExerciseIds, setOriginalExerciseIds] = useState([]);
+  const [originalExercisesMap, setOriginalExercisesMap] = useState({}); // Map exercise_id to original exercise data
   const [therapists, setTherapists] = useState([]);
   const [selectedTherapist, setSelectedTherapist] = useState(isAdmin ? '' : currentUserId);
+  
+  // Use ref to track timeout for cleanup
+  const animationTimeoutRef = useRef(null);
   
   // Determine therapist_id to use
   const therapistId = isAdmin ? selectedTherapist : currentUserId;
@@ -102,8 +106,17 @@ const CreateTreatmentPlanPage = () => {
     } else {
       setIsEditMode(false);
       setOriginalExerciseIds([]);
+      setOriginalExercisesMap({});
       setSelectedExercises([]);
     }
+    
+    // Cleanup function
+    return () => {
+      // Clear any pending timeouts
+      if (animationTimeoutRef.current) {
+        clearTimeout(animationTimeoutRef.current);
+      }
+    };
   }, [treatmentId, isAdmin, isTherapist]);
 
   // Set default end date (start date + 2 weeks)
@@ -117,14 +130,7 @@ const CreateTreatmentPlanPage = () => {
   }, [startDate]);
 
   // Pre-select patient if patientId is provided in URL
-  useEffect(() => {
-    if (patientId && patients.length > 0) {
-      const patient = patients.find(p => p.id === patientId);
-      if (patient) {
-        setTreatmentName(`Treatment Plan for ${patient.username}`);
-      }
-    }
-  }, [patientId, patients]);
+  // Note: Treatment name is now manually entered by user
 
   const fetchPatients = async () => {
     try {
@@ -198,6 +204,11 @@ const CreateTreatmentPlanPage = () => {
       setEndDate(treatmentData.end_date || '');
       setGoalNotes(treatmentData.goal_notes || '');
       
+      // Pre-select therapist if admin (therapist cannot change their own assignment)
+      if (isAdmin && treatmentData.therapist_id) {
+        setSelectedTherapist(treatmentData.therapist_id);
+      }
+      
       // Fetch existing exercises for this treatment
       console.log('Fetching exercises for treatment:', treatmentId);
       const exercisesResponse = await fetch(`http://127.0.0.1:8000/api/treatment-exercises/${treatmentId}/`);
@@ -224,9 +235,21 @@ const CreateTreatmentPlanPage = () => {
           instructions: exercise.instructions || '',
           reps_per_set: exercise.reps_per_set || 10,
           sets: exercise.sets || 1,
-          duration_per_set: exercise.duration_per_set || 60,
           notes: exercise.notes || '',
         }));
+        
+        // Create a map of exercise_id to original exercise data for restoration
+        const exercisesMap = {};
+        transformedExercises.forEach(ex => {
+          exercisesMap[ex.exercise_id] = {
+            id: ex.id,
+            treatment_exercise_id: ex.treatment_exercise_id,
+            reps_per_set: ex.reps_per_set,
+            sets: ex.sets,
+            notes: ex.notes,
+          };
+        });
+        setOriginalExercisesMap(exercisesMap);
         
         setSelectedExercises(transformedExercises);
       } else {
@@ -256,7 +279,7 @@ const CreateTreatmentPlanPage = () => {
   const validateStep = (step) => {
     switch (step) {
       case 0:
-        if (!treatmentName || !startDate) {
+        if (!treatmentName || !startDate || !endDate) {
           toast.warn("Please fill in all required fields");
           return false;
         }
@@ -264,6 +287,44 @@ const CreateTreatmentPlanPage = () => {
           toast.warn("Please select a therapist");
           return false;
         }
+        
+        // Validate dates
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        
+        const start = new Date(startDate);
+        start.setHours(0, 0, 0, 0);
+        
+        const end = new Date(endDate);
+        end.setHours(0, 0, 0, 0);
+        
+        // Check if start_date is in the past (only for create mode, or if start_date was changed in edit mode)
+        if (isEditMode) {
+          // In edit mode, only validate if start_date was changed
+          const originalStartDate = existingTreatment?.start_date;
+          if (originalStartDate) {
+            const originalStart = new Date(originalStartDate);
+            originalStart.setHours(0, 0, 0, 0);
+            // Only validate if start_date was actually changed
+            if (start.getTime() !== originalStart.getTime() && start < today) {
+              toast.warn("Start date cannot be in the past");
+              return false;
+            }
+          }
+        } else {
+          // In create mode, start_date cannot be in the past
+          if (start < today) {
+            toast.warn("Start date cannot be in the past");
+            return false;
+          }
+        }
+        
+        // Check if end_date is after start_date
+        if (end <= start) {
+          toast.warn("End date must be after start date");
+          return false;
+        }
+        
         return true;
       case 1:
         if (selectedExercises.length === 0) {
@@ -282,10 +343,6 @@ const CreateTreatmentPlanPage = () => {
             toast.warn(`Please set number of sets for ${exercise.exercise_name}`);
             return false;
           }
-          if (!exercise.duration_per_set || exercise.duration_per_set <= 0) {
-            toast.warn(`Please set duration per set for ${exercise.exercise_name}`);
-            return false;
-          }
         }
         return true;
       default:
@@ -299,7 +356,23 @@ const CreateTreatmentPlanPage = () => {
       return;
     }
 
-    const newExercise = {
+    // Check if this exercise was previously in the treatment (for edit mode)
+    const originalExercise = originalExercisesMap[exercise.exercise_id];
+    
+    const newExercise = originalExercise ? {
+      // Restore original data if it exists
+      id: originalExercise.id,
+      treatment_exercise_id: originalExercise.treatment_exercise_id,
+      exercise_id: exercise.exercise_id,
+      exercise_name: exercise.name,
+      category: exercise.category,
+      difficulty: exercise.difficulty,
+      instructions: exercise.instructions,
+      reps_per_set: originalExercise.reps_per_set || 10,
+      sets: originalExercise.sets || 1,
+      notes: originalExercise.notes || '',
+    } : {
+      // New exercise
       id: `new_${Date.now()}`,
       treatment_exercise_id: null,
       exercise_id: exercise.exercise_id,
@@ -309,7 +382,6 @@ const CreateTreatmentPlanPage = () => {
       instructions: exercise.instructions,
       reps_per_set: 10,
       sets: 1,
-      duration_per_set: 60,
       notes: '',
     };
 
@@ -319,9 +391,15 @@ const CreateTreatmentPlanPage = () => {
     // Add exercise with animation
     setSelectedExercises([...selectedExercises, newExercise]);
     
+    // Clear any existing timeout
+    if (animationTimeoutRef.current) {
+      clearTimeout(animationTimeoutRef.current);
+    }
+    
     // Clear animation after animation completes
-    setTimeout(() => {
+    animationTimeoutRef.current = setTimeout(() => {
       setAnimatingExercise(null);
+      animationTimeoutRef.current = null;
     }, 600);
   };
 
@@ -351,7 +429,13 @@ const CreateTreatmentPlanPage = () => {
           start_date: startDate,
           end_date: endDate || null,
           goal_notes: goalNotes || null,
+          // created_by is not updated when editing
         };
+        
+        // Only allow admin to update therapist_id
+        if (isAdmin && selectedTherapist) {
+          treatmentData.therapist_id = selectedTherapist;
+        }
 
         const treatmentResponse = await fetch(`http://127.0.0.1:8000/api/treatments/${treatmentId}/`, {
           method: "PATCH",
@@ -369,13 +453,33 @@ const CreateTreatmentPlanPage = () => {
         const existingExercisesToUpdate = selectedExercises.filter((exercise) => !!exercise.treatment_exercise_id);
         const newExercisesToCreate = selectedExercises.filter((exercise) => !exercise.treatment_exercise_id);
 
-        // Update existing exercises
+        // FIRST: Handle removed exercises (delete before creating new ones to avoid unique constraint violation)
+        const currentExistingIds = existingExercisesToUpdate.map((exercise) => exercise.treatment_exercise_id);
+        const removedExerciseIds = originalExerciseIds.filter((id) => !currentExistingIds.includes(id));
+
+        for (const removedId of removedExerciseIds) {
+          // Use PATCH to soft delete (set is_active to False)
+          const deleteResponse = await fetch(`http://127.0.0.1:8000/api/update-treatment-exercise/${removedId}/`, {
+            method: "PATCH",
+            headers: {
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({ is_active: false }),
+          });
+
+          if (!deleteResponse.ok) {
+            const errorText = await deleteResponse.text();
+            console.error("Failed to deactivate treatment exercise:", removedId, errorText);
+            throw new Error("Failed to deactivate treatment exercise");
+          }
+        }
+
+        // SECOND: Update existing exercises
         for (let index = 0; index < existingExercisesToUpdate.length; index += 1) {
           const exercise = existingExercisesToUpdate[index];
           const exerciseData = {
             reps_per_set: exercise.reps_per_set,
             sets: exercise.sets,
-            duration_per_set: exercise.duration_per_set,
             notes: exercise.notes || null,
             order_in_treatment: index + 1,
             is_active: true,
@@ -396,7 +500,7 @@ const CreateTreatmentPlanPage = () => {
           }
         }
 
-        // Create newly added exercises (continue order after existing ones)
+        // THIRD: Create newly added exercises (continue order after existing ones)
         for (let i = 0; i < newExercisesToCreate.length; i += 1) {
           const exercise = newExercisesToCreate[i];
           const orderIndex = existingExercisesToUpdate.length + i + 1;
@@ -405,7 +509,6 @@ const CreateTreatmentPlanPage = () => {
             exercise_id: exercise.exercise_id,
             reps_per_set: exercise.reps_per_set,
             sets: exercise.sets,
-            duration_per_set: exercise.duration_per_set,
             notes: exercise.notes || null,
             order_in_treatment: orderIndex,
             is_active: true,
@@ -426,21 +529,6 @@ const CreateTreatmentPlanPage = () => {
           }
         }
 
-        // Handle removed exercises
-        const currentExistingIds = existingExercisesToUpdate.map((exercise) => exercise.treatment_exercise_id);
-        const removedExerciseIds = originalExerciseIds.filter((id) => !currentExistingIds.includes(id));
-
-        for (const removedId of removedExerciseIds) {
-          const deleteResponse = await fetch(`http://127.0.0.1:8000/api/delete-treatment-exercise/${removedId}/`, {
-            method: "DELETE",
-          });
-
-          if (!deleteResponse.ok) {
-            const errorText = await deleteResponse.text();
-            console.error("Failed to delete treatment exercise:", removedId, errorText);
-          }
-        }
-
         toast.success("Treatment plan updated successfully!");
         navigate(`/home/treatment/${patientId}`);
       } else {
@@ -449,10 +537,11 @@ const CreateTreatmentPlanPage = () => {
           patient_id: patientId,
           therapist_id: therapistId,
           name: treatmentName,
-          status: 'active',
+          is_active: true,
           start_date: startDate,
           end_date: endDate || null,
           goal_notes: goalNotes || null,
+          created_by: currentUserId, // Record who created this treatment (admin or therapist)
         };
 
         const treatmentResponse = await fetch("http://127.0.0.1:8000/api/create-treatment/", {
@@ -477,7 +566,6 @@ const CreateTreatmentPlanPage = () => {
             exercise_id: exercise.exercise_id,
             reps_per_set: exercise.reps_per_set,
             sets: exercise.sets,
-            duration_per_set: exercise.duration_per_set,
             notes: exercise.notes || null,
             order_in_treatment: i + 1,
             is_active: true,
@@ -507,16 +595,20 @@ const CreateTreatmentPlanPage = () => {
     }
   };
 
-  // Filter exercises based on search term and category
-  const filteredExercises = exercises.filter(exercise => {
-    const matchesSearch = exercise.name.toLowerCase().includes(exerciseSearchTerm.toLowerCase()) ||
-                         (exercise.instructions && exercise.instructions.toLowerCase().includes(exerciseSearchTerm.toLowerCase()));
-    const matchesCategory = !exerciseCategoryFilter || exercise.category === exerciseCategoryFilter;
-    return matchesSearch && matchesCategory;
-  });
+  // Filter exercises based on search term and category - use useMemo to prevent unnecessary recalculations
+  const filteredExercises = useMemo(() => {
+    return exercises.filter(exercise => {
+      const matchesSearch = exercise.name.toLowerCase().includes(exerciseSearchTerm.toLowerCase()) ||
+                           (exercise.instructions && exercise.instructions.toLowerCase().includes(exerciseSearchTerm.toLowerCase()));
+      const matchesCategory = !exerciseCategoryFilter || exercise.category === exerciseCategoryFilter;
+      return matchesSearch && matchesCategory;
+    });
+  }, [exercises, exerciseSearchTerm, exerciseCategoryFilter]);
 
-  // Get unique categories for filter options
-  const uniqueCategories = [...new Set(exercises.map(ex => ex.category).filter(Boolean))];
+  // Get unique categories for filter options - use useMemo to prevent unnecessary recalculations
+  const uniqueCategories = useMemo(() => {
+    return [...new Set(exercises.map(ex => ex.category).filter(Boolean))];
+  }, [exercises]);
 
   // Get patient info for display
   const currentPatient = patients.find(p => p.id === patientId);
@@ -540,7 +632,6 @@ const CreateTreatmentPlanPage = () => {
               label="Treatment Name"
               value={treatmentName}
               onChange={(e) => setTreatmentName(e.target.value)}
-              placeholder="e.g., Post-Surgery Rehabilitation Plan"
               helperText="Give your treatment plan a descriptive name"
             />
 
@@ -583,12 +674,13 @@ const CreateTreatmentPlanPage = () => {
 
             <TextField
               fullWidth
+              required
               type="date"
-              label="End Date (Optional)"
+              label="End Date"
               value={endDate}
               onChange={(e) => setEndDate(e.target.value)}
               InputLabelProps={{ shrink: true }}
-              helperText="Automatically set to 2 weeks after start date"
+              helperText="Automatically set to 2 weeks after start date (can be modified)"
             />
 
             <TextField
@@ -850,7 +942,7 @@ const CreateTreatmentPlanPage = () => {
                   </Box>
                   
                   <Grid container spacing={2}>
-                      <Grid item xs={12} sm={4}>
+                      <Grid item xs={12} sm={6}>
                         <TextField
                           fullWidth
                           type="number"
@@ -861,7 +953,7 @@ const CreateTreatmentPlanPage = () => {
                         />
                       </Grid>
                       
-                      <Grid item xs={12} sm={4}>
+                      <Grid item xs={12} sm={6}>
                         <TextField
                           fullWidth
                           type="number"
@@ -870,19 +962,6 @@ const CreateTreatmentPlanPage = () => {
                           onChange={(e) => updateExerciseSettings(exercise.id, 'sets', parseInt(e.target.value) || 1)}
                           inputProps={{ min: 1 }}
                           placeholder="1"
-                        />
-                      </Grid>
-
-                      <Grid item xs={12} sm={4}>
-                        <TextField
-                          fullWidth
-                          type="number"
-                          label="Duration (sec)"
-                          value={exercise.duration_per_set || ''}
-                          onChange={(e) => updateExerciseSettings(exercise.id, 'duration_per_set', parseInt(e.target.value) || 60)}
-                          inputProps={{ min: 0 }}
-                          placeholder="60"
-                          helperText="Duration for one set"
                         />
                       </Grid>
 

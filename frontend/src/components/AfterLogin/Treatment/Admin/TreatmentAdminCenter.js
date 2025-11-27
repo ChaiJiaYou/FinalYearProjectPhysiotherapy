@@ -92,16 +92,6 @@ const TreatmentAdminCenter = () => {
     });
   };
 
-  const getStatusColor = (status) => {
-    switch (status) {
-      case 'active':
-        return 'success';
-      case 'inactive':
-        return 'error';
-      default:
-        return 'default';
-    }
-  };
 
   const handleRequestSort = (property) => {
     if (orderBy === property) {
@@ -137,6 +127,12 @@ const TreatmentAdminCenter = () => {
     if (orderBy === 'start_date' || orderBy === 'end_date') {
       aValue = new Date(aValue);
       bValue = new Date(bValue);
+    }
+    
+    if (orderBy === 'is_active') {
+      // For boolean sorting: false (deleted) comes before true (active)
+      aValue = a.is_active === false ? 0 : 1;
+      bValue = b.is_active === false ? 0 : 1;
     }
     
     if (aValue < bValue) return order === 'asc' ? -1 : 1;
@@ -262,7 +258,7 @@ const TreatmentAdminCenter = () => {
                       </TableSortLabel>
                     </TableCell>
                     <TableCell 
-                      sx={{ fontWeight: 700, fontSize: "0.9rem", py: 2, color: 'text.primary', width: '20%' }}
+                      sx={{ fontWeight: 700, fontSize: "0.9rem", py: 2, color: 'text.primary', width: '18%' }}
                     >
                       <TableSortLabel
                         active={orderBy === 'patient_name'}
@@ -274,7 +270,19 @@ const TreatmentAdminCenter = () => {
                       </TableSortLabel>
                     </TableCell>
                     <TableCell 
-                      sx={{ fontWeight: 700, fontSize: "0.9rem", py: 2, color: 'text.primary', width: '15%' }}
+                      sx={{ fontWeight: 700, fontSize: "0.9rem", py: 2, color: 'text.primary', width: '18%' }}
+                    >
+                      <TableSortLabel
+                        active={orderBy === 'therapist_name'}
+                        direction={orderBy === 'therapist_name' ? order : 'asc'}
+                        onClick={() => handleRequestSort('therapist_name')}
+                        sx={{ fontWeight: 700, fontSize: "0.9rem" }}
+                      >
+                        Therapist
+                      </TableSortLabel>
+                    </TableCell>
+                    <TableCell 
+                      sx={{ fontWeight: 700, fontSize: "0.9rem", py: 2, color: 'text.primary', width: '12%' }}
                     >
                       <TableSortLabel
                         active={orderBy === 'start_date'}
@@ -286,7 +294,7 @@ const TreatmentAdminCenter = () => {
                       </TableSortLabel>
                     </TableCell>
                     <TableCell 
-                      sx={{ fontWeight: 700, fontSize: "0.9rem", py: 2, color: 'text.primary', width: '15%' }}
+                      sx={{ fontWeight: 700, fontSize: "0.9rem", py: 2, color: 'text.primary', width: '12%' }}
                     >
                       <TableSortLabel
                         active={orderBy === 'end_date'}
@@ -301,9 +309,9 @@ const TreatmentAdminCenter = () => {
                       sx={{ fontWeight: 700, fontSize: "0.9rem", py: 2, color: 'text.primary', width: '10%' }}
                     >
                       <TableSortLabel
-                        active={orderBy === 'status'}
-                        direction={orderBy === 'status' ? order : 'asc'}
-                        onClick={() => handleRequestSort('status')}
+                        active={orderBy === 'is_active'}
+                        direction={orderBy === 'is_active' ? order : 'asc'}
+                        onClick={() => handleRequestSort('is_active')}
                         sx={{ fontWeight: 700, fontSize: "0.9rem" }}
                       >
                         Status
@@ -317,7 +325,7 @@ const TreatmentAdminCenter = () => {
                 <TableBody>
                   {loading ? (
                     <TableRow>
-                      <TableCell colSpan={6} align="center" sx={{ py: 3 }}>Loading...</TableCell>
+                      <TableCell colSpan={7} align="center" sx={{ py: 3 }}>Loading...</TableCell>
                     </TableRow>
                   ) : paginatedTreatments.length > 0 ? (
                     paginatedTreatments.map((treatment) => (
@@ -337,7 +345,7 @@ const TreatmentAdminCenter = () => {
                         <TableCell sx={{ py: 1.5, fontSize: "0.9rem", fontWeight: 500, color: 'text.primary', width: '25%', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                           {treatment.name || 'Unnamed Treatment'}
                         </TableCell>
-                        <TableCell sx={{ py: 1.5, width: '20%' }}>
+                        <TableCell sx={{ py: 1.5, width: '18%' }}>
                           <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
                             <Avatar
                               sx={{
@@ -357,17 +365,37 @@ const TreatmentAdminCenter = () => {
                             </Typography>
                           </Box>
                         </TableCell>
-                        <TableCell sx={{ py: 1.5, fontSize: "0.9rem", fontWeight: 500, color: 'text.primary', width: '15%' }}>
+                        <TableCell sx={{ py: 1.5, width: '18%' }}>
+                          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                            <Avatar
+                              sx={{
+                                width: 28,
+                                height: 28,
+                                backgroundColor: 'secondary.100',
+                                color: 'secondary.main',
+                                fontSize: '0.75rem',
+                                fontWeight: 600,
+                                flexShrink: 0
+                              }}
+                            >
+                              {treatment.therapist_name ? treatment.therapist_name.charAt(0).toUpperCase() : 'T'}
+                            </Avatar>
+                            <Typography variant="body2" sx={{ fontWeight: 500, color: 'text.primary', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                              {treatment.therapist_name || 'Unknown Therapist'}
+                            </Typography>
+                          </Box>
+                        </TableCell>
+                        <TableCell sx={{ py: 1.5, fontSize: "0.9rem", fontWeight: 500, color: 'text.primary', width: '12%' }}>
                           {formatDate(treatment.start_date)}
                         </TableCell>
-                        <TableCell sx={{ py: 1.5, fontSize: "0.9rem", fontWeight: 500, color: 'text.primary', width: '15%' }}>
+                        <TableCell sx={{ py: 1.5, fontSize: "0.9rem", fontWeight: 500, color: 'text.primary', width: '12%' }}>
                           {formatDate(treatment.end_date)}
                         </TableCell>
                         <TableCell sx={{ py: 1.5, width: '10%' }}>
                           <Chip 
-                            label={treatment.status?.toUpperCase()} 
+                            label={treatment.is_active === false ? 'Deleted' : 'Active'} 
                             size="small"
-                            color={getStatusColor(treatment.status)}
+                            color={treatment.is_active === false ? 'error' : 'success'}
                             sx={{
                               fontSize: '0.7rem',
                               height: 20,
@@ -401,7 +429,7 @@ const TreatmentAdminCenter = () => {
                     ))
                   ) : (
                     <TableRow>
-                      <TableCell colSpan={6} align="center">
+                      <TableCell colSpan={7} align="center">
                         No treatments found.
                       </TableCell>
                     </TableRow>

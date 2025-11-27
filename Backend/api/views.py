@@ -1113,7 +1113,7 @@ def treatments(request):
                     'therapist_name': treatment.therapist_id.username if treatment.therapist_id else 'Unknown',
                     'therapist_id': treatment.therapist_id.id if treatment.therapist_id else '',
                     'name': treatment.name,
-                    'status': treatment.status,
+                    'is_active': treatment.is_active,
                     'start_date': treatment.start_date,
                     'end_date': treatment.end_date,
                     'goal_notes': treatment.goal_notes,
@@ -1131,6 +1131,9 @@ def treatments(request):
             therapist = get_object_or_404(CustomUser, id=data.get('therapist_id'), role='therapist')
             
             # Create treatment
+            # Determine is_active: use is_active if provided, otherwise check status field for backward compatibility
+            is_active_value = data.get('is_active', True) if 'is_active' in data else (True if data.get('status') == 'active' else True)
+            
             treatment = Treatment.objects.create(
                 patient_id=patient,
                 therapist_id=therapist,
@@ -1138,7 +1141,7 @@ def treatments(request):
                 start_date=data.get('start_date'),
                 end_date=data.get('end_date'),
                 goal_notes=data.get('goal_notes'),
-                status=data.get('status', 'active'),
+                is_active=is_active_value,
             )
             
             return Response({
@@ -1162,13 +1165,26 @@ def create_treatment(request):
         therapist = get_object_or_404(CustomUser, id=data.get('therapist_id'), role__in=['therapist', 'admin'])
         
         # If creating an active treatment, deactivate any existing active treatments for this patient
-        if data.get('status') == 'active':
+        is_active = data.get('is_active', True) if 'is_active' in data else (True if data.get('status') == 'active' else False)
+        if is_active:
             Treatment.objects.filter(
                 patient_id=patient,
-                status='active'
-            ).update(status='completed')
+                is_active=True
+            ).update(is_active=False)
+        
+        # Get created_by - the user who is creating this treatment (admin or therapist)
+        created_by_id = data.get('created_by')
+        created_by = None
+        if created_by_id:
+            try:
+                created_by = CustomUser.objects.get(id=created_by_id)
+            except CustomUser.DoesNotExist:
+                pass  # If created_by user doesn't exist, leave it as None
         
         # Create treatment
+        # Determine is_active: use is_active if provided, otherwise check status field for backward compatibility
+        is_active_value = data.get('is_active', True) if 'is_active' in data else (True if data.get('status') == 'active' else True)
+        
         treatment = Treatment.objects.create(
             patient_id=patient,
             therapist_id=therapist,
@@ -1176,7 +1192,8 @@ def create_treatment(request):
             start_date=data.get('start_date'),
             end_date=data.get('end_date'),
             goal_notes=data.get('goal_notes'),
-            status=data.get('status', 'active'),
+            is_active=is_active_value,
+            created_by=created_by,  # Record who created this treatment
         )
         print(f"DEBUG: Treatment created successfully: {treatment.treatment_id}")  # Debug log
         
@@ -1197,7 +1214,7 @@ def patient_treatments(request, patient_id):
     try:
         treatments = Treatment.objects.filter(
             patient_id=patient_id, 
-            status='active'
+            is_active=True
         ).select_related('therapist_id').order_by('-created_at')
         
         data = []
@@ -1208,7 +1225,7 @@ def patient_treatments(request, patient_id):
             data.append({
                 'treatment_id': str(treatment.treatment_id),
                 'name': treatment.name,
-                'status': treatment.status,
+                'is_active': treatment.is_active,
                 'start_date': treatment.start_date,
                 'end_date': treatment.end_date,
                 'goal_notes': treatment.goal_notes,
@@ -1234,16 +1251,11 @@ def therapist_treatments(request, therapist_id):
                 'patient_name': treatment.patient_id.username,
                 'patient_id': treatment.patient_id.id,
                 'name': treatment.name,
-                'treatment_type': treatment.treatment_type,
-                'treatment_subtype': treatment.treatment_subtype,
-                'condition': treatment.condition,
-                'status': treatment.status,
-                'frequency': treatment.frequency,
+                'is_active': treatment.is_active,
                 'start_date': treatment.start_date,
                 'end_date': treatment.end_date,
+                'goal_notes': treatment.goal_notes,
                 'created_at': treatment.created_at,
-                'creation_method': treatment.creation_method,
-                'template_name': None,  # No longer using templates
             })
         
         return Response(data, status=status.HTTP_200_OK)
@@ -1277,7 +1289,6 @@ def treatment_exercises(request, treatment_id):
                 'instructions': te.exercise_id.instructions if te.exercise_id else '',
                 'reps_per_set': te.reps_per_set,
                 'sets': te.sets,
-                'duration_per_set': te.duration_per_set,
                 'notes': te.notes,
                 'order_in_treatment': te.order_in_treatment,
                 'is_active': te.is_active,
@@ -1305,7 +1316,6 @@ def create_treatment_exercise(request):
             exercise_id=exercise,
             reps_per_set=data.get('reps_per_set'),
             sets=data.get('sets', 1),
-            duration_per_set=data.get('duration_per_set'),
             notes=data.get('notes'),
             order_in_treatment=data.get('order_in_treatment', 1),
             is_active=data.get('is_active', True),
@@ -1478,7 +1488,7 @@ def list_patient_exercise_records(request):
                         'treatment_name': treatment.name,
                         'start_date': treatment.start_date.isoformat() if treatment.start_date else None,
                         'end_date': treatment.end_date.isoformat() if treatment.end_date else None,
-                        'status': treatment.status,
+                        'is_active': treatment.is_active,
                         'completed_dates': set()
                     }
                 completion_date = record.start_time or record.recorded_at
@@ -1630,7 +1640,7 @@ def patient_report_detail(request, patient_id):
         today = timezone.localdate()
         active_treatments = Treatment.objects.filter(
             patient_id=patient,
-            status='active'
+            is_active=True
         ).order_by('-created_at')
         
         active_treatment = None
@@ -1661,10 +1671,10 @@ def patient_report_detail(request, patient_id):
                     active_treatment = treatment
                     break
         
-        # Get previous treatment (most recent completed treatment)
+        # Get previous treatment (most recent inactive treatment)
         previous_treatment = Treatment.objects.filter(
             patient_id=patient,
-            status='completed'
+            is_active=False
         ).order_by('-created_at').first()
         
         # Get all exercise records for this patient
@@ -1892,7 +1902,6 @@ def patient_report_detail(request, patient_id):
                     'exercise_name': te.exercise_id.name if te.exercise_id else 'Custom Exercise',
                     'reps_per_set': te.reps_per_set,
                     'sets': te.sets,
-                    'duration_per_set': te.duration_per_set,
                     'order_in_treatment': te.order_in_treatment,
                 })
             
@@ -2056,7 +2065,7 @@ def treatment_detail(request, treatment_id):
                 'therapist_name': treatment.therapist_id.username if treatment.therapist_id else 'Unknown',
                 'therapist_id': treatment.therapist_id.id if treatment.therapist_id else '',
                 'name': treatment.name,
-                'status': treatment.status,
+                'is_active': treatment.is_active,
                 'start_date': treatment.start_date,
                 'end_date': treatment.end_date,
                 'goal_notes': treatment.goal_notes,
@@ -2072,8 +2081,15 @@ def treatment_detail(request, treatment_id):
             # Update fields if provided
             if 'name' in data:
                 treatment.name = data['name']
-            if 'status' in data:
-                treatment.status = data['status']
+            if 'is_active' in data:
+                treatment.is_active = data['is_active']
+            elif 'status' in data:
+                # Backward compatibility: convert status to is_active
+                treatment.is_active = (data['status'] == 'active')
+            if 'therapist_id' in data:
+                # Allow updating therapist (only admin should be able to do this)
+                therapist = get_object_or_404(CustomUser, id=data['therapist_id'], role__in=['therapist', 'admin'])
+                treatment.therapist_id = therapist
             if 'start_date' in data:
                 treatment.start_date = data['start_date']
             if 'end_date' in data:
@@ -2104,8 +2120,6 @@ def update_treatment_exercise(request, exercise_id):
             exercise.reps_per_set = data['reps_per_set']
         if 'sets' in data:
             exercise.sets = data['sets']
-        if 'duration_per_set' in data:
-            exercise.duration_per_set = data['duration_per_set']
         if 'notes' in data:
             exercise.notes = data['notes']
         if 'is_active' in data:
@@ -2158,16 +2172,21 @@ def create_exercise(request):
     try:
         data = request.data
         
-        # Get the therapist creating the exercise
+        # Validate required fields
+        if not data.get('name') or data.get('name', '').strip() == '':
+            return Response({'error': 'Exercise name is required'}, status=status.HTTP_400_BAD_REQUEST)
+        
+        if not data.get('action_id'):
+            return Response({'error': 'Link to Action is required'}, status=status.HTTP_400_BAD_REQUEST)
+        
+        # Get the user creating the exercise (admin or therapist)
         created_by = None
         if 'created_by' in data:
-            created_by = get_object_or_404(CustomUser, id=data['created_by'], role='therapist')
+            created_by = get_object_or_404(CustomUser, id=data['created_by'], role__in=['therapist', 'admin'])
         
-        # Get the action if provided
-        action_id = None
-        if data.get('action_id'):
-            from .models import Action
-            action_id = get_object_or_404(Action, id=data['action_id'])
+        # Get the action (required)
+        from .models import Action
+        action_id = get_object_or_404(Action, id=data['action_id'])
         
         exercise = Exercise.objects.create(
             name=data.get('name', 'Unnamed Exercise'),
@@ -2218,6 +2237,21 @@ def exercise_detail(request, exercise_id):
         elif request.method == 'PUT':
             data = request.data
             
+            # Validate required fields
+            if 'name' in data and (not data['name'] or data['name'].strip() == ''):
+                return Response({'error': 'Exercise name is required'}, status=status.HTTP_400_BAD_REQUEST)
+            
+            # action_id is required - validate if it's being updated or if it's missing
+            if 'action_id' in data:
+                if not data['action_id'] or data['action_id'] == '':
+                    return Response({'error': 'Link to Action is required'}, status=status.HTTP_400_BAD_REQUEST)
+                from .models import Action
+                action = get_object_or_404(Action, id=data['action_id'])
+                exercise.action_id = action
+            elif not exercise.action_id:
+                # If action_id is not in the update data and current exercise has no action_id, it's invalid
+                return Response({'error': 'Link to Action is required'}, status=status.HTTP_400_BAD_REQUEST)
+            
             # Update fields if provided
             if 'name' in data:
                 exercise.name = data['name']
@@ -2227,13 +2261,6 @@ def exercise_detail(request, exercise_id):
                 exercise.difficulty = data['difficulty']
             if 'instructions' in data:
                 exercise.instructions = data['instructions']
-            if 'action_id' in data:
-                if data['action_id']:  # If action_id is provided and not empty
-                    from .models import Action
-                    action = get_object_or_404(Action, id=data['action_id'])
-                    exercise.action_id = action
-                else:  # If action_id is empty string, set to None
-                    exercise.action_id = None
                 
             exercise.save()
             
@@ -2653,48 +2680,69 @@ def inference_status(request):
         return JsonResponse({'error': str(e)}, status=500)
 
 
-@api_view(['GET'])
+@api_view(['GET', 'PATCH'])
 def action_detail(request, action_id):
-    """Get detailed information about an action"""
+    """Get detailed information about an action or update it"""
     try:
         action = Action.objects.get(id=action_id)
         
-        # Get related data
-        templates = ActionTemplate.objects.filter(action=action)
-        samples = ActionSample.objects.filter(action=action)
-        
-        template_data = []
-        for template in templates:
-            template_data.append({
-                'id': template.id,
-                'length': template.length,
-                'feature_dim': template.feature_dim,
-                'created_at': template.created_at.isoformat()
+        if request.method == 'GET':
+            # Get related data
+            templates = ActionTemplate.objects.filter(action=action)
+            samples = ActionSample.objects.filter(action=action)
+            
+            template_data = []
+            for template in templates:
+                template_data.append({
+                    'id': template.id,
+                    'length': template.length,
+                    'feature_dim': template.feature_dim,
+                    'created_at': template.created_at.isoformat()
+                })
+            
+            sample_data = []
+            for sample in samples:
+                sample_data.append({
+                    'id': sample.id,
+                    'has_video': bool(sample.video_url),
+                    'video_url': sample.video_url if sample.video_url else None,
+                    'has_keypoints': bool(sample.keypoints_json),
+                    'fps': sample.fps,
+                    'created_at': sample.created_at.isoformat()
+                })
+            
+            return JsonResponse({
+                'action': {
+                    'id': action.id,
+                    'name': action.name,
+                    'description': action.description,
+                    'mode': action.mode,
+                    'params': action.params_json,
+                    'created_at': action.created_at.isoformat()
+                },
+                'templates': template_data,
+                'samples': sample_data
             })
         
-        sample_data = []
-        for sample in samples:
-            sample_data.append({
-                'id': sample.id,
-                'has_video': bool(sample.video_url),
-                'video_url': sample.video_url if sample.video_url else None,
-                'has_keypoints': bool(sample.keypoints_json),
-                'fps': sample.fps,
-                'created_at': sample.created_at.isoformat()
-            })
-        
-        return JsonResponse({
-            'action': {
+        elif request.method == 'PATCH':
+            # Update action fields
+            data = request.data
+            
+            if 'description' in data:
+                action.description = data['description']
+            
+            if 'name' in data:
+                action.name = data['name']
+            
+            action.save()
+            
+            return JsonResponse({
                 'id': action.id,
                 'name': action.name,
                 'description': action.description,
                 'mode': action.mode,
-                'params': action.params_json,
-                'created_at': action.created_at.isoformat()
-            },
-            'templates': template_data,
-            'samples': sample_data
-        })
+                'message': 'Action updated successfully'
+            })
         
     except Action.DoesNotExist:
         return JsonResponse({'error': 'Action not found'}, status=404)

@@ -223,11 +223,6 @@ const TreatmentDetailsModal = ({ open, onClose, treatmentId, patientId }) => {
                             <strong>Sets:</strong> {exercise.sets}
                           </Typography>
                         )}
-                        {exercise.duration_per_set && (
-                          <Typography variant="body2" color="text.secondary">
-                            <strong>Duration:</strong> {exercise.duration_per_set}s
-                          </Typography>
-                        )}
                       </Box>
                       
                       {exercise.notes && (

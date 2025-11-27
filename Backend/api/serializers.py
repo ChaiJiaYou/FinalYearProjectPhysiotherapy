@@ -378,7 +378,7 @@ class PatientReportSummarySerializer(serializers.ModelSerializer):
         if not hasattr(obj, '_cached_active_treatment'):
             obj._cached_active_treatment = Treatment.objects.filter(
                 patient_id=obj,
-                status='active'
+                is_active=True
             ).order_by('-created_at').first()
         return obj._cached_active_treatment
     
