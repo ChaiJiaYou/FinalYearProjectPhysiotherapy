@@ -1,0 +1,1210 @@
+
+import cv2
+import mediapipe as mp
+import numpy as np
+from collections import deque
+import glob
+import os
+import matplotlib.pyplot as plt
+from scipy.signal import find_peaks
+from tensorflow import keras
+import pandas as pd
+from scipy import stats as st
+import statistics
+import time
+import textwrap
+         
+from scipy.stats import differential_entropy
+from scipy.spatial.distance import cdist
+import pandas as pd
+import pickle
+from tensorflow.keras.models import load_model
+
+counting_results = []  
+ 
+desired_activity = 'standing_shoulder_internal_external_rotation'
+
+
+headers = ['0_x', '0_y', '0_z', '0_vis', '1_x', '1_y', '1_z', '1_vis', '2_x', '2_y', '2_z', '2_vis', '3_x', '3_y', '3_z', '3_vis', '4_x', '4_y', '4_z', '4_vis', '5_x', '5_y', '5_z', '5_vis', '6_x', '6_y', '6_z', '6_vis', '7_x', '7_y', '7_z', '7_vis', '8_x', '8_y', '8_z', '8_vis', '9_x', '9_y', '9_z', '9_vis', '10_x', '10_y', '10_z', '10_vis', '11_x', '11_y', '11_z', '11_vis', '12_x', '12_y', '12_z','12_vis','13_x', '13_y', '13_z', '13_vis', '14_x', '14_y', '14_z', '14_vis', '15_x', '15_y', '15_z', '15_vis', '16_x', '16_y', '16_z', '16_vis', '17_x', '17_y', '17_z', '17_vis', '18_x', '18_y', '18_z', '18_vis', '19_x', '19_y', '19_z', '19_vis', '20_x', '20_y', '20_z', '20_vis', '21_x', '21_y', '21_z', '21_vis', '22_x', '22_y', '22_z', '22_vis', '23_x', '23_y', '23_z', '23_vis', '24_x', '24_y', '24_z', '24_vis', '25_x', '25_y', '25_z', '25_vis', '26_x', '26_y', '26_z', '26_vis', '27_x', '27_y', '27_z', '27_vis', '28_x', '28_y', '28_z', '28_vis', '29_x', '29_y', '29_z', '29_vis', '30_x', '30_y', '30_z', '30_vis', '31_x', '31_y', '31_z', '31_vis', '32_x', '32_y', '32_z', '32_vis']
+
+save_video = False  # Disable video recording by default
+
+activitiesName = ['hurdle_step', 'idle', 'inline_lunge', 'jump', 'run' ,'side_lunge',
+'sit_to_stand' ,'squats', 'standing_shoulder_abduction',
+'standing_shoulder_extension',
+'standing_shoulder_internal_external_rotation', 
+'standing_shoulder_scapation',
+'custom_elbow_flexion',
+'standing_shoulder_external_rotation_custom']
+
+
+def calculate_angle(a, b, c):
+    """Return angle ABC in degrees using normalized landmark coordinates."""
+    a_vec = np.array([a.x, a.y, a.z])
+    b_vec = np.array([b.x, b.y, b.z])
+    c_vec = np.array([c.x, c.y, c.z])
+
+    ba = a_vec - b_vec
+    bc = c_vec - b_vec
+
+    ba_norm = np.linalg.norm(ba)
+    bc_norm = np.linalg.norm(bc)
+    if ba_norm == 0 or bc_norm == 0:
+        return 0.0
+
+    cos_angle = np.dot(ba, bc) / (ba_norm * bc_norm)
+    cos_angle = np.clip(cos_angle, -1.0, 1.0)
+    return np.degrees(np.arccos(cos_angle))
+
+
+def calculate_sparc(signal_values, sample_rate=30.0, freq_min=0.1, freq_max=10.0):
+    """
+    Compute the Spectral Arc Length (SPARC) smoothness metric for a 1D signal.
+    Larger SPARC (closer to 0) indicates smoother movement.
+    """
+    if not signal_values or len(signal_values) < 10:
+        return None
+
+    signal_array = np.asarray(signal_values, dtype=np.float32)
+    if signal_array.size < 10 or np.all(signal_array == signal_array[0]):
+        return None
+
+    # Detrend to remove offsets
+    signal_detrended = signal_array - np.mean(signal_array)
+    n = signal_detrended.size
+    if n < 10:
+        return None
+
+    # Use real FFT since the signal is real-valued
+    fft_vals = np.fft.rfft(signal_detrended)
+    freqs = np.fft.rfftfreq(n, d=1.0 / sample_rate if sample_rate > 0 else 1 / 30.0)
+    magnitude = np.abs(fft_vals)
+
+    max_mag = np.max(magnitude)
+    if max_mag <= 0:
+        return None
+    normalized_mag = magnitude / max_mag
+
+    freq_mask = (freqs >= freq_min) & (freqs <= freq_max)
+    freq_subset = freqs[freq_mask]
+    mag_subset = normalized_mag[freq_mask]
+    if freq_subset.size < 2:
+        return None
+
+    dA_dw = np.gradient(mag_subset, freq_subset)
+    integrand = np.sqrt(dA_dw ** 2 + 1)
+    sparc = -np.trapz(integrand, freq_subset)
+    return float(sparc)
+
+
+class ElbowFlexionDetector:
+    """Detector for elbow flexion (arm starts down, curls up toward shoulder)."""
+
+    def __init__(self):
+        self.stage = 'down'  # down = arm extended, up = flexed
+        self.flex_threshold = 130  # degrees or less counts as flexed
+        self.extend_threshold = 135  # must straighten beyond 135° to reset
+        self.min_wrist_raise = 0.05  # allow wrist slightly below shoulder (chest height)
+        self.reset_wrist_threshold = 0.35  # if wrist drops far enough (arm down), reset
+        self.max_elbow_shoulder_height_delta = 0.32
+        self.max_elbow_shoulder_x_delta = 0.12
+        self.last_debug_print = 0
+        self.current_rep_angles = []
+
+    def reset(self):
+        self.stage = 'down'
+        self.last_debug_print = 0
+        self.current_rep_angles = []
+
+    def _log_debug(self, message):
+        now = time.time()
+        if now - self.last_debug_print > 1.0:
+            print(f"[ElbowFlexionDetector] {message}")
+            self.last_debug_print = now
+
+    def update(self, landmarks):
+        try:
+            shoulder = landmarks[mp.solutions.pose.PoseLandmark.RIGHT_SHOULDER.value]
+            elbow = landmarks[mp.solutions.pose.PoseLandmark.RIGHT_ELBOW.value]
+            wrist = landmarks[mp.solutions.pose.PoseLandmark.RIGHT_WRIST.value]
+        except (IndexError, AttributeError):
+            return False, None
+
+        upper_arm_height_delta = abs(elbow.y - shoulder.y)
+        if upper_arm_height_delta > self.max_elbow_shoulder_height_delta:
+            self._log_debug(
+                f"Upper arm vertical drift Δ={upper_arm_height_delta:.3f}. Keep upper arm fixed."
+            )
+            return False
+
+        upper_arm_horizontal_delta = abs(elbow.x - shoulder.x)
+        if upper_arm_horizontal_delta > self.max_elbow_shoulder_x_delta:
+            self._log_debug(
+                f"Upper arm horizontal drift Δ={upper_arm_horizontal_delta:.3f}. Keep elbow near torso."
+            )
+            return False
+
+        elbow_angle = calculate_angle(shoulder, elbow, wrist)
+        wrist_relative = wrist.y - shoulder.y  # smaller (negative) = wrist higher
+        self.current_rep_angles.append(elbow_angle)
+
+        self._log_debug(
+            f"Angle={elbow_angle:.1f}°, wristΔ={wrist_relative:.3f}, stage={self.stage}"
+        )
+
+        flex_condition = elbow_angle <= self.flex_threshold
+        wrist_condition = wrist_relative <= self.min_wrist_raise
+
+        # Count rep when moving from extended (down stage) to flexed/chest position
+        if self.stage == 'down' and flex_condition and wrist_condition:
+            self.stage = 'up'
+            print(f"[ElbowFlexionDetector] ✅ Rep counted (angle={elbow_angle:.1f}°)")
+            angles_snapshot = self.current_rep_angles.copy()
+            self.current_rep_angles = []
+            return True, angles_snapshot
+
+        # Reset when arm extends or wrist drops sufficiently
+        if self.stage == 'up':
+            if elbow_angle >= self.extend_threshold or wrist_relative >= self.reset_wrist_threshold:
+                self.stage = 'down'
+                self.current_rep_angles = []
+
+        return False, None
+
+
+class ShoulderExternalRotationDetector:
+    """Detector for standing shoulder external rotation with elbow fixed by the torso."""
+
+    def __init__(self):
+        self.stage = 'front'  # front = forearm points forward, out = rotated outward
+        self.out_threshold = -0.10  # wrist must move at least 10% screen width outward (mirrored axis)
+        self.reset_threshold = -0.02  # must return close to front before counting again
+        self.max_elbow_shoulder_delta = 0.35
+        self.max_elbow_from_torso = 0.08
+        self.max_shoulders_y_delta = 0.05
+        self.max_torso_rotation = 0.35
+        self.min_shoulder_visibility = 0.5
+        self.max_shoulder_span = 0.0
+        self.shoulder_span_ratio = 0.7  # current span must be >= 70% of best span
+        self.last_debug_print = 0
+        self.current_rep_angles = []
+
+    def reset(self):
+        self.stage = 'front'
+        self.max_shoulder_span = 0.0
+        self.last_debug_print = 0
+        self.current_rep_angles = []
+
+    def _log_debug(self, message):
+        now = time.time()
+        if now - self.last_debug_print > 1.0:
+            print(f"[ShoulderExternalRotation] {message}")
+            self.last_debug_print = now
+
+    def update(self, landmarks):
+        try:
+            shoulder = landmarks[mp.solutions.pose.PoseLandmark.RIGHT_SHOULDER.value]
+            elbow = landmarks[mp.solutions.pose.PoseLandmark.RIGHT_ELBOW.value]
+            wrist = landmarks[mp.solutions.pose.PoseLandmark.RIGHT_WRIST.value]
+        except (IndexError, AttributeError):
+            return False, None
+
+        height_delta = abs(shoulder.y - elbow.y)
+        if height_delta > self.max_elbow_shoulder_delta:
+            self._log_debug(f"Elbow height mismatch (Δ={height_delta:.3f}). Keep elbow near torso.")
+            return False
+
+        torso_delta = abs(shoulder.x - elbow.x)
+        if torso_delta > self.max_elbow_from_torso:
+            self._log_debug(f"Elbow drift detected (Δx={torso_delta:.3f}). Keep elbow against torso.")
+            return False
+
+        left_shoulder = landmarks[mp.solutions.pose.PoseLandmark.LEFT_SHOULDER.value]
+        if min(shoulder.visibility or 0, left_shoulder.visibility or 0) < self.min_shoulder_visibility:
+            self._log_debug("Shoulders not visible enough. Ensure camera can see both shoulders.")
+            return False
+
+        shoulder_span = abs(left_shoulder.x - shoulder.x)
+        if shoulder_span > self.max_shoulder_span:
+            self.max_shoulder_span = shoulder_span
+        if self.max_shoulder_span > 0 and shoulder_span < self.max_shoulder_span * self.shoulder_span_ratio:
+            self._log_debug(
+                f"Shoulder span dropped (current={shoulder_span:.3f}, best={self.max_shoulder_span:.3f}). "
+                "Face the camera squarely."
+            )
+            return False
+
+        shoulders_y_delta = abs(left_shoulder.y - shoulder.y)
+        if shoulders_y_delta > self.max_shoulders_y_delta:
+            self._log_debug(f"Shoulders not level (Δ={shoulders_y_delta:.3f}). Keep shoulders balanced.")
+            return False
+
+        # Monitored but not blocking (for debugging info only)
+        right_shoulder_vec = np.array([shoulder.x, shoulder.y]) - np.array([elbow.x, elbow.y])
+        left_shoulder_vec = np.array([left_shoulder.x, left_shoulder.y]) - np.array([elbow.x, elbow.y])
+        torso_rotation = abs(np.degrees(np.arctan2(right_shoulder_vec[1], right_shoulder_vec[0]) -
+                                        np.arctan2(left_shoulder_vec[1], left_shoulder_vec[0])))
+        self._log_debug(f"Torso rotation (info only): Δ={torso_rotation:.3f}")
+        wrist_dx = wrist.x - elbow.x  # negative values indicate outward movement with mirrored camera
+        self._log_debug(f"Wrist Δx={wrist_dx:.3f}, stage={self.stage}")
+        rotation_angle = calculate_angle(shoulder, elbow, wrist)
+        self.current_rep_angles.append(rotation_angle)
+
+        if self.stage == 'front' and wrist_dx <= self.out_threshold:
+            self.stage = 'out'
+            print(f"[ShoulderExternalRotation] ✅ Rep counted (Δx={wrist_dx:.3f})")
+            angles_snapshot = self.current_rep_angles.copy()
+            self.current_rep_angles = []
+            return True, angles_snapshot
+
+        if self.stage == 'out' and wrist_dx >= self.reset_threshold:
+            self.stage = 'front'
+            self.current_rep_angles = []
+            self._log_debug("Reset to front position.")
+
+        return False, None
+
+def draw_tips_box(frame, text, position=(10, 40), box_color=(0, 0, 0), text_color=(255, 255, 255)):
+    font = cv2.FONT_HERSHEY_SIMPLEX
+    font_scale = 0.6
+    thickness = 1
+    padding = 10
+    text_size, _ = cv2.getTextSize(text, font, font_scale, thickness)
+    x, y = position
+
+    cv2.rectangle(
+        frame,
+        (x - padding, y - text_size[1] - padding),
+        (x + text_size[0] + padding, y + padding // 2),
+        box_color,
+        -1
+    )
+    cv2.putText(frame, text, (x, y), font, font_scale, text_color, thickness, cv2.LINE_AA)
+
+
+
+# Model path - 模型文件路径
+save_model_path = os.path.dirname(os.path.abspath(__file__))  # 使用当前代码文件所在目录
+
+
+# Define the codec and create VideoWriter object
+# Output video path - 输出视频保存路径（如果save_video=True）
+output_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "output_videos")  # 在当前目录下创建output_videos文件夹
+if not os.path.exists(output_path):
+    os.makedirs(output_path)
+
+
+
+from tensorflow.keras.layers import Layer, Dense, Dropout, LayerNormalization, MultiHeadAttention
+from tensorflow.keras.models import Sequential
+from tensorflow.keras.utils import register_keras_serializable
+
+
+try:
+    TransformerBlock
+except NameError:
+
+    @register_keras_serializable()
+    class TransformerBlock(Layer):
+        def __init__(self, embed_dim, num_heads, ff_dim, rate=0.1, **kwargs):
+            super(TransformerBlock, self).__init__(**kwargs)
+            self.embed_dim = embed_dim
+            self.num_heads = num_heads
+            self.ff_dim = ff_dim
+            self.rate = rate
+    
+            self.att = MultiHeadAttention(num_heads=num_heads, key_dim=embed_dim)
+            self.ffn = Sequential([
+                Dense(ff_dim, activation="relu"),
+                Dense(embed_dim),
+            ])
+            self.layernorm1 = LayerNormalization(epsilon=1e-6)
+            self.layernorm2 = LayerNormalization(epsilon=1e-6)
+            self.dropout1 = Dropout(rate)
+            self.dropout2 = Dropout(rate)
+    
+        def call(self, inputs, training):
+            attn_output = self.att(inputs, inputs)
+            attn_output = self.dropout1(attn_output, training=training)
+            out1 = self.layernorm1(inputs + attn_output)
+            ffn_output = self.ffn(out1)
+            ffn_output = self.dropout2(ffn_output, training=training)
+            return self.layernorm2(out1 + ffn_output)
+    
+        def get_config(self):
+            config = super().get_config()
+            config.update({
+                "embed_dim": self.embed_dim,
+                "num_heads": self.num_heads,
+                "ff_dim": self.ff_dim,
+                "rate": self.rate,
+            })
+            return config
+
+
+
+
+myModel = load_model(save_model_path + '/transformer_model.h5',
+                   custom_objects={'TransformerBlock': TransformerBlock})
+
+
+
+# 🔹 Function to compute entropy over sliding windows
+def compute_entropy(signal, window_size=50):
+    entropy_values = []
+    for i in range(len(signal) - window_size):
+        window = signal[i:i + window_size]
+        entropy_values.append(differential_entropy(window))
+    return np.array(entropy_values)
+
+
+
+
+
+def pearson_autocorrelation(signal):
+    N = len(signal)
+    mean_signal = np.mean(signal)
+    autocorr = []
+
+    for lag in range(N):
+        # Pearson correlation formula
+        numerator = np.sum((signal[:N-lag] - mean_signal) * (signal[lag:] - mean_signal))
+        denominator = np.sqrt(np.sum((signal[:N-lag] - mean_signal)**2)) * np.sqrt(np.sum((signal[lag:] - mean_signal)**2))
+        
+        if denominator == 0:
+            autocorr.append(0)
+        else:
+            autocorr.append(numerator / denominator)
+    
+    return np.array(autocorr)
+
+
+
+
+
+desired_width = 520   # Set your desired width
+desired_height = 600  # Set your desired height
+info_panel_width = 260  # Width of the right-side info panel
+
+
+
+
+def ResizeWithAspectRatio(image, desiredFrameWidth, inter=cv2.INTER_AREA):
+    (h, w) = image.shape[:2]
+
+    # Compute the scaling factor based on desired width
+    r = desiredFrameWidth / float(w)
+    desired_width = desiredFrameWidth
+    desired_height = int(h * r)
+
+    dim = (desired_width, desired_height)
+
+    return cv2.resize(image, dim, interpolation=inter)
+
+
+
+def get_direction(idx, x_projection, y_projection, projection_45, neg45_projection):
+    
+    direction = +1
+    
+    if idx == 0: # Movement along x-axis
+    
+        if x_projection > 0:
+            direction = +1
+            
+        else: 
+            direction = -1
+            
+        # print("Along x ", " ", direction)    
+            
+        
+    elif idx == 1: # Movement along y-axis
+            
+        if y_projection > 0:
+            direction = +1
+            
+        else: 
+            direction = -1
+            
+        # print("Along y ", " ", direction)   
+    
+    
+    elif idx == 2: # Movement along line y = x
+            
+        if projection_45 > 0:
+            direction = +1
+            
+        else: 
+            direction = -1
+            
+        # print("Along 45 ", " ", direction)   
+    
+    
+    else: 
+            
+        if neg45_projection > 0:
+            direction = +1
+            
+        else: 
+            direction = -1
+            
+        # print("Along neg45 ", " ", direction)   
+        
+    return direction
+
+
+    
+def process_video(activity=None, stop_event=None, target_reps=None, initial_reps=0, duration_minutes=1):
+    """
+    Run real-time action recognition and counting.
+
+    Args:
+        activity (str | None): Desired activity to recognize.
+        stop_event (threading.Event | None): Optional event to signal graceful stop.
+        target_reps (int | None): Optional reps target. When provided the loop stops
+            automatically once the target is reached.
+        initial_reps (int): Initial repetition count (for resuming).
+        duration_minutes (int): Maximum time to complete the exercise in minutes.
+
+    Returns:
+        dict: Session summary including repetition count and stop metadata.
+    """
+    global desired_activity
+
+    if activity:
+        desired_activity = activity
+    
+    # Initialize MediaPipe Pose
+    mp_pose = mp.solutions.pose
+    pose = mp_pose.Pose()
+    
+    mpDrawing = mp.solutions.drawing_utils  # Setup mediapipe
+    
+    cap = cv2.VideoCapture(0)
+    window_name = "3D Motion Tracking with Repetition Counting"
+    cv2.namedWindow(window_name, cv2.WINDOW_NORMAL)
+    try:
+        cv2.setWindowProperty(window_name, cv2.WND_PROP_TOPMOST, 1)
+    except Exception:
+        pass
+ 
+    TotalFramesInVideo = int(cap. get(cv2. CAP_PROP_FRAME_COUNT))
+    print("The length of the cap is ", TotalFramesInVideo)
+    
+    try:
+        repetition_count = max(0, int(initial_reps or 0))
+    except (TypeError, ValueError):
+        repetition_count = 0
+    target_value = None
+    if target_reps is not None:
+        try:
+            candidate = int(target_reps)
+            if candidate > 0:
+                target_value = candidate
+        except (TypeError, ValueError):
+            target_value = None
+
+    target_reached = False
+    stop_reason = "stopped"
+
+    def finalize_current_rep_signal(rom_override=None):
+        nonlocal current_rep_signal, current_rep_durations, rep_sparc_scores, rep_rom_scores, current_rep_angles, rep_durations
+        min_samples = 10
+        if len(current_rep_signal) >= min_samples:
+            avg_dt = sum(current_rep_durations) / len(current_rep_durations) if current_rep_durations else 0
+            sample_rate = 1.0 / avg_dt if avg_dt and avg_dt > 1e-3 else 30.0
+            sparc_value = calculate_sparc(current_rep_signal, sample_rate=sample_rate)
+            if sparc_value is not None:
+                rep_sparc_scores.append(sparc_value)
+        current_rep_signal = []
+        if current_rep_durations:
+            total_rep_time = sum(current_rep_durations)
+            if total_rep_time > 0:
+                rep_durations.append(total_rep_time)
+        current_rep_durations = []
+        if rom_override is not None:
+            rep_rom_scores.append(rom_override)
+        else:
+            if len(current_rep_angles) >= 2:
+                rep_rom_scores.append(max(current_rep_angles) - min(current_rep_angles))
+        current_rep_angles = []
+
+    def register_rep(rom_override=None):
+        """Increment rep counter and mark completion when hitting the target."""
+        nonlocal repetition_count, target_reached, stop_reason
+        finalize_current_rep_signal(rom_override=rom_override)
+        repetition_count += 1
+        if target_value and repetition_count >= target_value and not target_reached:
+            target_reached = True
+            stop_reason = "target_reached"
+
+    
+    peaks, properties = [], []
+    
+    wait_idx = 0
+    
+    dynamic_prominence_ratio = 0.8
+    
+    min_distance = 20
+    
+    peak_detect_threshold = 0.
+
+    if desired_activity == 'run' or desired_activity == 'jump':
+        alpha = 0.4  # Adjust for smoother motion tracking 
+        min_distance = 2 
+        peak_detect_threshold = 0.4
+    else:
+        alpha = 0.1
+        min_distance = 20
+
+
+    
+    frame_count = 0
+    
+    landmarksArray = []
+    columnArray    = []
+    motion_distance = []
+    motion_history_full = []
+    rep_sparc_scores = []
+    rep_rom_scores = []
+    rep_durations = []
+    current_rep_signal = []
+    current_rep_durations = []
+    current_rep_angles = []
+    last_sample_timestamp = None
+
+    
+    avg_dx = 0 
+    avg_dy = 0
+    
+    smoothed_dx = 0
+    smoothed_dy = 0 
+    autocorr = 0
+    autocorr_array = []
+    
+
+    motion_history = []
+    motion_history = deque(maxlen=8) 
+    
+    avg_dx, avg_dy = 0, 0
+
+      
+    frame_count = 0
+    total_dx, total_dy = 0, 0
+    motion_amplitude = 0
+    prev_x, prev_y = 0, 0
+
+    prev_landmarks = None
+    current_activity = None
+    last_count_frame = -9999
+    min_count_frame_gap = 30  # 必须间隔至少 30 帧（约 1s）才能再次记数
+    
+    motion_history_x = deque(maxlen=(100))
+    motion_history_y = deque(maxlen=(100))
+
+    
+    motion_history_45 = deque(maxlen=(100))
+    motion_history_neg45 = deque(maxlen=(100))
+    
+    variance_x = 0
+    variance_y = 0
+    variance_45 = 0
+    variance_neg45 = 0
+    
+
+    
+    prev_peak_array_length = 0
+    
+
+    
+    noOfFrameSize = 16
+    noOfFeatures  = 132
+    lastLandmarkPoint = 33 
+    
+    
+    motion_amplitude_threshold = 8
+    custom_detectors_map = {
+        'custom_elbow_flexion': ElbowFlexionDetector(),
+        'standing_shoulder_external_rotation_custom': ShoulderExternalRotationDetector(),
+    }
+    use_custom_logic = desired_activity in custom_detectors_map
+    custom_detector = custom_detectors_map.get(desired_activity)
+
+    if desired_activity == 'standing_shoulder_abduction':
+        motion_distance_arr_limit = 800
+    elif desired_activity == 'standing_shoulder_extension':
+        motion_distance_arr_limit = 500
+    else:
+        motion_distance_arr_limit = 800
+    
+
+    
+    variance_array = []
+    resultIndex = 0
+
+    overall_direction = +1
+    
+    
+    desiredFrameWidth = 400
+    
+    prev_repetition_count = 0
+
+    
+    for i in range(0, lastLandmarkPoint*4):
+        columnArray.append(i)
+    
+    landMarksDf = pd.DataFrame(columns = columnArray)
+    
+    first_actvity_detected = False
+    
+
+    
+    output_frame_width = desired_width + info_panel_width
+    
+    if save_video:
+        # fps = cap.get(cv2.CAP_PROP_FPS)
+        fps = 8
+        # 🔹 Save as MP4 instead of AVI
+        output_video_path = os.path.join(output_path, desired_activity + "_real_time.mp4")
+        
+        fourcc = cv2.VideoWriter_fourcc(*'mp4v')  
+        out = cv2.VideoWriter(output_video_path, fourcc, fps, (output_frame_width, desired_height))
+
+    session_start_time = time.time()
+
+    conf = 1.0
+    
+    with mp_pose.Pose(min_detection_confidence=0.9, min_tracking_confidence=0.9) as pose:
+            
+        while cap.isOpened():
+            if stop_event and stop_event.is_set():
+                print("🛑 Stop signal received, exiting loop...")
+                break
+            
+            ret, frame = cap.read()
+            # frame = cv2.flip(frame, 0)
+            # frame = cv2.flip(frame, 1)
+            
+            if not ret:
+                break
+    
+            rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            results = pose.process(rgb_frame)
+            skeleton_detected = False
+            current_sample_timestamp = time.time()
+            if last_sample_timestamp is None:
+                frame_dt = 1.0 / 30.0
+            else:
+                frame_dt = current_sample_timestamp - last_sample_timestamp
+                if frame_dt <= 0:
+                    frame_dt = 1.0 / 30.0
+            last_sample_timestamp = current_sample_timestamp
+            
+            landmarksArray    = []
+ 
+            
+            if results.pose_landmarks:
+                skeleton_detected = True
+                
+                curr_landmarks = results.pose_landmarks.landmark 
+    
+                
+                try: # Try and except are used because we are not going to get the landmarks all the time may be due to interruptions in the camera view 
+                    capturedLandmarks = results.pose_world_landmarks.landmark # Extract all the landmarks
+                    
+                    for i in range(0, lastLandmarkPoint):
+                                          
+                        landmarksArray.append(capturedLandmarks[i].x) 
+                        landmarksArray.append(capturedLandmarks[i].y)
+                        landmarksArray.append(capturedLandmarks[i].z)
+                        landmarksArray.append(capturedLandmarks[i].visibility)
+                                             
+                             
+                except: 
+                    pass;
+                
+                
+                landmarksArray = [landmarksArray]
+                addDf = pd.DataFrame(landmarksArray)
+                
+                motion_amplitude = None
+
+                if use_custom_logic:
+                    current_activity = desired_activity
+                if len(landMarksDf) < noOfFrameSize:  
+                    landMarksDf = pd.concat([landMarksDf, addDf], ignore_index=True, axis =0)
+
+                
+                elif len(landMarksDf) >= noOfFrameSize and not use_custom_logic:    
+                    landMarksDf = pd.concat([landMarksDf, addDf], ignore_index=True, axis =0)
+                    landMarksDf.drop(axis = 0, index = 0, inplace = True)
+                    landMarksDf = landMarksDf.reset_index(drop =True)
+                    inputArray = np.array(landMarksDf) 
+                    
+       
+                    result = myModel(inputArray.reshape(1,noOfFrameSize, noOfFeatures,1))            # print(np.argmax(result))
+                    
+                    resultIndex = np.argmax(result)
+                    predicted_activity = activitiesName[resultIndex]
+                    current_activity = predicted_activity
+                    conf = np.max(result)
+                        
+                # print("Input array length : ", len(landMarksDf))    
+                
+        
+                if prev_landmarks:
+                    
+                    total_dx, total_dy = 0, 0
+                    count = 0
+        
+        
+                    for i, landmark in enumerate(curr_landmarks):
+                        x, y = (landmark.x * frame.shape[1]), (landmark.y * frame.shape[0])
+                        prev_x, prev_y = (prev_landmarks[i].x * frame.shape[1]), (prev_landmarks[i].y * frame.shape[0])
+        
+                        dx, dy = x - prev_x, y - prev_y
+                        
+                        
+                        delta_limit = 60
+                        
+                        if dx > delta_limit:
+                            dx = delta_limit 
+                            
+                        elif dx < -delta_limit:
+                            dx = -delta_limit
+                            
+                            
+                        if dy > delta_limit:
+                            dy = delta_limit
+                            
+                        elif dy < -delta_limit:
+                            dy = -delta_limit
+                        
+                        
+                        
+                        # print("dx : ", dx, " dy : ", dy)
+                        
+                        total_dx += dx
+                        total_dy += dy
+                        count += 1
+        
+                        # Draw motion vectors
+                        cv2.arrowedLine(frame, (int(prev_x), int(prev_y)), (int(x), int(y)), (0, 255, 0), 1)
+
+     
+    
+    
+                    if count > 0:
+                        # Compute resultant motion
+                        resultant_dx, resultant_dy = total_dx, total_dy
+                    
+                        # Apply Exponential Moving Average
+                        smoothed_dx = alpha * resultant_dx + (1 - alpha) * smoothed_dx
+                        smoothed_dy = alpha * resultant_dy + (1 - alpha) * smoothed_dy
+                    
+                        # Store in motion history
+                        motion_history.append((smoothed_dx, smoothed_dy))
+                     
+
+                        
+                        # Compute the combined vector's amplitude
+                        motion_amplitude = np.sqrt(smoothed_dx**2 + smoothed_dy**2)
+                        
+
+    
+                        motion_history_x.append(smoothed_dx)
+                        motion_history_y.append(smoothed_dy)
+                
+
+                
+                        smoothed_45 = (smoothed_dx + smoothed_dy) / np.sqrt(2)
+                        smoothed_neg45 = (smoothed_dx - smoothed_dy) / np.sqrt(2)
+                        
+                        
+                        # Store motion along diagonal axes
+                        motion_history_45.append(smoothed_45)
+                        motion_history_neg45.append(smoothed_neg45)
+                        
+                        
+                        # print(smoothed_dx, smoothed_dy, smoothed_45, smoothed_neg45)
+                       
+                        
+                        
+                        if not use_custom_logic:
+                            # Initialize default direction vector
+                            norm_dx, norm_dy = 0, 0
+                            
+                            if len(motion_history_x) > 3:
+                                variance_x = statistics.variance(motion_history_x)
+                                variance_y = statistics.variance(motion_history_y)
+                                variance_45 = statistics.variance(motion_history_45)
+                                variance_neg45 = statistics.variance(motion_history_neg45)
+                                
+                                variance_array = np.array([variance_x, variance_y, variance_45, variance_neg45])
+                                max_variance_idx = np.argmax(variance_array)
+                                overall_direction = get_direction(
+                                    max_variance_idx, smoothed_dx, smoothed_dy, smoothed_45, smoothed_neg45
+                                )
+                            else:
+                                overall_direction = 0
+
+                            # Track ROM angles for transformer-based exercises
+                            try:
+                                if desired_activity == 'standing_shoulder_abduction':
+                                    left_hip = curr_landmarks[mp.solutions.pose.PoseLandmark.LEFT_HIP.value]
+                                    left_shoulder = curr_landmarks[mp.solutions.pose.PoseLandmark.LEFT_SHOULDER.value]
+                                    left_wrist = curr_landmarks[mp.solutions.pose.PoseLandmark.LEFT_WRIST.value]
+                                    right_hip = curr_landmarks[mp.solutions.pose.PoseLandmark.RIGHT_HIP.value]
+                                    right_shoulder = curr_landmarks[mp.solutions.pose.PoseLandmark.RIGHT_SHOULDER.value]
+                                    right_wrist = curr_landmarks[mp.solutions.pose.PoseLandmark.RIGHT_WRIST.value]
+                                    left_angle = calculate_angle(left_hip, left_shoulder, left_wrist)
+                                    right_angle = calculate_angle(right_hip, right_shoulder, right_wrist)
+                                    current_rep_angles.append(max(left_angle, right_angle))
+                                elif desired_activity == 'standing_shoulder_extension':
+                                    right_hip = curr_landmarks[mp.solutions.pose.PoseLandmark.RIGHT_HIP.value]
+                                    right_shoulder = curr_landmarks[mp.solutions.pose.PoseLandmark.RIGHT_SHOULDER.value]
+                                    right_wrist = curr_landmarks[mp.solutions.pose.PoseLandmark.RIGHT_WRIST.value]
+                                    extension_angle = calculate_angle(right_hip, right_shoulder, right_wrist)
+                                    current_rep_angles.append(extension_angle)
+                            except (IndexError, AttributeError):
+                                pass
+
+                            if (
+                                current_activity == desired_activity
+                                and len(peaks) == 0
+                                and not first_actvity_detected
+                                and (frame_count - last_count_frame) > min_count_frame_gap
+                                and frame_count > 30  # Wait at least 30 frames (~1 second) before initial trigger
+                                and motion_amplitude > motion_amplitude_threshold  # Only trigger if there's actual motion
+                            ):
+                                register_rep()
+                                first_actvity_detected = True
+                                last_count_frame = frame_count
+                                print(
+                                    f"[Repetition] Initial trigger at frame {frame_count}: "
+                                    f"activity={current_activity}, confidence={conf:.3f}, count={repetition_count}"
+                                )
+
+                        motion_distance.append(motion_amplitude * overall_direction)
+                        motion_history_full.append(motion_amplitude * overall_direction)
+
+                        if frame_count > 2 and wait_idx <= 0:
+                            if len(motion_distance) > motion_distance_arr_limit:
+                                motion_distance.pop(0)
+                        
+                            autocorr = pearson_autocorrelation(np.array(motion_distance))
+                            if np.max(autocorr) != 0:
+                                autocorr = autocorr / np.max(autocorr)
+                            
+                            prominence_threshold = np.max(autocorr) * dynamic_prominence_ratio  
+                            
+                            if len(autocorr) > 20:
+                                autocorr = autocorr[:-20]
+                                
+                            peaks, properties = find_peaks(
+                                autocorr,
+                                height=peak_detect_threshold,
+                                prominence=prominence_threshold,  
+                                distance=min_distance,  
+                                width=2,
+                            )
+                            
+                            peak_buffer_limit = 3
+                            peak_distances = np.diff(peaks) if len(peaks) > 1 else [0]
+                            avg_period = np.mean(peak_distances) if len(peak_distances) > 0 else 0
+           
+                            if (
+                                motion_amplitude > motion_amplitude_threshold
+                                and current_activity == desired_activity
+                                and (frame_count - last_count_frame) > min_count_frame_gap
+                            ):
+                                if len(peaks) > prev_peak_array_length and len(peaks) < peak_buffer_limit:
+                                    register_rep()
+                                    last_count_frame = frame_count
+                                    print(
+                                        f"[Repetition] Peak growth detected (len={len(peaks)}, "
+                                        f"prev={prev_peak_array_length}) at frame {frame_count}, "
+                                        f"activity={current_activity}, confidence={conf:.3f}, "
+                                        f"count={repetition_count}"
+                                    )
+                                elif len(peaks) >= peak_buffer_limit:
+                                    wait_idx = peaks[0]
+                                    motion_distance = motion_distance[wait_idx:]
+                                    register_rep()
+                                    last_count_frame = frame_count
+                                    print(
+                                        f"[Repetition] Peak buffer reached (len={len(peaks)}) "
+                                        f"at frame {frame_count}, activity={current_activity}, "
+                                        f"confidence={conf:.3f}, count={repetition_count}"
+                                    )
+         
+                            prev_peak_array_length = len(peaks)
+      
+                        prev_repetition_count = repetition_count
+                        
+                        # Display motion vector (only for transformer-based exercises)
+                        center_x, center_y = frame.shape[1] // 2, frame.shape[0] // 2
+                        if motion_amplitude and motion_amplitude > motion_amplitude_threshold:
+                            norm_dx = smoothed_dx / motion_amplitude
+                            norm_dy = smoothed_dy / motion_amplitude
+                        else:
+                            norm_dx, norm_dy = 0, 0
+                        cv2.arrowedLine(frame, (center_x, center_y),
+                                        (int(center_x + norm_dx * motion_amplitude),
+                                          int(center_y + norm_dy * motion_amplitude)), (0, 0, 255), 3)
+                                            
+                if motion_amplitude is not None:
+                    current_rep_signal.append(float(motion_amplitude))
+                    current_rep_durations.append(frame_dt)
+
+                if use_custom_logic and custom_detector:
+                    detector_result = custom_detector.update(curr_landmarks)
+                    if isinstance(detector_result, tuple):
+                        rep_completed, rep_angles = detector_result
+                    else:
+                        rep_completed = detector_result
+                        rep_angles = None
+                    if rep_completed:
+                        rom_value = None
+                        if rep_angles and len(rep_angles) >= 2:
+                            rom_value = max(rep_angles) - min(rep_angles)
+                        register_rep(rom_override=rom_value)
+
+                mpDrawing.draw_landmarks(
+                    frame,
+                    results.pose_landmarks,
+                    mp_pose.POSE_CONNECTIONS,
+                    mpDrawing.DrawingSpec(color = (0, 0, 255), thickness = 2, circle_radius = 4),
+                    mpDrawing.DrawingSpec(color = (0, 255, 0), thickness = 2, circle_radius = 0)
+                )
+                     
+                prev_landmarks = curr_landmarks 
+                
+                
+            frame_count+=1
+            
+            if wait_idx > 0:
+                wait_idx -= 1
+            
+
+            
+            if stop_event and stop_event.is_set():
+                print("🛑 Stop signal received, closing windows...")
+                if stop_reason != "target_reached":
+                    stop_reason = "manual_stop"
+                break
+            
+            frame = cv2.resize(frame, (desired_width, desired_height))
+        
+            # Display repetition count (moved to side panel)
+            # cv2.putText(frame, f"Repetitions: {repetition_count}", (30, 50),
+            #             cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2, cv2.LINE_AA)
+
+            # Build right-side info panel
+            panel = np.full((desired_height, info_panel_width, 3), (18, 25, 55), dtype=np.uint8)
+            card_margin_x = 15
+            card_width = info_panel_width - 2 * card_margin_x
+            card_height = 80
+            card_spacing = 15
+            card_y = 30
+
+            pretty_activity = desired_activity.replace('_', ' ').title() if desired_activity else "Unknown"
+            elapsed_time = max(0.0, time.time() - session_start_time)
+            elapsed_seconds = int(elapsed_time)
+            timer_text = f"{elapsed_seconds // 60:02}:{elapsed_seconds % 60:02}"
+            reps_display = f"{repetition_count}/{target_value}" if target_value else str(repetition_count)
+
+            time_limit_text = f"{duration_minutes} minutes"
+            panel_sections = [
+                ("Exercise", pretty_activity, (255, 255, 255)),
+                ("Reps", reps_display, (0, 255, 0)),
+                ("Time", timer_text, (0, 255, 255)),
+                ("Time Limit", time_limit_text, (255, 165, 0)),  # Orange color
+            ]
+            detection_text = (
+                "Ensure 1m-2m distance from camera. Skeleton detected. Keep position steady."
+                if skeleton_detected else
+                "Ensure 1m-2m distance from camera. Please ensure your skeleton is fully visible."
+            )
+            detection_color = (0, 255, 0) if skeleton_detected else (0, 0, 255)
+            panel_sections.append(("Detection", detection_text, detection_color))
+
+            for title, value, value_color in panel_sections:
+                y1 = card_y
+                current_height = 120 if title == "Detection" else card_height
+                y2 = y1 + current_height
+                cv2.rectangle(panel, (card_margin_x, y1), (card_margin_x + card_width, y2), (0, 0, 255), 2)
+                cv2.putText(panel, title, (card_margin_x + 10, y1 + 25),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.5, (220, 220, 220), 1, cv2.LINE_AA)
+
+                wrap_width = 26 if title == "Detection" else 18  # Increased for better wrapping with larger font
+                wrapped_lines = textwrap.wrap(value, width=wrap_width) or [value]
+                max_lines = 3 if title == "Detection" else 2
+                # Use smaller font for Detection
+                font_scale = 0.45 if title == "Detection" else 0.55
+                # Adjust line spacing for Detection based on font size
+                line_spacing = 16 if title == "Detection" else 18
+                # Use same font style as header for all panels to match design (thinner, cleaner)
+                font_type = cv2.FONT_HERSHEY_SIMPLEX  # Same as header
+                text_thickness = 1  # Same as header (thinner, cleaner)
+                line_type = cv2.LINE_AA  # Same anti-aliasing as header for smoother text
+                for idx, line in enumerate(wrapped_lines[:max_lines]):
+                    cv2.putText(
+                        panel,
+                        line,
+                        (card_margin_x + 10, y1 + 55 + idx * line_spacing),
+                        font_type,
+                        font_scale,
+                        value_color,
+                        text_thickness,
+                        line_type
+                    )
+
+                card_y = y2 + card_spacing
+
+            display_frame = np.hstack((frame, panel))
+
+            footer_text = "Press 'Q' to pause and save progress"
+            font = cv2.FONT_HERSHEY_SIMPLEX
+            font_scale = 0.55
+            thickness = 1
+            text_size, _ = cv2.getTextSize(footer_text, font, font_scale, thickness)
+            text_x = display_frame.shape[1] - text_size[0] - 20
+            text_y = display_frame.shape[0] - 15
+            cv2.rectangle(
+                display_frame,
+                (text_x - 8, text_y - text_size[1] - 6),
+                (display_frame.shape[1] - 10, text_y + 6),
+                (0, 0, 0),
+                -1
+            )
+            cv2.putText(
+                display_frame,
+                footer_text,
+                (text_x, text_y),
+                font,
+                font_scale,
+                (255, 255, 255),
+                thickness,
+                cv2.LINE_AA
+            )
+        
+            cv2.imshow(window_name, display_frame)
+        
+            if save_video:
+                out.write(display_frame)  # ✅ now frame size matches writer
+               
+            key = cv2.waitKey(10) & 0xFF
+            if key in (ord('q'), ord('Q')):
+                if stop_reason != "target_reached":
+                    stop_reason = "duration_exceeded"  # Use same logic as duration exceeded
+                break
+
+            # Check if duration limit exceeded
+            duration_seconds = duration_minutes * 60
+            if elapsed_time >= duration_seconds:
+                stop_reason = "duration_exceeded"
+                print(f"[Duration] Time limit exceeded ({elapsed_seconds}s / {duration_seconds}s). Completed {repetition_count} reps.")
+                break
+
+            if target_reached:
+                print(f"[Target] Desired repetitions reached ({repetition_count}/{target_value}).")
+                break
+        counting_results.append(repetition_count)
+        print("Current exercise : ", activitiesName[resultIndex], " total repetitions counted : ", repetition_count)
+            
+       
+        window_size = 200
+        entropy_repeat = compute_entropy(motion_history_full, window_size)
+        
+
+        
+        # try:
+        #     # Plot the motion
+        #     plt.figure(figsize=(10, 5))
+        #     plt.plot(motion_history_full, marker='.', linestyle='-', color='b', label='Motion')
+        
+        #     # Labels and title
+        #     plt.xlabel('Frame Index')
+        #     plt.ylabel('Motion')
+        #     plt.title('Motion vs time')
+        #     plt.legend()
+        #     plt.grid(True)
+            
+
+            
+        #     plt.show() 
+                  
+    
+            
+            
+        #     # Plot the autocorrelation for motion with detected peaks
+        #     plt.figure(figsize=(10, 5))
+        #     plt.plot(autocorr, marker='.', linestyle='-', color='b', label='Autocorrelation for motion')
+        
+        #     # Labels and title
+        #     plt.xlabel('Frame Index')
+        #     plt.ylabel('Autocorrelation')
+        #     plt.title('Autocorrelation for motion')
+        #     plt.legend()
+        #     plt.grid(True)
+        #     plt.show()
+            
+        #     plt.plot(autocorr)
+        #     plt.plot(peaks, autocorr[peaks], "x")
+        #     plt.vlines(x=peaks, ymin=autocorr[peaks] - properties["prominences"],
+        #                 ymax = autocorr[peaks], color = "C1")
+        #     plt.show()
+    
+        
+    
+        #     # 🔹 Plot results
+        #     fig, axes = plt.subplots(3, 2, figsize=(12, 12))
+
+        #     # Plot original signals
+        #     axes[0, 0].plot(motion_history_full, label="Repeating Signal", color='blue')
+        #     axes[0, 0].set_title("🔵 Repeating Signal")
+
+        #     # Plot entropy
+        #     axes[1, 0].plot(entropy_repeat, label="Entropy (Repeating)", color='blue')
+        #     axes[1, 0].set_title("🔵 Entropy of Repeating Signal")
+
+        #     plt.tight_layout()
+        #     plt.show()
+                
+    
+    
+        # except Exception as e:
+        #     print(e)
+        
+
+        cap.release()
+        cv2.destroyAllWindows()
+        
+        print(desired_activity)
+        print(counting_results)
+        
+        if save_video:
+            out.release()   # 🔹 Important! Finalize and save the file
+            print(f"✅ Saved video at: {output_video_path}")
+        
+
+        return {
+            "repetition_count": repetition_count,
+            "target_reached": target_reached,
+            "target_reps": target_value,
+            "stop_reason": stop_reason,
+            "activity": desired_activity,
+            "rep_sparc_scores": rep_sparc_scores,
+            "rep_rom_scores": rep_rom_scores,
+            "repetition_times": rep_durations,
+        }
+
+
+
+
+    
+    
+    
+    
+    

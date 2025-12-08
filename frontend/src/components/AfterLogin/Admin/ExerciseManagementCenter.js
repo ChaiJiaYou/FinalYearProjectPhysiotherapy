@@ -27,10 +27,7 @@ import {
   Alert,
   CircularProgress,
   Tooltip,
-  Collapse,
-  CardHeader,
   CardActions,
-  Divider,
   InputAdornment,
   Avatar,
 } from "@mui/material";
@@ -39,40 +36,31 @@ import {
   Add as AddIcon,
   Edit as EditIcon,
   Delete as DeleteIcon,
-  Visibility as ViewIcon,
   SmartToy as AIIcon,
-  ExpandMore as ExpandMoreIcon,
-  ExpandLess as ExpandLessIcon,
-  Info as InfoIcon,
   Search as SearchIcon,
   FilterList as FilterIcon,
   Clear as ClearIcon,
   Refresh as RefreshIcon,
+  Close as CloseIcon,
 } from "@mui/icons-material";
 import { toast } from "react-toastify";
 
 const ExerciseManagementCenter = () => {
   const [exercises, setExercises] = useState([]);
   const [filteredExercises, setFilteredExercises] = useState([]);
-  const [actions, setActions] = useState([]);
   const [loading, setLoading] = useState(false);
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
   const [editDialogOpen, setEditDialogOpen] = useState(false);
-  const [viewDialogOpen, setViewDialogOpen] = useState(false);
   const [selectedExercise, setSelectedExercise] = useState(null);
-  const [expandedRows, setExpandedRows] = useState(new Set());
   const [filters, setFilters] = useState({
-    category: 'all',
-    difficulty: 'all',
     search: ''
   });
-  const [formData, setFormData] = useState({
+  const initialFormState = {
     name: '',
-    category: 'upper_body',
-    difficulty: 'beginner',
     instructions: '',
-    action_id: ''
-  });
+    activity_name: ''
+  };
+  const [formData, setFormData] = useState(initialFormState);
 
   // 获取所有运动记录
   const fetchExercises = async () => {
@@ -101,38 +89,11 @@ const ExerciseManagementCenter = () => {
 
   useEffect(() => {
     fetchExercises();
-    fetchActions();
   }, []);
-
-  // 获取所有Actions
-  const fetchActions = async () => {
-    try {
-      const response = await fetch('http://127.0.0.1:8000/api/actions/');
-      if (response.ok) {
-        const data = await response.json();
-        // Backend returns {actions: [...]} format, extract the array
-        setActions(Array.isArray(data) ? data : (data.actions || []));
-      } else {
-        console.error('Failed to fetch actions');
-      }
-    } catch (error) {
-      console.error("Error fetching actions:", error);
-    }
-  };
 
   // 过滤exercises
   useEffect(() => {
     let filtered = exercises;
-
-    // 按category过滤
-    if (filters.category !== 'all') {
-      filtered = filtered.filter(exercise => exercise.category === filters.category);
-    }
-
-    // 按difficulty过滤
-    if (filters.difficulty !== 'all') {
-      filtered = filtered.filter(exercise => exercise.difficulty === filters.difficulty);
-    }
 
     // 按搜索关键词过滤
     if (filters.search) {
@@ -146,8 +107,12 @@ const ExerciseManagementCenter = () => {
   }, [exercises, filters]);
 
   const handleCreateExercise = async () => {
-    if (!formData.action_id || !formData.instructions || formData.instructions.trim() === '') {
+    if (!formData.instructions || formData.instructions.trim() === '') {
       toast.error('Please fill in required field');
+      return;
+    }
+    if (!formData.activity_name || formData.activity_name.trim() === '') {
+      toast.error('Activity name is required');
       return;
     }
 
@@ -155,6 +120,7 @@ const ExerciseManagementCenter = () => {
       const currentUserId = localStorage.getItem('userId');
       const formDataWithUser = {
         ...formData,
+        activity_name: formData.activity_name?.trim() || '',
         created_by: currentUserId
       };
 
@@ -169,7 +135,7 @@ const ExerciseManagementCenter = () => {
       if (response.ok) {
         toast.success('Exercise created successfully!');
         setCreateDialogOpen(false);
-        setFormData({ name: '', category: 'upper_body', difficulty: 'beginner', instructions: '', action_id: '' });
+        setFormData(initialFormState);
         fetchExercises();
       } else {
         const errorData = await response.json();
@@ -182,8 +148,12 @@ const ExerciseManagementCenter = () => {
   };
 
   const handleEditExercise = async () => {
-    if (!formData.action_id || !formData.instructions || formData.instructions.trim() === '') {
+    if (!formData.instructions || formData.instructions.trim() === '') {
       toast.error('Please fill in required field');
+      return;
+    }
+    if (!formData.activity_name || formData.activity_name.trim() === '') {
+      toast.error('Activity name is required');
       return;
     }
 
@@ -193,14 +163,17 @@ const ExerciseManagementCenter = () => {
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify(formData)
+        body: JSON.stringify({
+          ...formData,
+          activity_name: formData.activity_name?.trim() || ''
+        })
       });
 
       if (response.ok) {
         toast.success('Exercise updated successfully!');
         setEditDialogOpen(false);
         setSelectedExercise(null);
-        setFormData({ name: '', category: 'upper_body', difficulty: 'beginner', instructions: '', action_id: '' });
+        setFormData(initialFormState);
         fetchExercises();
       } else {
         const errorData = await response.json();
@@ -233,13 +206,7 @@ const ExerciseManagementCenter = () => {
   };
 
   const openCreateDialog = () => {
-    setFormData({ 
-      name: '', 
-      category: 'upper_body', 
-      difficulty: 'beginner', 
-      instructions: '', 
-      action_id: '' 
-    });
+    setFormData(initialFormState);
     setCreateDialogOpen(true);
   };
 
@@ -247,27 +214,10 @@ const ExerciseManagementCenter = () => {
     setSelectedExercise(exercise);
     setFormData({
       name: exercise.name,
-      category: exercise.category,
-      difficulty: exercise.difficulty,
       instructions: exercise.instructions,
-      action_id: exercise.action_id || ''
+      activity_name: exercise.activity_name || ''
     });
     setEditDialogOpen(true);
-  };
-
-  const openViewDialog = (exercise) => {
-    setSelectedExercise(exercise);
-    setViewDialogOpen(true);
-  };
-
-  const toggleRowExpansion = (exerciseId) => {
-    const newExpandedRows = new Set(expandedRows);
-    if (newExpandedRows.has(exerciseId)) {
-      newExpandedRows.delete(exerciseId);
-    } else {
-      newExpandedRows.add(exerciseId);
-    }
-    setExpandedRows(newExpandedRows);
   };
 
   const handleFilterChange = (filterType, value) => {
@@ -279,32 +229,10 @@ const ExerciseManagementCenter = () => {
 
   const clearFilters = () => {
     setFilters({
-      category: 'all',
-      difficulty: 'all',
       search: ''
     });
   };
 
-  const getCategoryColor = (category) => {
-    switch (category) {
-      case 'upper_body': return 'primary';
-      case 'lower_body': return 'secondary';
-      case 'full_body': return 'success';
-      case 'Balance': return 'info';
-      case 'Functional': return 'warning';
-      case 'ROM': return 'error';
-      default: return 'default';
-    }
-  };
-
-  const getDifficultyColor = (difficulty) => {
-    switch (difficulty) {
-      case 'beginner': return 'success';
-      case 'intermediate': return 'warning';
-      case 'advanced': return 'error';
-      default: return 'default';
-    }
-  };
 
   return (
     <Box sx={{ bgcolor: '#f8fafc', minHeight: '100vh', p: { xs: 2, md: 4 } }}>
@@ -334,60 +262,10 @@ const ExerciseManagementCenter = () => {
             minHeight: 300,
             p: 3,
           }}>
-            {/* Header with Refresh Button */}
-            <Box display="flex" justifyContent="space-between" alignItems="center" mb={3}>
-              <Typography variant="h6" sx={{ fontWeight: 600 }}>
-                Exercise Library ({filteredExercises.length} of {exercises.length})
-              </Typography>
-              <Box sx={{ display: 'flex', gap: 2 }}>
-                <Button
-                  variant="outlined"
-                  startIcon={<RefreshIcon />}
-                  onClick={fetchExercises}
-                  disabled={loading}
-                  size="small"
-                  sx={{
-                    borderRadius: 2,
-                    textTransform: 'uppercase',
-                    fontWeight: 600,
-                    px: 3,
-                    height: '40px',
-                    borderColor: '#3b82f6',
-                    color: '#3b82f6',
-                    '&:hover': {
-                      borderColor: '#2563eb',
-                      bgcolor: 'rgba(59, 130, 246, 0.04)',
-                    }
-                  }}
-                >
-                  Refresh
-                </Button>
-                <Button
-                  variant="contained"
-                  startIcon={<AddIcon />}
-                  onClick={openCreateDialog}
-                  size="small"
-                  sx={{
-                    borderRadius: 2,
-                    textTransform: 'uppercase',
-                    fontWeight: 600,
-                    px: 3,
-                    height: '40px',
-                    bgcolor: '#3b82f6',
-                    '&:hover': {
-                      bgcolor: '#2563eb',
-                    }
-                  }}
-                >
-                  Create Exercise
-                </Button>
-              </Box>
-            </Box>
-
-            {/* Filter Section */}
+            {/* Search and Action Buttons */}
             <Box sx={{ mb: 3 }}>
               <Grid container spacing={2} alignItems="center">
-                <Grid item xs={12} md={4}>
+                <Grid item xs={12} md={5}>
                   <TextField
                     placeholder="Search exercises..."
                     value={filters.search}
@@ -408,44 +286,6 @@ const ExerciseManagementCenter = () => {
                       }
                     }}
                   />
-                </Grid>
-                <Grid item xs={12} md={3}>
-                  <FormControl fullWidth size="small">
-                    <InputLabel>Category</InputLabel>
-                    <Select
-                      value={filters.category}
-                      onChange={(e) => handleFilterChange('category', e.target.value)}
-                      label="Category"
-                      sx={{ 
-                        borderRadius: 2,
-                        height: '40px',
-                      }}
-                    >
-                      <MenuItem value="all">All Categories</MenuItem>
-                      <MenuItem value="upper_body">Upper Body</MenuItem>
-                      <MenuItem value="lower_body">Lower Body</MenuItem>
-                      <MenuItem value="full_body">Full Body</MenuItem>
-                    </Select>
-                  </FormControl>
-                </Grid>
-                <Grid item xs={12} md={3}>
-                  <FormControl fullWidth size="small">
-                    <InputLabel>Difficulty</InputLabel>
-                    <Select
-                      value={filters.difficulty}
-                      onChange={(e) => handleFilterChange('difficulty', e.target.value)}
-                      label="Difficulty"
-                      sx={{ 
-                        borderRadius: 2,
-                        height: '40px',
-                      }}
-                    >
-                      <MenuItem value="all">All Levels</MenuItem>
-                      <MenuItem value="beginner">Beginner</MenuItem>
-                      <MenuItem value="intermediate">Intermediate</MenuItem>
-                      <MenuItem value="advanced">Advanced</MenuItem>
-                    </Select>
-                  </FormControl>
                 </Grid>
                 <Grid item xs={12} md={2}>
                   <Button
@@ -469,6 +309,27 @@ const ExerciseManagementCenter = () => {
                     Clear
                   </Button>
                 </Grid>
+                <Grid item xs={12} md={5} sx={{ display: 'flex', justifyContent: 'flex-end' }}>
+                  <Button
+                    variant="contained"
+                    startIcon={<AddIcon />}
+                    onClick={openCreateDialog}
+                    size="small"
+                    sx={{
+                      borderRadius: 2,
+                      textTransform: 'uppercase',
+                      fontWeight: 600,
+                      height: '40px',
+                      px: 3,
+                      bgcolor: '#3b82f6',
+                      '&:hover': {
+                        bgcolor: '#2563eb',
+                      }
+                    }}
+                  >
+                    Create Exercise
+                  </Button>
+                </Grid>
               </Grid>
             </Box>
 
@@ -487,152 +348,102 @@ const ExerciseManagementCenter = () => {
                   }
                 </Alert>
               ) : (
-                <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                <Grid container spacing={3}>
                   {filteredExercises.map((exercise) => (
-                    <Card 
-                      key={exercise.exercise_id} 
-                      sx={{ 
-                        borderRadius: 3, 
-                        border: '1px solid', 
-                        borderColor: 'grey.200',
-                        elevation: 0,
-                        '&:hover': {
-                          boxShadow: '0 2px 8px rgba(0,0,0,0.1)',
-                          borderColor: 'primary.main'
-                        },
-                        transition: 'all 0.2s ease-in-out'
-                      }}
-                    >
-                  <CardHeader
-                    avatar={
-                      <Avatar sx={{ bgcolor: 'primary.main' }}>
-                        <ExerciseIcon />
-                      </Avatar>
-                    }
-                    title={
-                      <Typography variant="h6" fontWeight="600">
-                        {exercise.name}
-                      </Typography>
-                    }
-                    subheader={
-                      <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap', mt: 1 }}>
-                        <Chip 
-                          label={exercise.category.replace('_', ' ').toUpperCase()} 
-                          color={getCategoryColor(exercise.category)}
-                          size="small"
-                        />
-                        <Chip 
-                          label={exercise.difficulty.toUpperCase()} 
-                          color={getDifficultyColor(exercise.difficulty)}
-                          size="small"
-                        />
-                        {exercise.action_id ? (
-                          <Chip 
-                            icon={<AIIcon />}
-                            label="AI Enabled" 
-                            color="success" 
-                            size="small"
-                          />
-                        ) : (
-                          <Chip 
-                            label="Manual Only" 
-                            color="default" 
-                            size="small"
-                          />
-                        )}
-                      </Box>
-                    }
-                    action={
-                      <Box sx={{ display: 'flex', gap: 1 }}>
-                        <Tooltip title="View Details">
-                          <IconButton 
-                            size="small" 
-                            onClick={() => openViewDialog(exercise)}
-                          >
-                            <ViewIcon />
-                          </IconButton>
-                        </Tooltip>
-                        <Tooltip title="Edit Exercise">
-                          <IconButton 
-                            size="small" 
-                            onClick={() => openEditDialog(exercise)}
-                          >
-                            <EditIcon />
-                          </IconButton>
-                        </Tooltip>
-                        <Tooltip title="Delete Exercise">
-                          <IconButton 
-                            size="small" 
-                            color="error"
-                            onClick={() => handleDeleteExercise(exercise.exercise_id)}
-                          >
-                            <DeleteIcon />
-                          </IconButton>
-                        </Tooltip>
-                        <Tooltip title={expandedRows.has(exercise.exercise_id) ? "Hide Details" : "Show Details"}>
-                          <IconButton 
-                            size="small" 
-                            onClick={() => toggleRowExpansion(exercise.exercise_id)}
-                          >
-                            {expandedRows.has(exercise.exercise_id) ? <ExpandLessIcon /> : <ExpandMoreIcon />}
-                          </IconButton>
-                        </Tooltip>
-                      </Box>
-                    }
-                  />
-                  
-                  <Collapse in={expandedRows.has(exercise.exercise_id)} timeout="auto" unmountOnExit>
-                    <Divider />
-                    <CardContent>
-                      <Grid container spacing={2}>
-                        <Grid item xs={12}>
-                          <Typography variant="subtitle2" color="text.secondary" gutterBottom>
-                            Instructions
-                          </Typography>
-                          <Typography variant="body1" sx={{ 
-                            whiteSpace: 'pre-wrap',
-                            lineHeight: 1.6,
-                            backgroundColor: 'grey.50',
-                            p: 2,
-                            borderRadius: 1,
-                            border: '1px solid',
-                            borderColor: 'grey.200'
-                          }}>
-                            {exercise.instructions || 'No instructions provided'}
-                          </Typography>
-                        </Grid>
-                        <Grid item xs={12} sm={6}>
-                          <Typography variant="subtitle2" color="text.secondary" gutterBottom>
-                            Exercise ID
-                          </Typography>
-                          <Typography variant="body2" sx={{ fontFamily: 'monospace' }}>
-                            {exercise.exercise_id}
-                          </Typography>
-                        </Grid>
-                        <Grid item xs={12} sm={6}>
-                          <Typography variant="subtitle2" color="text.secondary" gutterBottom>
-                            Created By
-                          </Typography>
-                          <Typography variant="body2">
-                            {exercise.created_by_name || 'Unknown'}
-                          </Typography>
-                        </Grid>
-                        {exercise.action_id && (
-                          <Grid item xs={12}>
-                            <Typography variant="subtitle2" color="text.secondary" gutterBottom>
-                              AI Action ID
+                    <Grid item xs={12} md={6} lg={4} key={exercise.exercise_id}>
+                      <Card
+                        variant="outlined"
+                        sx={{
+                          height: '100%',
+                          display: 'flex',
+                          flexDirection: 'column',
+                          borderRadius: 3,
+                          borderColor: 'grey.200',
+                          transition: 'all 0.25s ease',
+                          '&:hover': {
+                            boxShadow: '0 8px 16px rgba(0,0,0,0.12)',
+                            transform: 'translateY(-4px)',
+                            borderColor: 'primary.main',
+                          },
+                        }}
+                      >
+                        <CardContent sx={{ flexGrow: 1 }}>
+                          <Box display="flex" justifyContent="space-between" alignItems="flex-start">
+                            <Box display="flex" alignItems="center" gap={2}>
+                              <Avatar sx={{ bgcolor: 'primary.main' }}>
+                                <ExerciseIcon />
+                              </Avatar>
+                              <Box>
+                                <Typography variant="h6" fontWeight="600">
+                                  {exercise.name}
+                                </Typography>
+                                <Typography variant="caption" color="text.secondary">
+                                  ID: {exercise.exercise_id}
+                                </Typography>
+                              </Box>
+                            </Box>
+                            {/* Legacy AI training badges removed */}
+                          </Box>
+
+                          {exercise.created_by_name && (
+                            <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap', mt: 2, mb: 2 }}>
+                              <Chip
+                                label={`Created By: ${exercise.created_by_name}`}
+                                size="small"
+                                variant="outlined"
+                                color="info"
+                              />
+                            {exercise.activity_name && (
+                              <Chip
+                                label={`Activity: ${exercise.activity_name}`}
+                                size="small"
+                                variant="outlined"
+                                color="secondary"
+                              />
+                            )}
+                            </Box>
+                          )}
+
+                          {exercise.instructions && (
+                            <Typography
+                              variant="body2"
+                              color="text.secondary"
+                              sx={{
+                                mt: 2,
+                                mb: 1,
+                                lineHeight: 1.6,
+                                display: '-webkit-box',
+                                WebkitLineClamp: 3,
+                                WebkitBoxOrient: 'vertical',
+                                overflow: 'hidden',
+                                textOverflow: 'ellipsis',
+                              }}
+                            >
+                              {exercise.instructions}
                             </Typography>
-                            <Typography variant="body2" sx={{ fontFamily: 'monospace' }}>
-                              {exercise.action_id}
-                            </Typography>
-                          </Grid>
-                        )}
-                      </Grid>
-                    </CardContent>
-                  </Collapse>
-                    </Card>
+                          )}
+                        </CardContent>
+
+                        <CardActions sx={{ justifyContent: 'flex-start', px: 2, pb: 2 }}>
+                          <Tooltip title="Edit Exercise">
+                            <IconButton size="small" onClick={() => openEditDialog(exercise)}>
+                              <EditIcon />
+                            </IconButton>
+                          </Tooltip>
+                          <Tooltip title="Delete Exercise">
+                            <IconButton
+                              size="small"
+                              color="error"
+                              onClick={() => handleDeleteExercise(exercise.exercise_id)}
+                            >
+                              <DeleteIcon />
+                            </IconButton>
+                          </Tooltip>
+                        </CardActions>
+                      </Card>
+                    </Grid>
                   ))}
-                </Box>
+                </Grid>
               )}
             </Box>
           </Box>
@@ -642,7 +453,7 @@ const ExerciseManagementCenter = () => {
       {/* Create Exercise Dialog */}
       <Dialog open={createDialogOpen} onClose={() => {
         setCreateDialogOpen(false);
-        setFormData({ name: '', category: 'upper_body', difficulty: 'beginner', instructions: '', action_id: '' });
+        setFormData({ name: '', instructions: '' });
       }} maxWidth="md" fullWidth>
         <DialogTitle>Create New Exercise</DialogTitle>
         <DialogContent>
@@ -656,51 +467,6 @@ const ExerciseManagementCenter = () => {
                 required
               />
             </Grid>
-            <Grid item xs={12} sm={6}>
-              <FormControl fullWidth>
-                <InputLabel>Category</InputLabel>
-                <Select
-                  value={formData.category}
-                  onChange={(e) => setFormData({ ...formData, category: e.target.value })}
-                  label="Category"
-                >
-                  <MenuItem value="upper_body">Upper Body</MenuItem>
-                  <MenuItem value="lower_body">Lower Body</MenuItem>
-                  <MenuItem value="full_body">Full Body</MenuItem>
-                </Select>
-              </FormControl>
-            </Grid>
-            <Grid item xs={12} sm={6}>
-              <FormControl fullWidth>
-                <InputLabel>Difficulty</InputLabel>
-                <Select
-                  value={formData.difficulty}
-                  onChange={(e) => setFormData({ ...formData, difficulty: e.target.value })}
-                  label="Difficulty"
-                >
-                  <MenuItem value="beginner">Beginner</MenuItem>
-                  <MenuItem value="intermediate">Intermediate</MenuItem>
-                  <MenuItem value="advanced">Advanced</MenuItem>
-                </Select>
-              </FormControl>
-            </Grid>
-            <Grid item xs={12}>
-              <FormControl fullWidth required>
-                <InputLabel>Link to Action</InputLabel>
-                <Select
-                  value={formData.action_id}
-                  onChange={(e) => setFormData({ ...formData, action_id: e.target.value })}
-                  label="Link to Action"
-                  required
-                >
-                  {Array.isArray(actions) && actions.map((action) => (
-                    <MenuItem key={action.id} value={action.id}>
-                      {action.name} ({action.mode})
-                    </MenuItem>
-                  ))}
-                </Select>
-              </FormControl>
-            </Grid>
             <Grid item xs={12}>
               <TextField
                 fullWidth
@@ -712,12 +478,21 @@ const ExerciseManagementCenter = () => {
                 required
               />
             </Grid>
+            <Grid item xs={12}>
+              <TextField
+                fullWidth
+                label="Activity Name (Rehab Engine)"
+                value={formData.activity_name}
+                onChange={(e) => setFormData({ ...formData, activity_name: e.target.value })}
+                helperText="Must match one of the supported Rehab Engine activities (e.g. squats, run, standing_shoulder_abduction)"
+              />
+            </Grid>
           </Grid>
         </DialogContent>
         <DialogActions>
           <Button onClick={() => {
             setCreateDialogOpen(false);
-            setFormData({ name: '', category: 'upper_body', difficulty: 'beginner', instructions: '', action_id: '' });
+            setFormData(initialFormState);
           }}>Cancel</Button>
           <Button onClick={handleCreateExercise} variant="contained">Create</Button>
         </DialogActions>
@@ -737,51 +512,6 @@ const ExerciseManagementCenter = () => {
                 required
               />
             </Grid>
-            <Grid item xs={12} sm={6}>
-              <FormControl fullWidth>
-                <InputLabel>Category</InputLabel>
-                <Select
-                  value={formData.category}
-                  onChange={(e) => setFormData({ ...formData, category: e.target.value })}
-                  label="Category"
-                >
-                  <MenuItem value="upper_body">Upper Body</MenuItem>
-                  <MenuItem value="lower_body">Lower Body</MenuItem>
-                  <MenuItem value="full_body">Full Body</MenuItem>
-                </Select>
-              </FormControl>
-            </Grid>
-            <Grid item xs={12} sm={6}>
-              <FormControl fullWidth>
-                <InputLabel>Difficulty</InputLabel>
-                <Select
-                  value={formData.difficulty}
-                  onChange={(e) => setFormData({ ...formData, difficulty: e.target.value })}
-                  label="Difficulty"
-                >
-                  <MenuItem value="beginner">Beginner</MenuItem>
-                  <MenuItem value="intermediate">Intermediate</MenuItem>
-                  <MenuItem value="advanced">Advanced</MenuItem>
-                </Select>
-              </FormControl>
-            </Grid>
-            <Grid item xs={12}>
-              <FormControl fullWidth required>
-                <InputLabel>Link to Action</InputLabel>
-                <Select
-                  value={formData.action_id}
-                  onChange={(e) => setFormData({ ...formData, action_id: e.target.value })}
-                  label="Link to Action"
-                  required
-                >
-                  {Array.isArray(actions) && actions.map((action) => (
-                    <MenuItem key={action.id} value={action.id}>
-                      {action.name} ({action.mode})
-                    </MenuItem>
-                  ))}
-                </Select>
-              </FormControl>
-            </Grid>
             <Grid item xs={12}>
               <TextField
                 fullWidth
@@ -793,6 +523,15 @@ const ExerciseManagementCenter = () => {
                 required
               />
             </Grid>
+            <Grid item xs={12}>
+              <TextField
+                fullWidth
+                label="Activity Name (Rehab Engine)"
+                value={formData.activity_name}
+                onChange={(e) => setFormData({ ...formData, activity_name: e.target.value })}
+                helperText="Must match a known Rehab Engine activity label"
+              />
+            </Grid>
           </Grid>
         </DialogContent>
         <DialogActions>
@@ -801,71 +540,6 @@ const ExerciseManagementCenter = () => {
         </DialogActions>
       </Dialog>
 
-      {/* View Exercise Dialog */}
-      <Dialog open={viewDialogOpen} onClose={() => setViewDialogOpen(false)} maxWidth="md" fullWidth>
-        <DialogTitle>Exercise Details</DialogTitle>
-        <DialogContent>
-          {selectedExercise && (
-            <Grid container spacing={2} sx={{ mt: 1 }}>
-              <Grid item xs={12}>
-                <Typography variant="h6" gutterBottom>
-                  {selectedExercise.name}
-                </Typography>
-              </Grid>
-              <Grid item xs={12} sm={6}>
-                <Typography variant="body2" color="text.secondary">
-                  Category
-                </Typography>
-                <Chip 
-                  label={selectedExercise.category.replace('_', ' ').toUpperCase()} 
-                  color={getCategoryColor(selectedExercise.category)}
-                  size="small"
-                />
-              </Grid>
-              <Grid item xs={12} sm={6}>
-                <Typography variant="body2" color="text.secondary">
-                  Difficulty
-                </Typography>
-                <Chip 
-                  label={selectedExercise.difficulty.toUpperCase()} 
-                  color={getDifficultyColor(selectedExercise.difficulty)}
-                  size="small"
-                />
-              </Grid>
-              <Grid item xs={12}>
-                <Typography variant="body2" color="text.secondary">
-                  Instructions
-                </Typography>
-                <Typography variant="body1">
-                  {selectedExercise.instructions}
-                </Typography>
-              </Grid>
-              <Grid item xs={12}>
-                <Typography variant="body2" color="text.secondary">
-                  AI Recognition
-                </Typography>
-                {selectedExercise.action_id ? (
-                  <Chip 
-                    icon={<AIIcon />}
-                    label="AI Enabled" 
-                    color="success" 
-                    size="small"
-                  />
-                ) : (
-                  <Chip 
-                    label="Manual Only" 
-                    color="default" 
-                    size="small"
-                  />
-                )}
-              </Grid>
-            </Grid>
-          )}
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setViewDialogOpen(false)}>Close</Button>
-        </DialogActions>
-      </Dialog>
     </Box>
   );
 };

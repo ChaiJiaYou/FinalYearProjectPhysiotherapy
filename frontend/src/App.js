@@ -23,7 +23,6 @@ import PatientListPage from './components/AfterLogin/PatientInfo/PatientListPage
 import PatientDetailPage from './components/AfterLogin/PatientInfo/PatientDetailPage';
 import AddMedicalHistoryPage from './components/AfterLogin/PatientInfo/AddMedicalHistoryPage';
 import PatientExercisePage from './components/AfterLogin/Patient/PatientExercisePage';
-import ActionLearningCenter from './components/AfterLogin/Admin/ActionLearningCenter';
 import ExerciseManagementCenter from './components/AfterLogin/Admin/ExerciseManagementCenter';
 import ErrorPage from './components/ErrorPage';
 import TestComponent from './components/TestComponent';
@@ -53,7 +52,6 @@ function App() {
         <Route path="create-treatment-plan" element={<CreateTreatmentPlanPage />} />
         <Route path="admin-treatment" element={<TreatmentAdminCenter />} />
         <Route path="exercise-management" element={<ExerciseManagementCenter />} />
-        <Route path="action-learning" element={<ActionLearningCenter />} />
         <Route path="patients" element={<PatientListPage />} />
         <Route path="patients/:patientId" element={<PatientDetailPage />} />
         <Route path="patients/:patientId/add-medical-history" element={<AddMedicalHistoryPage />} />

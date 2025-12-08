@@ -109,14 +109,8 @@ def create_appointment(request):
             
             
             # 根据创建者确定状态
-            # 如果患者创建，状态为 Pending；如果治疗师创建，状态为 Scheduled
-            # 优先检查therapist_created字段，如果没有则根据patient_id判断
-            if data.get('therapist_created'):
-                appointment_status = 'Scheduled'  # 治疗师创建的预约默认为Scheduled
-            elif data.get('patient_id'):
-                appointment_status = 'Pending'  # 患者创建的预约默认为Pending
-            else:
-                appointment_status = 'Scheduled'  # 默认治疗师创建
+            # 所有预约默认为 Scheduled（不再有 Pending 状态）
+            appointment_status = 'Scheduled'
             
             # 创建预约
             appointment = Appointment.objects.create(
@@ -280,12 +274,11 @@ def list_appointments(request):
             
             # 计算各种状态的统计
             stats = {
-                'pending': all_therapist_appointments.filter(status='Pending').count(),
                 'scheduled': all_therapist_appointments.filter(status='Scheduled').count(),
                 'completed': all_therapist_appointments.filter(status='Completed').count(),
                 'todaySessions': all_therapist_appointments.filter(
                     start_at__date=today,
-                    status__in=['Pending', 'Scheduled', 'Completed']
+                    status__in=['Scheduled', 'Completed']
                 ).count(),
             }
         else:
@@ -402,17 +395,21 @@ def create_availability_slot(request):
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
-def _has_time_conflict(therapist_id, start_at, end_at):
+def _has_time_conflict(therapist_id, start_at, end_at, exclude_appointment_id=None):
     """检查时间冲突"""
     # 查找与新区间重叠的活跃预约
-    overlapping = Appointment.objects.filter(
+    query = Appointment.objects.filter(
         therapist_id=therapist_id,
-        status__in=['Scheduled', 'Completed'],  # 只检查活跃状态
+        status__in=['Scheduled'],  # 只检查已预约状态
         start_at__lt=end_at,
         end_at__gt=start_at
-    ).exists()
+    )
     
-    return overlapping
+    # 排除当前预约（用于reschedule）
+    if exclude_appointment_id:
+        query = query.exclude(id=exclude_appointment_id)
+    
+    return query.exists()
 
 
 @api_view(['DELETE'])
@@ -453,20 +450,21 @@ def respond_to_appointment(request, appointment_id):
             # 如果不是数字，则作为 appointment_code 查找
             appointment = get_object_or_404(Appointment, appointment_code=appointment_id)
         
-        # 检查预约状态是否为 Pending
-        if appointment.status != 'Pending':
+        # 检查预约状态是否为 Scheduled（不再有 Pending 状态）
+        if appointment.status != 'Scheduled':
             return Response({
-                'error': 'Appointment is not in pending status'
+                'error': 'Appointment is not in scheduled status'
             }, status=status.HTTP_400_BAD_REQUEST)
         
-        # 更新状态
-        if action == 'accept':
-            appointment.status = 'Scheduled'
-            message = 'Appointment accepted successfully'
-        else:  # reject
+        # 更新状态（只支持 reject，因为不再有 accept）
+        if action == 'reject':
             appointment.status = 'Cancelled'
             appointment.cancelled_at = timezone.now()
-            message = 'Appointment rejected successfully'
+            message = 'Appointment cancelled successfully'
+        else:
+            return Response({
+                'error': 'Invalid action. Only reject is supported.'
+            }, status=status.HTTP_400_BAD_REQUEST)
         
         appointment.save()
         
@@ -525,8 +523,8 @@ def complete_appointment(request, appointment_id):
                 'error': 'You do not have permission to complete this appointment'
             }, status=status.HTTP_403_FORBIDDEN)
         
-        # 检查状态
-        if appointment.status not in ['Scheduled', 'Pending']:
+        # 检查状态（只允许完成 Scheduled 状态的预约）
+        if appointment.status != 'Scheduled':
             return Response({
                 'error': 'Appointment cannot be completed in current status'
             }, status=status.HTTP_400_BAD_REQUEST)
@@ -655,4 +653,135 @@ def cancel_appointment(request, appointment_id):
     except Exception as e:
         return Response({
             'error': f'Failed to cancel appointment: {str(e)}'
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(['PATCH'])
+@parser_classes([JSONParser])
+@csrf_exempt
+def reschedule_appointment(request, appointment_id):
+    """重新安排预约 - 更新预约时间"""
+    try:
+        appointment = get_object_or_404(Appointment, appointment_code=appointment_id)
+        
+        # 从请求中获取用户ID（可选，用于权限检查）
+        user_id = request.data.get('user_id')
+        if user_id:
+            try:
+                user = CustomUser.objects.get(id=user_id)
+                # 检查权限 - 治疗师或患者可以重新安排预约
+                if (user.role == 'therapist' and appointment.therapist_id.id != user.id) or \
+                   (user.role == 'patient' and appointment.patient_id and appointment.patient_id.id != user.id):
+                    return Response({
+                        'error': 'You do not have permission to reschedule this appointment'
+                    }, status=status.HTTP_403_FORBIDDEN)
+            except CustomUser.DoesNotExist:
+                pass  # 如果用户不存在，继续处理（向后兼容）
+        
+        # 检查状态 - 只允许重新安排 Scheduled 状态的预约
+        if appointment.status != 'Scheduled':
+            return Response({
+                'error': 'Only scheduled appointments can be rescheduled'
+            }, status=status.HTTP_400_BAD_REQUEST)
+        
+        # 获取新的开始和结束时间
+        start_at_str = request.data.get('start_at')
+        end_at_str = request.data.get('end_at')
+        
+        if not start_at_str or not end_at_str:
+            return Response({
+                'error': 'Both start_at and end_at are required'
+            }, status=status.HTTP_400_BAD_REQUEST)
+        
+        # 解析时间
+        try:
+            # 处理带毫秒的ISO格式
+            if start_at_str.endswith('Z'):
+                start_at_str = start_at_str.replace('Z', '+00:00')
+            elif '.' in start_at_str and not start_at_str.endswith('+00:00'):
+                if not start_at_str.endswith('Z') and '+' not in start_at_str and '-' not in start_at_str[-6:]:
+                    start_at_str += '+00:00'
+            
+            if end_at_str.endswith('Z'):
+                end_at_str = end_at_str.replace('Z', '+00:00')
+            elif '.' in end_at_str and not end_at_str.endswith('+00:00'):
+                if not end_at_str.endswith('Z') and '+' not in end_at_str and '-' not in end_at_str[-6:]:
+                    end_at_str += '+00:00'
+            
+            new_start_at = datetime.fromisoformat(start_at_str)
+            new_end_at = datetime.fromisoformat(end_at_str)
+            
+            # 检查是否已经是aware datetime
+            if new_start_at.tzinfo is None:
+                new_start_at = timezone.make_aware(new_start_at)
+            if new_end_at.tzinfo is None:
+                new_end_at = timezone.make_aware(new_end_at)
+                
+        except ValueError as e:
+            return Response({
+                'error': 'Invalid date format. Use ISO format (YYYY-MM-DDTHH:MM:SSZ)'
+            }, status=status.HTTP_400_BAD_REQUEST)
+        
+        # 验证结束时间晚于开始时间
+        if new_end_at <= new_start_at:
+            return Response({
+                'error': 'End time must be later than start time'
+            }, status=status.HTTP_400_BAD_REQUEST)
+        
+        # 验证不能是过去的时间
+        if new_start_at < timezone.now():
+            return Response({
+                'error': 'Cannot reschedule to a past time'
+            }, status=status.HTTP_400_BAD_REQUEST)
+        
+        with transaction.atomic():
+            # 检查时间冲突（排除当前预约）
+            if _has_time_conflict(appointment.therapist_id.id, new_start_at, new_end_at, exclude_appointment_id=appointment.id):
+                return Response({
+                    'error': 'Time slot unavailable. This time conflicts with another appointment.'
+                }, status=status.HTTP_409_CONFLICT)
+            
+            # 计算新的时长
+            duration_delta = new_end_at - new_start_at
+            new_duration_min = int(duration_delta.total_seconds() / 60)
+            
+            # 验证时长
+            if new_duration_min not in [30, 45, 60]:
+                return Response({
+                    'error': 'Invalid duration. Must be 30, 45, or 60 minutes.'
+                }, status=status.HTTP_400_BAD_REQUEST)
+            
+            # 更新预约
+            appointment.start_at = new_start_at
+            appointment.end_at = new_end_at
+            appointment.duration_min = new_duration_min
+            appointment.save()
+            
+            # 发送通知
+            if appointment.patient_id:
+                notification_service.send_notification(
+                    user=appointment.patient_id,
+                    title='Appointment Rescheduled',
+                    message=f'Your appointment has been rescheduled to {new_start_at.strftime("%Y-%m-%d %H:%M")}.',
+                    notification_type='appointment'
+                )
+            
+            # 通知治疗师
+            if appointment.therapist_id:
+                notification_service.send_notification(
+                    user=appointment.therapist_id,
+                    title='Appointment Rescheduled',
+                    message=f'An appointment has been rescheduled to {new_start_at.strftime("%Y-%m-%d %H:%M")}.',
+                    notification_type='appointment'
+                )
+            
+            serializer = AppointmentSerializer(appointment)
+            return Response({
+                'message': 'Appointment rescheduled successfully',
+                'appointment': serializer.data
+            }, status=status.HTTP_200_OK)
+            
+    except Exception as e:
+        return Response({
+            'error': f'Failed to reschedule appointment: {str(e)}'
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)

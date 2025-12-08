@@ -51,7 +51,7 @@ const TreatmentDetailsModal = ({ open, onClose, treatmentId, patientId }) => {
       const exercisesResponse = await fetch(`http://127.0.0.1:8000/api/treatment-exercises/${treatmentId}/`);
       if (exercisesResponse.ok) {
         const exercisesData = await exercisesResponse.json();
-        setExercises(exercisesData || []);
+        setExercises((exercisesData || []).filter(ex => ex.is_active !== false));
       }
     } catch (error) {
       console.error('Error fetching treatment details:', error);

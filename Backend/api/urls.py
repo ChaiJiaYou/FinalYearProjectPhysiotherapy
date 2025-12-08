@@ -28,6 +28,7 @@ urlpatterns = [
     path('appointments/<str:appointment_id>/respond/', appointment_views.respond_to_appointment, name='respond_to_appointment'),
     path('appointments/<str:appointment_id>/complete/', appointment_views.complete_appointment, name='complete_appointment'),
     path('appointments/<str:appointment_id>/cancel/', appointment_views.cancel_appointment, name='cancel_appointment'),
+    path('appointments/<str:appointment_id>/reschedule/', appointment_views.reschedule_appointment, name='reschedule_appointment'),
     path('appointments/<str:appointment_id>/admin-complete/', views.admin_force_complete_appointment, name='admin_force_complete_appointment'),
     path('appointments/<str:appointment_id>/admin-reject/', views.admin_force_reject_appointment, name='admin_force_reject_appointment'),
     path('availability/', appointment_views.get_availability_slots, name='get_availability_slots'),
@@ -67,6 +68,7 @@ urlpatterns = [
     path('patient-treatments/<str:patient_id>/', views.patient_treatments, name='patient-treatments'),
     path('therapist-treatments/<str:therapist_id>/', views.therapist_treatments, name='therapist-treatments'),
     path('treatment-exercises/<str:treatment_id>/', views.treatment_exercises, name='treatment-exercises'),
+    path('treatment-exercises-all/<str:treatment_id>/', views.treatment_exercises_all, name='treatment-exercises-all'),
     path('create-treatment-exercise/', views.create_treatment_exercise, name='create-treatment-exercise'),
     path('update-treatment-exercise/<str:exercise_id>/', views.update_treatment_exercise, name='update-treatment-exercise'),
     path('delete-treatment-exercise/<str:exercise_id>/', views.delete_treatment_exercise, name='delete-treatment-exercise'),
@@ -83,23 +85,6 @@ urlpatterns = [
 
     path('detect-pose/', views.detect_pose, name='detect-pose'),
 
-    # New Action Learning API Endpoints
-    path('actions/', views.list_actions, name='list-actions'),
-    path('actions/create/', views.create_action, name='create-action'),
-    path('actions/<int:action_id>/', views.action_detail, name='action-detail'),
-    path('actions/<int:action_id>/delete/', views.delete_action, name='delete-action'),
-    path('actions/<int:action_id>/record/', views.upload_record, name='upload-record'),
-    path('actions/<int:action_id>/finalize/', views.finalize_action, name='finalize-action'),
-    path('actions/<int:action_id>/setup/', views.setup_action_inference, name='setup-action-inference'),
-    
-    # Real-time inference endpoints
-    path('infer/stream/', views.infer_stream, name='infer-stream'),
-    path('infer/reset/', views.reset_inference, name='reset-inference'),
-    path('infer/status/', views.inference_status, name='inference-status'),
-    
-    # Legacy mode support
-    path('legacy/mode-status/', views.legacy_mode_status, name='legacy-mode-status'),
-    path('legacy/detect-pose/', views.legacy_detect_pose, name='legacy-detect-pose'),
 ]
 
 urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)

@@ -10,9 +10,13 @@ import {
   Box,
   CircularProgress,
   Alert,
+  IconButton,
+  InputAdornment,
 } from "@mui/material";
 import LockIcon from "@mui/icons-material/Lock";
 import SecurityIcon from "@mui/icons-material/Security";
+import Visibility from "@mui/icons-material/Visibility";
+import VisibilityOff from "@mui/icons-material/VisibilityOff";
 import { toast } from "react-toastify";
 
 const ChangeUserPasswordDialog = ({ open, onClose, userId, userName }) => {
@@ -20,6 +24,11 @@ const ChangeUserPasswordDialog = ({ open, onClose, userId, userName }) => {
     currentPassword: "",
     newPassword: "",
     confirmPassword: "",
+  });
+  const [showPasswords, setShowPasswords] = useState({
+    current: false,
+    new: false,
+    confirm: false,
   });
   const [errors, setErrors] = useState({});
   const [loading, setLoading] = useState(false);
@@ -38,6 +47,13 @@ const ChangeUserPasswordDialog = ({ open, onClose, userId, userName }) => {
         [name]: ''
       }));
     }
+  };
+
+  const togglePasswordVisibility = (field) => {
+    setShowPasswords(prev => ({
+      ...prev,
+      [field]: !prev[field]
+    }));
   };
 
   const validateForm = () => {
@@ -106,6 +122,11 @@ const ChangeUserPasswordDialog = ({ open, onClose, userId, userName }) => {
       newPassword: "",
       confirmPassword: "",
     });
+    setShowPasswords({
+      current: false,
+      new: false,
+      confirm: false,
+    });
     setErrors({});
     onClose();
   };
@@ -155,13 +176,24 @@ const ChangeUserPasswordDialog = ({ open, onClose, userId, userName }) => {
             fullWidth
             label="Current Admin Password"
             name="currentPassword"
-            type="password"
+            type={showPasswords.current ? "text" : "password"}
             value={formData.currentPassword}
             onChange={handleInputChange}
             error={!!errors.currentPassword}
             helperText={errors.currentPassword}
             InputProps={{
-              startAdornment: <LockIcon sx={{ mr: 1, color: "text.secondary" }} />
+              startAdornment: <LockIcon sx={{ mr: 1, color: "text.secondary" }} />,
+              endAdornment: (
+                <InputAdornment position="end">
+                  <IconButton
+                    onClick={() => togglePasswordVisibility("current")}
+                    edge="end"
+                    aria-label="toggle password visibility"
+                  >
+                    {showPasswords.current ? <VisibilityOff /> : <Visibility />}
+                  </IconButton>
+                </InputAdornment>
+              ),
             }}
             sx={{ mt: 1 }}
           />
@@ -170,13 +202,24 @@ const ChangeUserPasswordDialog = ({ open, onClose, userId, userName }) => {
             fullWidth
             label="New Password"
             name="newPassword"
-            type="password"
+            type={showPasswords.new ? "text" : "password"}
             value={formData.newPassword}
             onChange={handleInputChange}
             error={!!errors.newPassword}
             helperText={errors.newPassword || "Minimum 8 characters"}
             InputProps={{
-              startAdornment: <LockIcon sx={{ mr: 1, color: "text.secondary" }} />
+              startAdornment: <LockIcon sx={{ mr: 1, color: "text.secondary" }} />,
+              endAdornment: (
+                <InputAdornment position="end">
+                  <IconButton
+                    onClick={() => togglePasswordVisibility("new")}
+                    edge="end"
+                    aria-label="toggle password visibility"
+                  >
+                    {showPasswords.new ? <VisibilityOff /> : <Visibility />}
+                  </IconButton>
+                </InputAdornment>
+              ),
             }}
           />
 
@@ -184,13 +227,24 @@ const ChangeUserPasswordDialog = ({ open, onClose, userId, userName }) => {
             fullWidth
             label="Confirm New Password"
             name="confirmPassword"
-            type="password"
+            type={showPasswords.confirm ? "text" : "password"}
             value={formData.confirmPassword}
             onChange={handleInputChange}
             error={!!errors.confirmPassword}
             helperText={errors.confirmPassword}
             InputProps={{
-              startAdornment: <LockIcon sx={{ mr: 1, color: "text.secondary" }} />
+              startAdornment: <LockIcon sx={{ mr: 1, color: "text.secondary" }} />,
+              endAdornment: (
+                <InputAdornment position="end">
+                  <IconButton
+                    onClick={() => togglePasswordVisibility("confirm")}
+                    edge="end"
+                    aria-label="toggle password visibility"
+                  >
+                    {showPasswords.confirm ? <VisibilityOff /> : <Visibility />}
+                  </IconButton>
+                </InputAdornment>
+              ),
             }}
           />
         </Box>

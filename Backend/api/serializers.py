@@ -5,7 +5,7 @@ from django.utils import timezone
 import pytz
 import statistics
 from collections import defaultdict
-from django.db.models import Sum, DateField
+from django.db.models import Sum, DateField, Q
 from django.db.models.functions import TruncDate, Cast
 
 class AdminProfileSerializer(serializers.ModelSerializer):
@@ -401,17 +401,29 @@ class PatientReportSummarySerializer(serializers.ModelSerializer):
         return active_treatment is not None
     
     def get_treatment_completed_days(self, obj):
-        """Calculate completed days"""
+        """Calculate completed days in Malaysia timezone (UTC+8)"""
         active_treatment = self._get_active_treatment(obj)
         if not active_treatment:
             return 0
         
         treatment_records = self._get_treatment_records(obj, active_treatment)
-        completed_dates = treatment_records.annotate(
-            completion_date=TruncDate('recorded_at')
-        ).values_list('completion_date', flat=True).distinct()
+        malaysia_tz = pytz.timezone('Asia/Kuala_Lumpur')
         
-        return len([date for date in completed_dates if date])
+        # Convert each recorded_at to Malaysia timezone and extract date
+        completed_dates = set()
+        for record in treatment_records:
+            if record.recorded_at:
+                # Convert to Malaysia timezone
+                if timezone.is_aware(record.recorded_at):
+                    my_time = record.recorded_at.astimezone(malaysia_tz)
+                else:
+                    my_time = timezone.make_aware(record.recorded_at, malaysia_tz)
+                # Extract date
+                completion_date = my_time.date()
+                completed_dates.add(completion_date)
+        
+        print(f"[Completed Days Debug] Patient {obj.id}: Total unique dates = {len(completed_dates)}, dates = {sorted(completed_dates)}")
+        return len(completed_dates)
     
     def get_treatment_completion_rate(self, obj):
         """Calculate overall completion rate"""
@@ -487,33 +499,36 @@ class PatientReportSummarySerializer(serializers.ModelSerializer):
         return None
     
     def get_treatment_consistency_score(self, obj):
-        """Calculate consistency score"""
+        """Calculate consistency score using SPARC (Consistency = 1 - CV(SPARC))."""
         active_treatment = self._get_active_treatment(obj)
         if not active_treatment:
             return None
         
         treatment_records = self._get_treatment_records(obj, active_treatment)
         
-        all_repetition_times = []
+        sparc_values = []
         for record in treatment_records:
-            if record.repetition_times and isinstance(record.repetition_times, list):
-                all_repetition_times.extend(record.repetition_times)
+            if record.rep_sparc_scores and isinstance(record.rep_sparc_scores, list):
+                for score in record.rep_sparc_scores:
+                    if isinstance(score, (int, float)) and score is not None:
+                        sparc_values.append(abs(score))
         
-        if all_repetition_times and len(all_repetition_times) > 1:
-            mean_rep_time = statistics.mean(all_repetition_times)
-            if mean_rep_time > 0:
-                std_rep_time = statistics.stdev(all_repetition_times)
-                cv = std_rep_time / mean_rep_time
-                consistency_score = round(1 / (1 + cv), 3)
-                consistency_score = max(0, min(1, consistency_score))
-                return consistency_score
+        if len(sparc_values) >= 2:
+            mean_sparc = statistics.mean(sparc_values)
+            if abs(mean_sparc) > 1e-6:
+                std_sparc = statistics.stdev(sparc_values)
+                cv = std_sparc / abs(mean_sparc)
+                consistency_score = max(0, min(1, 1 - cv))
+                return round(consistency_score, 3)
         
         return None
     
     def get_today_status_state(self, obj):
         """Get today's status state"""
         active_treatment = self._get_active_treatment(obj)
-        today = timezone.localdate()
+        # Use Malaysia timezone (UTC+8) to get today's date
+        malaysia_tz = pytz.timezone('Asia/Kuala_Lumpur')
+        today = timezone.now().astimezone(malaysia_tz).date()
         
         if not active_treatment:
             return 'no-treatment'
@@ -529,38 +544,110 @@ class PatientReportSummarySerializer(serializers.ModelSerializer):
             return 'no-exercises'
         
         # Check today's completion status
+        # Use start_time for date matching (consistent with last_exercise_date logic)
+        # Also check recorded_at as fallback
+        # Convert datetime fields to Malaysia timezone for date comparison
         treatment_records = self._get_treatment_records(obj, active_treatment)
-        today_records = treatment_records.filter(recorded_at__date=today)
+        
+        # Filter records by today's date in Malaysia timezone
+        today_records = []
+        print(f"[Today Status Debug] ========== TODAY STATUS CHECK ==========")
+        print(f"[Today Status Debug] Today in Malaysia timezone (UTC+8): {today}")
+        print(f"[Today Status Debug] Current UTC time: {timezone.now()}")
+        print(f"[Today Status Debug] Current MY time: {timezone.now().astimezone(malaysia_tz)}")
+        print(f"[Today Status Debug] Total records to check: {treatment_records.count()}")
+        for record in treatment_records:
+            # Check start_time date in Malaysia timezone
+            record_date_from_start = None
+            if record.start_time:
+                # Convert to Malaysia timezone and get date
+                if timezone.is_aware(record.start_time):
+                    # Ensure proper timezone conversion
+                    my_time_start = record.start_time.astimezone(malaysia_tz)
+                    record_date_from_start = my_time_start.date()
+                    print(f"[Today Status Debug] Record {record.record_id}: start_time(UTC)={record.start_time}, start_time(MY)={my_time_start}, start_time_date(MY)={record_date_from_start}")
+                else:
+                    # If naive (shouldn't happen with USE_TZ=True), use as-is
+                    record_date_from_start = record.start_time.date()
+                    print(f"[Today Status Debug] Record {record.record_id}: start_time(naive)={record.start_time}, start_time_date={record_date_from_start}")
+            
+            # Check recorded_at date in Malaysia timezone  
+            record_date_from_recorded = None
+            if record.recorded_at:
+                if timezone.is_aware(record.recorded_at):
+                    # Ensure proper timezone conversion
+                    my_time_recorded = record.recorded_at.astimezone(malaysia_tz)
+                    record_date_from_recorded = my_time_recorded.date()
+                    print(f"[Today Status Debug] Record {record.record_id}: recorded_at(UTC)={record.recorded_at}, recorded_at(MY)={my_time_recorded}, recorded_at_date(MY)={record_date_from_recorded}")
+                else:
+                    # If naive (shouldn't happen with USE_TZ=True), use as-is
+                    record_date_from_recorded = record.recorded_at.date()
+                    print(f"[Today Status Debug] Record {record.record_id}: recorded_at(naive)={record.recorded_at}, recorded_at_date={record_date_from_recorded}")
+            
+            # If either date matches today, include the record
+            if (record_date_from_start == today) or (record_date_from_recorded == today):
+                print(f"[Today Status Debug] Record {record.record_id} matches today! sets_completed={record.sets_completed}")
+                today_records.append(record)
+        
+        # Group completed sets by exercise_id instead of treatment_exercise_id
+        # This handles cases where TreatmentExercise UUIDs change but Exercise remains the same
         completed_sets_by_exercise = defaultdict(int)
         for record in today_records:
-            completed_sets_by_exercise[str(record.treatment_exercise_id_id)] += record.sets_completed or 0
+            # Get the exercise_id from the treatment_exercise_id relationship
+            try:
+                treatment_exercise = record.treatment_exercise_id
+                exercise_id_key = str(treatment_exercise.exercise_id.exercise_id)
+                completed_sets_by_exercise[exercise_id_key] += record.sets_completed or 0
+                print(f"[Today Status Debug] Record {record.record_id}: treatment_exercise_id={record.treatment_exercise_id_id}, exercise_id={exercise_id_key}, sets_completed={record.sets_completed}")
+            except Exception as e:
+                print(f"[Today Status Debug] Error getting exercise_id for record {record.record_id}: {e}")
+                # Fallback to treatment_exercise_id if exercise_id lookup fails
+                record_key = str(record.treatment_exercise_id_id)
+                completed_sets_by_exercise[record_key] += record.sets_completed or 0
+        
+        print(f"[Today Status Debug] Completed sets by exercise_id: {dict(completed_sets_by_exercise)}")
         
         exercises = TreatmentExercise.objects.filter(
-            treatment_id=active_treatment
-        )
+            treatment_id=active_treatment,
+            is_active=True  # Only check active exercises
+        ).select_related('exercise_id')
         
         has_assignments_today = False
         all_completed = True
         
+        print(f"[Today Status Debug] Total exercises to check: {exercises.count()}")
         for exercise in exercises:
             # Check if exercise scheduled today
             exercise_start = exercise.start_date
             exercise_end = exercise.end_date
+            print(f"[Today Status Debug] Exercise {exercise.exercise_id.name}: start_date={exercise_start}, end_date={exercise_end}, today={today}")
             if exercise_start and exercise_start > today:
+                print(f"[Today Status Debug] Exercise {exercise.exercise_id.name} skipped: start_date > today")
                 continue
             if exercise_end and exercise_end < today:
+                print(f"[Today Status Debug] Exercise {exercise.exercise_id.name} skipped: end_date < today")
                 continue
             
             has_assignments_today = True
             required_sets = exercise.sets or 0
             if required_sets <= 0:
+                print(f"[Today Status Debug] Exercise {exercise.exercise_id.name} skipped: required_sets={required_sets} <= 0")
                 continue
             
-            key = str(exercise.treatment_exercise_id)
-            completed_sets = completed_sets_by_exercise.get(key, 0)
+            # Use exercise_id instead of treatment_exercise_id for matching
+            exercise_id_key = str(exercise.exercise_id.exercise_id)
+            completed_sets = completed_sets_by_exercise.get(exercise_id_key, 0)
+            print(f"[Today Status Debug] Exercise {exercise.exercise_id.name}: exercise_id={exercise_id_key}, completed_sets={completed_sets}, required_sets={required_sets}")
+            print(f"[Today Status Debug] Available keys in completed_sets_by_exercise: {list(completed_sets_by_exercise.keys())}")
+            print(f"[Today Status Debug] Key match check: key '{exercise_id_key}' in dict? {exercise_id_key in completed_sets_by_exercise}")
             if completed_sets < required_sets:
+                print(f"[Today Status Debug] Exercise {exercise.exercise_id.name} NOT completed (completed < required)")
                 all_completed = False
                 break
+            else:
+                print(f"[Today Status Debug] Exercise {exercise.exercise_id.name} completed (completed >= required)")
+        
+        print(f"[Today Status Debug] Final: has_assignments_today={has_assignments_today}, all_completed={all_completed}")
         
         if not has_assignments_today:
             return 'no-exercises'

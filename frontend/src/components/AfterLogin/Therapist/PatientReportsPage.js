@@ -264,7 +264,7 @@ const PatientReportsPage = () => {
                       </TableCell>
                       <TableCell>{formatDateTime(patient.lastRecordedAt)}</TableCell>
                       <TableCell align="center">
-                        <Tooltip title="查看明细">
+                        <Tooltip title="View Details">
                           <span>
                             <IconButton
                               color="primary"

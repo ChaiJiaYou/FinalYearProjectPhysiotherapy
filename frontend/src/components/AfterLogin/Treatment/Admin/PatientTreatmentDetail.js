@@ -112,7 +112,7 @@ const PatientTreatmentDetail = () => {
                 const exercisesData = await exercisesResponse.json();
                 return {
                   ...treatment,
-                  exercises: exercisesData || []
+                  exercises: (exercisesData || []).filter(ex => ex.is_active !== false)
                 };
               } else {
                 console.error(`Failed to fetch exercises for treatment ${treatment.treatment_id}`);
@@ -593,6 +593,11 @@ const PatientTreatmentDetail = () => {
                   : 'Ongoing'
                 }
               </Typography>
+              {currentActiveTreatment.goal_notes && (
+                <Typography variant="body2" color="text.secondary" gutterBottom>
+                  Goal Notes: {currentActiveTreatment.goal_notes}
+                </Typography>
+              )}
               
               {/* Display Exercises List */}
               <Box sx={{ mt: 2 }}>

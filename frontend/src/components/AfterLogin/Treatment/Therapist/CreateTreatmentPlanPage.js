@@ -47,6 +47,8 @@ import {
   Search as SearchIcon,
   ArrowBack as ArrowBackIcon,
   Visibility as VisibilityIcon,
+  ExpandMore as ExpandMoreIcon,
+  ExpandLess as ExpandLessIcon,
 } from "@mui/icons-material";
 import { toast } from "react-toastify";
 import { formatDate } from "../../../../utils/dateUtils";
@@ -84,6 +86,7 @@ const CreateTreatmentPlanPage = () => {
   const [originalExercisesMap, setOriginalExercisesMap] = useState({}); // Map exercise_id to original exercise data
   const [therapists, setTherapists] = useState([]);
   const [selectedTherapist, setSelectedTherapist] = useState(isAdmin ? '' : currentUserId);
+  const [expandedExercises, setExpandedExercises] = useState({});
   
   // Use ref to track timeout for cleanup
   const animationTimeoutRef = useRef(null);
@@ -217,15 +220,16 @@ const CreateTreatmentPlanPage = () => {
       if (exercisesResponse.ok) {
         const exercisesData = await exercisesResponse.json();
         console.log('Exercises data received:', exercisesData);
+        const activeExercises = (exercisesData || []).filter(ex => ex.is_active !== false);
         
         // Track original treatment exercise ids for deletion detection
-        const treatmentExerciseIds = exercisesData
+        const treatmentExerciseIds = activeExercises
           .map((exercise) => exercise.treatment_exercise_id)
           .filter(Boolean);
         setOriginalExerciseIds(treatmentExerciseIds);
         
         // Transform the data to match the expected format
-        const transformedExercises = exercisesData.map((exercise, index) => ({
+        const transformedExercises = activeExercises.map((exercise, index) => ({
           id: exercise.treatment_exercise_id || exercise.exercise_id || `${Date.now()}_${index}`,
           treatment_exercise_id: exercise.treatment_exercise_id || null,
           exercise_id: exercise.exercise_id,
@@ -235,6 +239,7 @@ const CreateTreatmentPlanPage = () => {
           instructions: exercise.instructions || '',
           reps_per_set: exercise.reps_per_set || 10,
           sets: exercise.sets || 1,
+          duration: exercise.duration || 1,
           notes: exercise.notes || '',
         }));
         
@@ -246,6 +251,7 @@ const CreateTreatmentPlanPage = () => {
             treatment_exercise_id: ex.treatment_exercise_id,
             reps_per_set: ex.reps_per_set,
             sets: ex.sets,
+            duration: ex.duration,
             notes: ex.notes,
           };
         });
@@ -370,6 +376,7 @@ const CreateTreatmentPlanPage = () => {
       instructions: exercise.instructions,
       reps_per_set: originalExercise.reps_per_set || 10,
       sets: originalExercise.sets || 1,
+      duration: originalExercise.duration || 1,
       notes: originalExercise.notes || '',
     } : {
       // New exercise
@@ -382,6 +389,7 @@ const CreateTreatmentPlanPage = () => {
       instructions: exercise.instructions,
       reps_per_set: 10,
       sets: 1,
+      duration: 1,
       notes: '',
     };
 
@@ -480,6 +488,7 @@ const CreateTreatmentPlanPage = () => {
           const exerciseData = {
             reps_per_set: exercise.reps_per_set,
             sets: exercise.sets,
+            duration: exercise.duration || 1,
             notes: exercise.notes || null,
             order_in_treatment: index + 1,
             is_active: true,
@@ -509,6 +518,7 @@ const CreateTreatmentPlanPage = () => {
             exercise_id: exercise.exercise_id,
             reps_per_set: exercise.reps_per_set,
             sets: exercise.sets,
+            duration: exercise.duration || 1,
             notes: exercise.notes || null,
             order_in_treatment: orderIndex,
             is_active: true,
@@ -566,6 +576,7 @@ const CreateTreatmentPlanPage = () => {
             exercise_id: exercise.exercise_id,
             reps_per_set: exercise.reps_per_set,
             sets: exercise.sets,
+            duration: exercise.duration || 1,
             notes: exercise.notes || null,
             order_in_treatment: i + 1,
             is_active: true,
@@ -609,6 +620,13 @@ const CreateTreatmentPlanPage = () => {
   const uniqueCategories = useMemo(() => {
     return [...new Set(exercises.map(ex => ex.category).filter(Boolean))];
   }, [exercises]);
+
+  const toggleExerciseDetails = (exerciseId) => {
+    setExpandedExercises((prev) => ({
+      ...prev,
+      [exerciseId]: !prev[exerciseId],
+    }));
+  };
 
   // Get patient info for display
   const currentPatient = patients.find(p => p.id === patientId);
@@ -818,107 +836,111 @@ const CreateTreatmentPlanPage = () => {
                 {/* Efficient Table View */}
                 <TableContainer component={Paper} sx={{ maxHeight: 400 }}>
                   <Table stickyHeader>
-                    <TableHead>
-                      <TableRow>
-                        <TableCell padding="checkbox">Select</TableCell>
-                        <TableCell>Exercise Name</TableCell>
-                        <TableCell>Category</TableCell>
-                        <TableCell>Difficulty</TableCell>
-                        <TableCell>Instructions</TableCell>
-                        <TableCell align="center">Actions</TableCell>
-                      </TableRow>
-                    </TableHead>
+                      <TableHead>
+                        <TableRow>
+                          <TableCell padding="checkbox">Select</TableCell>
+                          <TableCell>Exercise Name</TableCell>
+                          <TableCell>Instructions</TableCell>
+                          <TableCell align="center">Actions</TableCell>
+                          <TableCell align="center">Details</TableCell>
+                        </TableRow>
+                      </TableHead>
                     <TableBody>
                       {filteredExercises.map((exercise) => {
                         const isSelected = selectedExercises.some(ex => ex.exercise_id === exercise.exercise_id);
                         const isAnimating = animatingExercise === exercise.exercise_id;
+                        const isExpanded = !!expandedExercises[exercise.exercise_id];
                         return (
-                          <TableRow 
-                            key={exercise.exercise_id}
-                            hover
-                            selected={isSelected}
-                            sx={{ 
-                              '&:nth-of-type(odd)': { 
-                                backgroundColor: 'action.hover' 
-                              },
-                              '&:last-child td, &:last-child th': { 
-                                border: 0 
-                              },
-                              transform: isAnimating ? 'scale(0.95)' : 'scale(1)',
-                              transition: 'all 0.3s ease-in-out',
-                              backgroundColor: isAnimating ? 'primary.100' : isSelected ? 'action.selected' : 'inherit',
-                            }}
-                          >
-                            <TableCell padding="checkbox">
-                              <Checkbox
-                                checked={isSelected}
-                                onChange={() => {
-                                  if (isSelected) {
-                                    const exerciseToRemove = selectedExercises.find(ex => ex.exercise_id === exercise.exercise_id);
-                                    removeExercise(exerciseToRemove.id);
-                                  } else {
-                                    addExercise(exercise);
-                                  }
-                                }}
-                                color="primary"
-                              />
-                            </TableCell>
-                            <TableCell>
-                              <Typography variant="subtitle2" sx={{ fontWeight: 'bold' }}>
-                                {exercise.name}
-                              </Typography>
-                            </TableCell>
-                            <TableCell>
-                              <Chip 
-                                label={exercise.category.replace('_', ' ')} 
-                                size="small" 
-                                color="primary" 
-                                variant="outlined"
-                              />
-                            </TableCell>
-                            <TableCell>
-                              <Chip 
-                                label={exercise.difficulty} 
-                                size="small" 
-                                color="secondary" 
-                                variant="outlined"
-                              />
-                            </TableCell>
-                            <TableCell>
-                              <Tooltip title={exercise.instructions} arrow>
+                          <React.Fragment key={exercise.exercise_id}>
+                            <TableRow 
+                              hover
+                              selected={isSelected}
+                              sx={{ 
+                                '&:nth-of-type(odd)': { 
+                                  backgroundColor: 'action.hover' 
+                                },
+                                '&:last-child td, &:last-child th': { 
+                                  border: 0 
+                                },
+                                transform: isAnimating ? 'scale(0.95)' : 'scale(1)',
+                                transition: 'all 0.3s ease-in-out',
+                                backgroundColor: isAnimating ? 'primary.100' : isSelected ? 'action.selected' : 'inherit',
+                              }}
+                            >
+                              <TableCell padding="checkbox">
+                                <Checkbox
+                                  checked={isSelected}
+                                  onChange={() => {
+                                    if (isSelected) {
+                                      const exerciseToRemove = selectedExercises.find(ex => ex.exercise_id === exercise.exercise_id);
+                                      removeExercise(exerciseToRemove.id);
+                                    } else {
+                                      addExercise(exercise);
+                                    }
+                                  }}
+                                  color="primary"
+                                />
+                              </TableCell>
+                              <TableCell>
+                                <Typography variant="subtitle2" sx={{ fontWeight: 'bold' }}>
+                                  {exercise.name}
+                                </Typography>
+                              </TableCell>
+                              <TableCell>
                                 <Typography 
                                   variant="body2" 
                                   sx={{ 
-                                    maxWidth: 200, 
+                                    maxWidth: 240, 
                                     overflow: 'hidden', 
                                     textOverflow: 'ellipsis',
                                     whiteSpace: 'nowrap',
-                                    cursor: 'help'
                                   }}
                                 >
-                                  {exercise.instructions}
+                                  {exercise.instructions || 'No instructions provided'}
                                 </Typography>
-                              </Tooltip>
-                            </TableCell>
-                            <TableCell align="center">
-                              <Button
-                                variant={isSelected ? "outlined" : "contained"}
-                                size="small"
-                                startIcon={isSelected ? <RemoveIcon /> : <AddIcon />}
-                                onClick={() => {
-                                  if (isSelected) {
-                                    const exerciseToRemove = selectedExercises.find(ex => ex.exercise_id === exercise.exercise_id);
-                                    removeExercise(exerciseToRemove.id);
-                                  } else {
-                                    addExercise(exercise);
-                                  }
-                                }}
-                                color={isSelected ? "error" : "primary"}
-                              >
-                                {isSelected ? "Remove" : "Add"}
-                              </Button>
-                            </TableCell>
-                          </TableRow>
+                              </TableCell>
+                              <TableCell align="center">
+                                <Button
+                                  variant={isSelected ? "outlined" : "contained"}
+                                  size="small"
+                                  startIcon={isSelected ? <RemoveIcon /> : <AddIcon />}
+                                  onClick={() => {
+                                    if (isSelected) {
+                                      const exerciseToRemove = selectedExercises.find(ex => ex.exercise_id === exercise.exercise_id);
+                                      removeExercise(exerciseToRemove.id);
+                                    } else {
+                                      addExercise(exercise);
+                                    }
+                                  }}
+                                  color={isSelected ? "error" : "primary"}
+                                >
+                                  {isSelected ? "Remove" : "Add"}
+                                </Button>
+                              </TableCell>
+                              <TableCell align="center">
+                                <IconButton
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    toggleExerciseDetails(exercise.exercise_id);
+                                  }}
+                                >
+                                  {isExpanded ? <ExpandLessIcon /> : <ExpandMoreIcon />}
+                                </IconButton>
+                              </TableCell>
+                            </TableRow>
+                            {isExpanded && (
+                              <TableRow>
+                                <TableCell colSpan={5} sx={{ bgcolor: 'grey.50' }}>
+                                  <Typography variant="subtitle2" gutterBottom>
+                                    Instructions
+                                  </Typography>
+                                  <Typography variant="body2">
+                                    {exercise.instructions || 'No instructions provided'}
+                                  </Typography>
+                                </TableCell>
+                              </TableRow>
+                            )}
+                          </React.Fragment>
                         );
                       })}
                     </TableBody>
@@ -942,7 +964,7 @@ const CreateTreatmentPlanPage = () => {
                   </Box>
                   
                   <Grid container spacing={2}>
-                      <Grid item xs={12} sm={6}>
+                      <Grid item xs={12} sm={4}>
                         <TextField
                           fullWidth
                           type="number"
@@ -953,7 +975,7 @@ const CreateTreatmentPlanPage = () => {
                         />
                       </Grid>
                       
-                      <Grid item xs={12} sm={6}>
+                      <Grid item xs={12} sm={4}>
                         <TextField
                           fullWidth
                           type="number"
@@ -962,6 +984,19 @@ const CreateTreatmentPlanPage = () => {
                           onChange={(e) => updateExerciseSettings(exercise.id, 'sets', parseInt(e.target.value) || 1)}
                           inputProps={{ min: 1 }}
                           placeholder="1"
+                        />
+                      </Grid>
+
+                      <Grid item xs={12} sm={4}>
+                        <TextField
+                          fullWidth
+                          type="number"
+                          label="Time to Complete Within (Minute)"
+                          value={exercise.duration || ''}
+                          onChange={(e) => updateExerciseSettings(exercise.id, 'duration', parseInt(e.target.value) || 1)}
+                          inputProps={{ min: 1 }}
+                          placeholder="1"
+                          helperText="Min 1"
                         />
                       </Grid>
 

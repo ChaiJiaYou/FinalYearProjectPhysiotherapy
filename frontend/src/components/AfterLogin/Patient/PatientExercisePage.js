@@ -10,20 +10,19 @@ import {
   CircularProgress,
   Alert,
   Stack,
-  LinearProgress,
   Dialog,
   DialogTitle,
   DialogContent,
   DialogContentText,
   DialogActions,
   Paper,
+  Divider,
 } from "@mui/material";
 import {
   Videocam as VideocamIcon,
   VideocamOff as VideocamOffIcon,
   PlayArrow as PlayIcon,
   Stop as StopIcon,
-  Refresh as RefreshIcon,
   SmartToy as SmartToyIcon,
   FitnessCenter as FitnessCenterIcon,
   CheckCircle as CheckIcon,
@@ -33,8 +32,56 @@ import {
   Info as InfoIcon,
   Pause as PauseIcon,
   FiberManualRecord as RecordIcon,
+  Warning as WarningIcon,
+  WhatsApp as WhatsAppIcon,
 } from "@mui/icons-material";
 import { toast } from "react-toastify";
+
+const REHAB_ENGINE_URL = process.env.REACT_APP_REHAB_ENGINE_URL || "http://127.0.0.1:8808";
+const SUPPORTED_ACTIVITIES = [
+  'hurdle_step',
+  'idle',
+  'inline_lunge',
+  'jump',
+  'run',
+  'side_lunge',
+  'sit_to_stand',
+  'squats',
+  'standing_shoulder_abduction',
+  'standing_shoulder_extension',
+  'standing_shoulder_internal_external_rotation',
+  'standing_shoulder_scapation',
+  'custom_elbow_flexion',
+  'standing_shoulder_external_rotation_custom'
+];
+const ENABLED_CUSTOM_ACTIVITIES = new Set([
+  'custom_elbow_flexion',
+  'standing_shoulder_external_rotation_custom',
+  'standing_shoulder_abduction',
+  'standing_shoulder_extension'
+]);
+const SUPPORTED_ACTIVITIES_LABEL = SUPPORTED_ACTIVITIES.join(', ');
+const ENGINE_HINT_TOAST_ID = 'engine-hint-toast';
+
+const normalizeActivityValue = (value = '') =>
+  value
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, '_')
+    .replace(/-+/g, '_');
+
+const getCanonicalActivityName = (rawValue) => {
+  if (typeof rawValue !== 'string') {
+    return null;
+  }
+  const normalizedValue = normalizeActivityValue(rawValue);
+  if (!normalizedValue) {
+    return null;
+  }
+  return SUPPORTED_ACTIVITIES.find(
+    (activity) => normalizeActivityValue(activity) === normalizedValue
+  ) || null;
+};
 
 const PatientExercisePage = () => {
   // State management
@@ -46,9 +93,10 @@ const PatientExercisePage = () => {
   const [hasExercisedToday, setHasExercisedToday] = useState(false);
   const [todayCompletedExercises, setTodayCompletedExercises] = useState([]);
   const [showStopDialog, setShowStopDialog] = useState(false);
+  const [patientEmergencyContact, setPatientEmergencyContact] = useState('');
+  const [patientName, setPatientName] = useState('');
   
   // Camera and recognition states
-  const [isCameraActive, setIsCameraActive] = useState(false);
   const [isRecognitionActive, setIsRecognitionActive] = useState(false);
   const [isExercisePaused, setIsExercisePaused] = useState(false);
   const [isResting, setIsResting] = useState(false);
@@ -68,19 +116,17 @@ const PatientExercisePage = () => {
     state: 'OUT',
     totalTime: 0,
     startTime: null,
-    exerciseStartTime: null
+    exerciseStartTime: null,
+    targetReps: null,
+    stopReason: null
   });
   const [completedSets, setCompletedSets] = useState(0);
   const [restTarget, setRestTarget] = useState('nextExercise'); // 'nextExercise' | 'sameExercise'
   const [currentRepTime, setCurrentRepTime] = useState(0); // Track current rep duration in seconds
   
   // Video refs
-  const videoRef = useRef(null);
-  const streamRef = useRef(null);
-  const canvasRef = useRef(null);
   const demoVideoRef = useRef(null);
   const recognitionIntervalRef = useRef(null);
-  const frameCountRef = useRef(0);
   const restTimerRef = useRef(null);
   const exerciseTimerRef = useRef(null);
   const countdownTimerRef = useRef(null);
@@ -93,6 +139,38 @@ const PatientExercisePage = () => {
   const totalPauseCountRef = useRef(0); // Track total pauses across sets
   const nextSetShouldResetRef = useRef(false); // Ensure backend resets before new set
   const repetitionTimesRef = useRef([]); // Mirror of repetitionTimes state for immediate reads
+  const lastEngineRepetitionTimesLengthRef = useRef(0); // Track last engine repetition_times length to detect resets
+  const repSparcScoresRef = useRef([]); // Track SPARC smoothness scores per rep
+  const lastEngineSparcScoresLengthRef = useRef(0); // Track last engine rep_sparc_scores length to detect resets
+  const repRomScoresRef = useRef([]); // Track ROM per rep
+  const lastEngineRomScoresLengthRef = useRef(0); // Track last engine rep_rom_scores length to detect resets
+  const isSavingRef = useRef(false); // Prevent duplicate saves
+  const lastSavedRepsRef = useRef(0); // Track last saved reps to prevent duplicate saves
+  const engineWaitingRef = useRef(false);
+
+  const totalExercises = treatmentExercises.length || activeTreatment?.exercise_count || 0;
+  const completedExercisesCount = allExercisesCompleted
+    ? totalExercises
+    : Math.min(currentExerciseIndex, totalExercises);
+  const isTreatmentActive = activeTreatment
+    ? (() => {
+        const start = activeTreatment.start_date ? new Date(activeTreatment.start_date) : null;
+        const end = activeTreatment.end_date ? new Date(activeTreatment.end_date) : null;
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        if (start && today < start) {
+          return false;
+        }
+        if (end && today > end) {
+          return false;
+        }
+        return true;
+      })()
+    : false;
+  const repsPerSet = selectedExercise?.reps_per_set || 0;
+  const totalSets = selectedExercise?.sets || 0;
+  const setProgressText =
+    totalSets > 0 ? `${completedSets} / ${totalSets}` : '0 / 0';
 
   const addRepetitionTime = (duration) => {
     repetitionTimesRef.current = [...repetitionTimesRef.current, duration];
@@ -102,11 +180,78 @@ const PatientExercisePage = () => {
   const resetRepetitionTimes = () => {
     repetitionTimesRef.current = [];
     setRepetitionTimes([]);
+    lastEngineRepetitionTimesLengthRef.current = 0; // Reset tracking
   };
+  
+  const resetSparcScores = () => {
+    repSparcScoresRef.current = [];
+    lastEngineSparcScoresLengthRef.current = 0; // Reset tracking
+  };
+  
+const resetRomScores = () => {
+  repRomScoresRef.current = [];
+  lastEngineRomScoresLengthRef.current = 0; // Reset tracking
+};
+
+  const resetRepMetrics = () => {
+  resetRepetitionTimes();
+  resetSparcScores();
+  resetRomScores();
+  };
+  
+  const dismissEngineToast = useCallback(() => {
+    toast.dismiss(ENGINE_HINT_TOAST_ID);
+  }, []);
+
+  const showEngineStartToast = useCallback(() => {
+    toast.dismiss(ENGINE_HINT_TOAST_ID);
+    toast.info('Starting Rehab Engine... please hold steady (4-5s)', {
+      toastId: ENGINE_HINT_TOAST_ID,
+      autoClose: false,
+      closeOnClick: false,
+      draggable: false
+    });
+  }, []);
+
+  const showEngineStartErrorToast = useCallback(() => {
+    if (toast.isActive(ENGINE_HINT_TOAST_ID)) {
+      toast.update(ENGINE_HINT_TOAST_ID, {
+        render: 'Unable to start Rehab Engine. Please try again.',
+        type: toast.TYPE.ERROR,
+        autoClose: 5000
+      });
+    } else {
+      toast.error('Unable to start Rehab Engine. Please try again.', {
+        autoClose: 5000
+      });
+    }
+  }, []);
   
   // Get current user info
   const currentUserId = localStorage.getItem("id");
   const currentUserRole = localStorage.getItem("role");
+
+  useEffect(() => {
+    const fetchPatientProfile = async () => {
+      if (!currentUserId) return;
+      try {
+      const response = await fetch(`http://127.0.0.1:8000/api/get-user/${currentUserId}/`);
+        if (!response.ok) {
+          throw new Error(`Failed to fetch user: ${response.status}`);
+        }
+        const data = await response.json();
+        setPatientName(
+          data?.username ||
+          [data?.first_name, data?.last_name].filter(Boolean).join(' ') ||
+          'Patient'
+        );
+        setPatientEmergencyContact(data?.patient_profile?.emergency_contact || '');
+      } catch (error) {
+        console.error('Error fetching patient profile:', error);
+      }
+    };
+    fetchPatientProfile();
+  }, [currentUserId]);
 
   // Helper functions
   const formatTime = (seconds) => {
@@ -114,6 +259,32 @@ const PatientExercisePage = () => {
     const mins = Math.floor(seconds / 60);
     const secs = Math.floor(seconds % 60);
     return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+  };
+
+  const formatDate = (dateString) => {
+    if (!dateString) return 'Not set';
+    const date = new Date(dateString);
+    if (Number.isNaN(date.getTime())) {
+      return 'Not set';
+    }
+    const day = String(date.getDate()).padStart(2, '0');
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const year = date.getFullYear();
+    return `${day}/${month}/${year}`;
+  };
+
+const getWhatsappLink = (contactNumber, message) => {
+  if (!contactNumber) return null;
+  let digitsOnly = contactNumber.replace(/\D/g, '');
+  if (!digitsOnly) return null;
+
+  // If number starts with a leading zero (e.g., Malaysian 0XX...), prepend country code 60
+  if (digitsOnly.startsWith('0')) {
+    digitsOnly = `60${digitsOnly.slice(1)}`;
+  }
+
+  const encodedMessage = message ? encodeURIComponent(message) : null;
+  return `https://wa.me/${digitsOnly}${encodedMessage ? `?text=${encodedMessage}` : ''}`;
   };
 
   // Start exercise timer
@@ -147,120 +318,14 @@ const PatientExercisePage = () => {
     setExerciseTime(0);
   };
 
-  // Frame capture function for DTW recognition
-  const captureFrame = () => {
-    return new Promise((resolve) => {
-      if (!videoRef.current || !canvasRef.current) {
-        resolve(null);
-        return;
-      }
-
-      const video = videoRef.current;
-      const canvas = canvasRef.current;
-      const ctx = canvas.getContext('2d');
-
-      canvas.width = video.videoWidth;
-      canvas.height = video.videoHeight;
-      ctx.drawImage(video, 0, 0);
-
-      canvas.toBlob((blob) => {
-        resolve(blob);
-      }, 'image/jpeg', 0.8);
-    });
-  };
-
-  // Send frame for DTW recognition
-  const sendFrameForRecognition = async () => {
-    if (!selectedExercise) return;
-    
-    // Check if recognition interval is still running (more reliable than state)
-    if (!recognitionIntervalRef.current) return;
-    
-    // Check if camera is actually ready
-    if (!videoRef.current || !videoRef.current.srcObject) return;
-    
-    try {
-      const frameBlob = await captureFrame();
-      if (!frameBlob) return;
-      const formData = new FormData();
-      formData.append('frame', frameBlob);
-      
-      const response = await fetch('http://127.0.0.1:8000/api/infer/stream/', {
-        method: 'POST',
-        body: formData
-      });
-      
-      if (response.ok) {
-        const result = await response.json();
-        const backendReps = result.reps || 0;
-        
-        // If we have paused reps, add them to the backend reps (continue from where we paused)
-        const newReps = pausedRepsRef.current + backendReps;
-        const overallReps = totalRepsRef.current + newReps;
-        // console.log('📊 Reps calculation:', {
-        //   pausedReps: pausedRepsRef.current,
-        //   backendReps: backendReps,
-        //   totalReps: newReps
-        // });
-        
-        // Detect if a new repetition was completed
-        if (newReps > lastRepsRef.current) {
-          // A new repetition was completed
-          if (currentRepStartTimeRef.current !== null) {
-            // Calculate time taken for the completed repetition
-            const repDuration = (Date.now() - currentRepStartTimeRef.current) / 1000; // in seconds
-            console.log(`✅ Repetition ${newReps} completed in ${repDuration.toFixed(2)}s`);
-            
-            // Add to repetition_times array
-            if (repetitionTimesRef.current.length < overallReps) {
-              addRepetitionTime(repDuration);
-            }
-          }
-          
-          // Start timing for the next repetition
-          currentRepStartTimeRef.current = Date.now();
-          lastRepsRef.current = newReps;
-        } else if (newReps === 0 && lastRepsRef.current > 0) {
-          // Reset if reps went back to 0 (new exercise)
-          currentRepStartTimeRef.current = Date.now();
-          lastRepsRef.current = 0;
-        } else if (currentRepStartTimeRef.current === null && newReps === 0) {
-          // First time, start tracking
-          currentRepStartTimeRef.current = Date.now();
-        }
-        
-        // Update results first
-        setCurrentResults(prev => ({
-          ...prev,
-          reps: newReps,
-          distance: result.distance || 0,
-          state: result.state || 'OUT'
-        }));
-        
-        // Check if target reps reached (outside of setState callback)
-        if (newReps >= selectedExercise.reps_per_set && recognitionIntervalRef.current) {
-          console.log(`🎯 TARGET REACHED! ${newReps}/${selectedExercise.reps_per_set}, stopping recognition...`);
-          
-          // Record the last repetition time if we just reached the target
-          if (currentRepStartTimeRef.current !== null) {
-            const finalRepDuration = (Date.now() - currentRepStartTimeRef.current) / 1000;
-            if (repetitionTimesRef.current.length < overallReps) {
-              addRepetitionTime(finalRepDuration);
-            }
-          }
-          
+  const handleEmergencyStop = () => {
           stopRecognition();
-          
-          // Save exercise record first, then check if treatment is complete before rest
-          // Pass newReps directly to avoid state update timing issues
-          handleExerciseCompletion(newReps);
-        }
-        
-        // Update frame count
-        frameCountRef.current += 1;
-      }
-    } catch (error) {
-      console.error('Error in DTW recognition:', error);
+    const message = `-- Emergency Alert --\n${patientName || 'Patient'} triggered the emergency stop during a rehab session at ${new Date().toLocaleString()}. Please reach out immediately.`;
+    const whatsappLink = getWhatsappLink(patientEmergencyContact, message);
+    if (whatsappLink) {
+      window.open(whatsappLink, '_blank', 'noopener,noreferrer');
+    } else {
+      toast.warn('Emergency contact number is unavailable.');
     }
   };
 
@@ -326,7 +391,9 @@ const PatientExercisePage = () => {
         total_duration: calculatedTotalDuration,
         pause_count: pauseCountToSave,
         avg_duration: averageDuration,
-        repetition_times: repetitionTimesToSave
+        repetition_times: repetitionTimesToSave,
+        rep_sparc_scores: repSparcScoresRef.current.length > 0 ? repSparcScoresRef.current : null,
+        rep_rom_scores: repRomScoresRef.current.length > 0 ? repRomScoresRef.current : null
       };
 
       console.log('📝 Exercise Record Snapshot', {
@@ -366,90 +433,6 @@ const PatientExercisePage = () => {
       console.error('   Error details:', error.message);
       console.error('   Error stack:', error.stack);
     }
-  };
-
-  // Handle exercise completion: save data first, then check if treatment is complete
-  const handleExerciseCompletion = async (completedReps) => {
-    console.log('🟢 handleExerciseCompletion called');
-    console.log('🟢 completedReps:', completedReps);
-    console.log('🟢 currentExerciseIndex:', currentExerciseIndex);
-    console.log('🟢 treatmentExercises.length:', treatmentExercises.length);
-    
-    const totalSetsForExercise = selectedExercise?.sets || 1;
-    const repsPerSet = selectedExercise?.reps_per_set || 1;
-    
-    // Update aggregate trackers
-    totalRepsRef.current += completedReps || 0;
-    totalActiveDurationRef.current += Number(exerciseTime || 0);
-    
-    // Calculate actual completed sets based on total reps completed
-    // Use Math.ceil to count sets that have been started (even if not fully completed)
-    // Example: 5 reps / 5 reps per set = 1 set, 6 reps / 5 reps per set = 2 sets (second set started)
-    const actualCompletedSets = Math.ceil(totalRepsRef.current / repsPerSet);
-    // Cap at total sets for this exercise
-    const actualSetsCompleted = Math.min(actualCompletedSets, totalSetsForExercise);
-    
-    // Update completed sets count for UI display
-    const nextCompletedSetNumber = Math.min(completedSets + 1, totalSetsForExercise);
-    setCompletedSets(nextCompletedSetNumber);
-    
-    const hasAdditionalSets = actualSetsCompleted < totalSetsForExercise;
-    const nextExerciseIndex = currentExerciseIndex + 1;
-    const hasNextExercise = nextExerciseIndex < treatmentExercises.length;
-    
-    const snapshotLabel = hasAdditionalSets
-      ? `set-${actualSetsCompleted}-partial`
-      : `set-${actualSetsCompleted}-final`;
-    const shouldSend = !hasAdditionalSets;
-    
-    // Save with actual completed sets (based on reps, not counter)
-    await saveExerciseRecord(totalRepsRef.current, actualSetsCompleted, {
-      shouldSend,
-      label: snapshotLabel
-    });
-    
-    if (hasAdditionalSets) {
-      console.log(`🟢 Set ${nextCompletedSetNumber} completed. Preparing for next set.`);
-      // toast.success(`Set ${nextCompletedSetNumber}/${totalSetsForExercise} completed! Rest up for the next set.`);
-      startRestPeriod('sameExercise');
-      return;
-    }
-    
-    if (hasNextExercise) {
-      console.log('🟢 Exercise completed. Preparing for next exercise.');
-      // toast.success(`Great job! ${selectedExercise?.exercise_name || 'Exercise'} completed. Rest before the next exercise.`);
-      // Don't reset completedSets here - keep it to show user they completed all sets
-      // It will be reset when moving to next exercise in endRestPeriod
-      resetRepetitionTimes();
-      sessionStartTimeRef.current = null;
-      totalRepsRef.current = 0;
-      totalActiveDurationRef.current = 0;
-      totalPauseCountRef.current = 0;
-      startRestPeriod('nextExercise');
-      return;
-    }
-    
-    // All exercises completed - no need for rest period
-    console.log('🟢 All exercises completed!');
-    
-    // Stop exercise timer when all exercises are completed
-    stopExerciseTimer();
-    
-    // Stop recognition if still running
-    if (recognitionIntervalRef.current) {
-      clearInterval(recognitionIntervalRef.current);
-      recognitionIntervalRef.current = null;
-      setIsRecognitionActive(false);
-    }
-    
-    setAllExercisesCompleted(true);
-    
-    // Reset aggregates for safety
-    sessionStartTimeRef.current = null;
-    totalRepsRef.current = 0;
-    totalActiveDurationRef.current = 0;
-    totalPauseCountRef.current = 0;
-    resetRepetitionTimes();
   };
 
   // Start rest period when target reps reached
@@ -499,6 +482,132 @@ const PatientExercisePage = () => {
     }, 1000);
   };
 
+  // Handle exercise completion: save data first, then check if treatment is complete
+  const handleExerciseCompletion = useCallback(async (completedReps, isDurationExceeded = false) => {
+    // Prevent duplicate calls
+    if (isSavingRef.current) {
+      console.log('⏸️ handleExerciseCompletion already in progress, skipping...');
+      return;
+    }
+    
+    // Check if we've already saved for this set
+    // lastSavedRepsRef tracks the reps that were saved for the current set
+    // If it's >= repsPerSet, we've already completed and saved this set
+    // Skip this check if duration exceeded, as we need to proceed regardless
+    const repsPerSet = selectedExercise?.reps_per_set || 1;
+    if (!isDurationExceeded && lastSavedRepsRef.current >= repsPerSet) {
+      console.log(`⏸️ Already saved for this set (last saved: ${lastSavedRepsRef.current}, repsPerSet: ${repsPerSet}), skipping...`);
+      return;
+    }
+    
+    console.log('🟢 handleExerciseCompletion called');
+    console.log('🟢 completedReps:', completedReps);
+    console.log('🟢 currentExerciseIndex:', currentExerciseIndex);
+    console.log('🟢 treatmentExercises.length:', treatmentExercises.length);
+    
+    // Immediately stop recognition to prevent further count changes
+    setIsRecognitionActive(false);
+    setIsExercisePaused(false);
+    pausedRepsRef.current = 0;
+    
+    isSavingRef.current = true;
+    // Mark that we've saved for this set's reps
+    // This prevents duplicate saves if status polling reports the same count multiple times
+    lastSavedRepsRef.current = completedReps;
+    
+    try {
+      const totalSetsForExercise = selectedExercise?.sets || 1;
+      const repsPerSet = selectedExercise?.reps_per_set || 1;
+      
+      // Update aggregate trackers
+      // completedReps is the reps for the CURRENT set that just finished
+      totalRepsRef.current += completedReps || 0;
+      totalActiveDurationRef.current += Number(exerciseTime || 0);
+      
+      // Calculate actual completed sets based on total reps completed
+      // If at least 1 rep is completed, count as at least 1 set (even if less than repsPerSet)
+      // Example: 1 rep / 5 reps per set = 1 set (first set started), 5 reps / 5 reps per set = 1 set (first set completed)
+      let actualCompletedSets = Math.floor(totalRepsRef.current / repsPerSet);
+      // If user did at least 1 rep, ensure at least 1 set is recorded
+      if (totalRepsRef.current > 0 && actualCompletedSets === 0) {
+        actualCompletedSets = 1;
+      }
+      // Cap at total sets for this exercise
+      const actualSetsCompleted = Math.min(actualCompletedSets, totalSetsForExercise);
+      
+      console.log(`📊 Set completion check: totalReps=${totalRepsRef.current}, repsPerSet=${repsPerSet}, actualSetsCompleted=${actualSetsCompleted}, totalSetsForExercise=${totalSetsForExercise}`);
+      
+      // Update completed sets count for UI display
+      const nextCompletedSetNumber = actualSetsCompleted;
+      setCompletedSets(nextCompletedSetNumber);
+      
+      // Check if there are more sets to complete
+      // If duration exceeded, skip to next exercise regardless of sets completion
+      // Use actualSetsCompleted (after ensuring at least 1 set) for the check
+      const hasAdditionalSets = isDurationExceeded ? false : (actualSetsCompleted < totalSetsForExercise);
+      console.log(`📊 hasAdditionalSets=${hasAdditionalSets}, actualSetsCompleted=${actualSetsCompleted}, totalSetsForExercise=${totalSetsForExercise}, isDurationExceeded=${isDurationExceeded}`);
+      const nextExerciseIndex = currentExerciseIndex + 1;
+      const hasNextExercise = nextExerciseIndex < treatmentExercises.length;
+      
+      const snapshotLabel = hasAdditionalSets
+        ? `set-${actualSetsCompleted}-partial`
+        : `set-${actualSetsCompleted}-final`;
+      const shouldSend = !hasAdditionalSets;
+      
+      // Save with actual completed sets (based on reps, not counter)
+      await saveExerciseRecord(totalRepsRef.current, actualSetsCompleted, {
+        shouldSend,
+        label: snapshotLabel
+      });
+      
+      if (hasAdditionalSets && !isDurationExceeded) {
+        console.log(`🟢 Set ${nextCompletedSetNumber} completed. Preparing for next set.`);
+        // toast.success(`Set ${nextCompletedSetNumber}/${totalSetsForExercise} completed! Rest up for the next set.`);
+        startRestPeriod('sameExercise');
+        return;
+      }
+      
+      if (hasNextExercise) {
+        console.log('🟢 Exercise completed. Preparing for next exercise.');
+        // toast.success(`Great job! ${selectedExercise?.exercise_name || 'Exercise'} completed. Rest before the next exercise.`);
+        // Don't reset completedSets here - keep it to show user they completed all sets
+        // It will be reset when moving to next exercise in endRestPeriod
+        resetRepMetrics();
+        sessionStartTimeRef.current = null;
+        totalRepsRef.current = 0;
+        totalActiveDurationRef.current = 0;
+        totalPauseCountRef.current = 0;
+        startRestPeriod('nextExercise');
+        return;
+      }
+      
+      // All exercises completed - no need for rest period
+      console.log('🟢 All exercises completed!');
+      
+      // Stop exercise timer when all exercises are completed
+      stopExerciseTimer();
+      
+      // Stop recognition if still running
+      if (recognitionIntervalRef.current) {
+        clearInterval(recognitionIntervalRef.current);
+        recognitionIntervalRef.current = null;
+        setIsRecognitionActive(false);
+      }
+      
+      setAllExercisesCompleted(true);
+      setHasExercisedToday(true);
+      
+      // Reset aggregates for safety
+      sessionStartTimeRef.current = null;
+      totalRepsRef.current = 0;
+      totalActiveDurationRef.current = 0;
+      totalPauseCountRef.current = 0;
+      resetRepMetrics();
+    } finally {
+      isSavingRef.current = false;
+    }
+  }, [selectedExercise, currentExerciseIndex, treatmentExercises, completedSets, exerciseTime]);
+
   // End rest period (manual reset when user clicks continue)
   const endRestPeriod = () => {
     // Clear rest timer
@@ -522,6 +631,8 @@ const PatientExercisePage = () => {
       lastRepsRef.current = 0;
       currentRepStartTimeRef.current = null;
       resetExerciseTimer();
+      
+      lastSavedRepsRef.current = 0; // Reset saved reps tracking for new set
       
       setCurrentResults(prev => ({
         ...prev,
@@ -548,13 +659,12 @@ const PatientExercisePage = () => {
       setCompletedSets(0);
       
       console.log('🔄 Switching to next exercise:', nextExercise.exercise_name);
-      console.log('🔄 Next exercise action_id:', nextExercise.action_id);
       
       // Reset states for next exercise
       setExerciseStartTime(null);
       setPauseCount(0);
       setIsExercisePaused(false); // Ensure pause state is reset for next exercise
-      resetRepetitionTimes();
+      resetRepMetrics();
       pausedRepsRef.current = 0; // Reset paused reps for next exercise
       lastRepsRef.current = 0; // Reset repetition tracking
       currentRepStartTimeRef.current = null; // Reset repetition timing
@@ -563,6 +673,9 @@ const PatientExercisePage = () => {
       totalRepsRef.current = 0;
       totalActiveDurationRef.current = 0;
       totalPauseCountRef.current = 0;
+      
+      lastSavedRepsRef.current = 0; // Reset saved reps tracking for new exercise
+      isSavingRef.current = false; // Reset saving flag for new exercise
       
       // Reset reps for next exercise
       setCurrentResults(prev => ({
@@ -626,13 +739,16 @@ const PatientExercisePage = () => {
   const fetchActiveTreatment = async () => {
     try {
       setIsLoading(true);
+      console.log('🔄 Fetching active treatment for patient:', currentUserId);
       
       // Check if user has exercised today first
       await checkTodayExercise();
       
       const response = await fetch(`http://127.0.0.1:8000/api/patient-treatments/${currentUserId}/`);
+      console.log('📡 GET /api/patient-treatments status:', response.status);
       if (response.ok) {
         const data = await response.json();
+        console.log('📦 patient treatments payload:', data);
         if (data.length > 0) {
           // Find treatment where today is within start_date and end_date range
           const today = new Date();
@@ -658,6 +774,7 @@ const PatientExercisePage = () => {
           setActiveTreatment(currentTreatment);
           fetchTreatmentExercises(currentTreatment.treatment_id);
         } else {
+          console.warn('⚠️ No active treatments returned for patient.');
           setActiveTreatment(null);
         }
       } else {
@@ -677,18 +794,20 @@ const PatientExercisePage = () => {
   // Fetch exercises for selected treatment
   const fetchTreatmentExercises = async (treatmentId) => {
     try {
+      console.log('🔄 Fetching exercises for treatment:', treatmentId);
       const response = await fetch(`http://127.0.0.1:8000/api/treatment-exercises/${treatmentId}/`);
+      console.log('📡 GET /api/treatment-exercises status:', response.status);
       if (response.ok) {
         const data = await response.json();
+        console.log('📦 treatment exercises payload:', data);
         
-        // Sort exercises by order_in_treatment and filter only exercises with linked actions
+        // Sort exercises by order_in_treatment
         const sortedExercises = data
           .sort((a, b) => {
             const orderA = a.order_in_treatment || 999;
             const orderB = b.order_in_treatment || 999;
             return orderA - orderB;
-          })
-          .filter(exercise => exercise.action_id); // Only exercises with linked actions
+          });
         
         setTreatmentExercises(sortedExercises);
         
@@ -697,7 +816,7 @@ const PatientExercisePage = () => {
           setSelectedExercise(sortedExercises[0]);
           setCurrentExerciseIndex(0);
           setCompletedSets(0);
-          resetRepetitionTimes();
+          resetRepMetrics();
           setExerciseStartTime(null);
           setPauseCount(0);
           setIsExercisePaused(false); // Reset pause state when loading exercises
@@ -726,25 +845,6 @@ const PatientExercisePage = () => {
   };
 
   // No need for treatment selection since there's only one active treatment
-
-  // Handle exercise selection
-  const handleExerciseSelect = (exercise) => {
-    setSelectedExercise(exercise);
-    setCompletedSets(0);
-    resetRepetitionTimes();
-    setExerciseStartTime(null);
-    setPauseCount(0);
-    setIsExercisePaused(false); // Reset pause state when manually selecting exercise
-    sessionStartTimeRef.current = null;
-    totalRepsRef.current = 0;
-    totalActiveDurationRef.current = 0;
-    totalPauseCountRef.current = 0;
-    pausedRepsRef.current = 0;
-    lastRepsRef.current = 0;
-    currentRepStartTimeRef.current = null;
-    stopRecognition();
-    stopCamera();
-  };
 
   // Start exercise (camera + recognition combined)
   const startExercise = async () => {
@@ -784,7 +884,7 @@ const PatientExercisePage = () => {
           totalRepsRef.current = 0;
           totalActiveDurationRef.current = 0;
           totalPauseCountRef.current = 0;
-          resetRepetitionTimes();
+          resetRepMetrics();
         }
       } else {
         // Increment pause count when continuing from a paused exercise
@@ -800,10 +900,7 @@ const PatientExercisePage = () => {
       
       setIsExercisePaused(false);
       
-      // Start camera and wait for it to be ready
-      await startCamera();
-      
-      // Start recognition immediately after camera is ready
+      // Start recognition immediately
       // Only reset reps if starting a new exercise (not paused)
       await startRecognition(!wasPaused);
       
@@ -813,33 +910,151 @@ const PatientExercisePage = () => {
     }
   };
 
-  // Camera functions
-  const startCamera = async () => {
+  const pollRehabStatus = async () => {
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ 
-        video: { width: 640, height: 480 } 
-      });
-      streamRef.current = stream;
-      if (videoRef.current) {
-        videoRef.current.srcObject = stream;
+      const response = await fetch(`${REHAB_ENGINE_URL}/status`);
+      if (!response.ok) {
+        throw new Error(`Status request failed: ${response.status}`);
       }
-      setIsCameraActive(true);
-    } catch (error) {
-      console.error('Error accessing camera:', error);
-      toast.error('Failed to access camera');
-    }
-  };
 
-  const stopCamera = () => {
-    if (streamRef.current) {
-      streamRef.current.getTracks().forEach(track => track.stop());
-      streamRef.current = null;
+      const statusData = await response.json();
+      if (Array.isArray(statusData.rep_sparc_scores)) {
+        // Accumulate rep_sparc_scores across all sets instead of replacing
+        const currentSparc = repSparcScoresRef.current || [];
+        const newSparc = statusData.rep_sparc_scores || [];
+        const lastSparcLength = lastEngineSparcScoresLengthRef.current;
+        
+        const engineWasReset = newSparc.length < lastSparcLength;
+        
+        if (engineWasReset) {
+          // Engine was reset (new set started), append new scores to existing accumulated data
+          if (newSparc.length > 0) {
+            repSparcScoresRef.current = [...currentSparc, ...newSparc];
+          }
+          // If newSparc is empty (engine just reset), keep existing data
+        } else if (newSparc.length > lastSparcLength) {
+          // New scores have been added to current set, append only the new ones
+          const newScores = newSparc.slice(lastSparcLength);
+          repSparcScoresRef.current = [...currentSparc, ...newScores];
+        }
+        
+        lastEngineSparcScoresLengthRef.current = newSparc.length;
+      }
+      if (Array.isArray(statusData.rep_rom_scores)) {
+        // Accumulate rep_rom_scores across all sets instead of replacing
+        const currentRom = repRomScoresRef.current || [];
+        const newRom = statusData.rep_rom_scores || [];
+        const lastRomLength = lastEngineRomScoresLengthRef.current;
+        
+        const engineWasReset = newRom.length < lastRomLength;
+        
+        if (engineWasReset) {
+          // Engine was reset (new set started), append new scores to existing accumulated data
+          if (newRom.length > 0) {
+            repRomScoresRef.current = [...currentRom, ...newRom];
+          }
+          // If newRom is empty (engine just reset), keep existing data
+        } else if (newRom.length > lastRomLength) {
+          // New scores have been added to current set, append only the new ones
+          const newScores = newRom.slice(lastRomLength);
+          repRomScoresRef.current = [...currentRom, ...newScores];
+        }
+        
+        lastEngineRomScoresLengthRef.current = newRom.length;
+      }
+      if (Array.isArray(statusData.repetition_times)) {
+        // Accumulate repetition_times across all sets instead of replacing
+        const currentTimes = repetitionTimesRef.current || [];
+        const newTimes = statusData.repetition_times || [];
+        const lastLength = lastEngineRepetitionTimesLengthRef.current;
+        
+        // Detect if engine was reset (new set started)
+        // Engine reset is detected when newTimes.length < lastLength (engine went backwards)
+        const engineWasReset = newTimes.length < lastLength;
+        
+        if (engineWasReset) {
+          // Engine was reset (new set started), append new times to existing accumulated data
+          if (newTimes.length > 0) {
+            repetitionTimesRef.current = [...currentTimes, ...newTimes];
+            setRepetitionTimes([...currentTimes, ...newTimes]);
+          }
+          // If newTimes is empty (engine just reset), keep existing data
+        } else if (newTimes.length > lastLength) {
+          // New reps have been added to current set, append only the new ones
+          const newReps = newTimes.slice(lastLength);
+          repetitionTimesRef.current = [...currentTimes, ...newReps];
+          setRepetitionTimes([...currentTimes, ...newReps]);
+        } else if (newTimes.length === lastLength && newTimes.length > 0) {
+          // Same length - might be updated values, but we'll keep existing accumulated data
+          // This prevents overwriting when engine sends same-length arrays during set transitions
+        }
+        
+        // Update last length for next comparison
+        lastEngineRepetitionTimesLengthRef.current = newTimes.length;
+      }
+
+      const backendReps = statusData.current_reps || 0;
+      const newReps = pausedRepsRef.current + backendReps;
+      const overallReps = totalRepsRef.current + newReps;
+      const targetForExercise = selectedExercise?.reps_per_set || 0;
+      const hasTarget = targetForExercise > 0;
+      const hasReachedTarget = hasTarget && newReps >= targetForExercise;
+
+      if (statusData.is_running) {
+        engineWaitingRef.current = false;
+        dismissEngineToast();
+      }
+
+      setCurrentResults(prev => ({
+        ...prev,
+        reps: newReps,
+        state: statusData.is_running ? 'IN' : 'OUT',
+        targetReps: statusData.target_reps ?? prev.targetReps ?? null,
+        stopReason: statusData.stop_reason || null
+      }));
+
+      if (!statusData.is_running) {
+        if (engineWaitingRef.current && !statusData.stop_reason) {
+          return;
+        }
+        
+        // Handle duration exceeded - complete exercise with current reps and move to next
+        if (statusData.stop_reason === 'duration_exceeded' && !isSavingRef.current) {
+          console.log('⏱️ Duration exceeded, completing exercise with', newReps, 'reps and moving to next');
+          lastRepsRef.current = newReps;
+
+          stopRecognition({ skipApi: true, overrideReps: newReps });
+          // Complete exercise and proceed to next (skip remaining sets if any)
+          handleExerciseCompletion(newReps, true); // Pass true to indicate duration exceeded
+          return;
+        }
+        
+        if (
+          statusData.stop_reason === 'target_reached' &&
+          hasReachedTarget &&
+          lastSavedRepsRef.current < targetForExercise &&
+          !isSavingRef.current
+        ) {
+          lastRepsRef.current = newReps;
+
+          handleExerciseCompletion(newReps);
+        }
+
+        stopRecognition({ skipApi: true, overrideReps: newReps });
+        if (!isRecognitionActive && newReps > 0) {
+          setIsExercisePaused(true);
+        }
+        return;
+      }
+
+      if (hasReachedTarget) {
+        stopRecognition({ skipApi: true, overrideReps: newReps });
+
+        handleExerciseCompletion(newReps);
+      }
+    } catch (error) {
+      console.error('Error polling Rehab Engine status:', error);
     }
-    if (videoRef.current) {
-      videoRef.current.srcObject = null;
-    }
-    setIsCameraActive(false);
-    stopRecognition();
   };
 
   // Recognition functions
@@ -848,105 +1063,158 @@ const PatientExercisePage = () => {
       return;
     }
     
-    // Check if camera is actually active by checking the video element
-    if (!videoRef.current || !videoRef.current.srcObject) {
-      console.log('Camera not ready yet, waiting...');
-      return;
-    }
-    
-    // Check if exercise has linked action
-    console.log('Selected exercise:', selectedExercise);
-    console.log('Action ID:', selectedExercise.action_id);
-    console.log('Action ID type:', typeof selectedExercise.action_id);
-    
-    if (!selectedExercise.action_id) {
-      toast.error('This exercise is not linked to an action for recognition');
-      return;
-    }
-    
-    try {
-      console.log('🎯 Setting up recognition for action_id:', selectedExercise.action_id);
-      console.log('🎯 Exercise name:', selectedExercise.exercise_name);
-      
-      // Setup DTW recognizer for the linked action
-      const setupResponse = await fetch(`http://127.0.0.1:8000/api/actions/${selectedExercise.action_id}/setup/`, {
-        method: 'POST'
+      const repsPerSetValue = Number(selectedExercise?.reps_per_set);
+    const targetReps = Number.isFinite(repsPerSetValue) && repsPerSetValue > 0
+      ? repsPerSetValue
+      : null;
+    const exerciseDuration = selectedExercise?.duration || 1; // Duration in minutes
+    const rawActivityName =
+      selectedExercise?.activity_name ||
+      selectedExercise?.exercise_name ||
+      selectedExercise?.name ||
+      '';
+
+    const activityName = getCanonicalActivityName(rawActivityName);
+
+    if (!activityName) {
+      console.error('[Rehab Engine] Unsupported activity name', {
+        rawActivityName,
+        supported: SUPPORTED_ACTIVITIES
       });
-      
-      if (!setupResponse.ok) {
-        const errorData = await setupResponse.json();
-        throw new Error(errorData.error || 'Failed to setup action recognition');
-      }
-      
-      console.log('✅ Recognition setup successful for:', selectedExercise.exercise_name);
-      
+      toast.error(`Exercise must use one of: ${SUPPORTED_ACTIVITIES_LABEL}`);
+      return;
+    }
+    
+    if (!ENABLED_CUSTOM_ACTIVITIES.has(activityName)) {
+      console.warn('[Rehab Engine] Activity not yet enabled', {
+        activityName,
+        rawActivityName,
+        enabledActivities: Array.from(ENABLED_CUSTOM_ACTIVITIES)
+      });
+      toast.error('No supported exercise detected for this activity.');
+      return;
+    }
+
+    engineWaitingRef.current = true;
+    showEngineStartToast();
+
+    console.log('[Rehab Engine] Starting recognition with activity:', {
+      rawActivityName,
+      activityName,
+      selectedExercise,
+      targetReps,
+    });
+
+    try {
       const forceResetForNextSet = nextSetShouldResetRef.current;
       const shouldPerformReset = shouldResetReps || forceResetForNextSet;
+      const resumeRepsPayload =
+        shouldPerformReset ? 0 : Math.max(pausedRepsRef.current || 0, 0);
+
+      const response = await fetch(`${REHAB_ENGINE_URL}/start`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          activity: activityName,
+          ...(targetReps ? { target_reps: targetReps } : {}),
+          ...(resumeRepsPayload ? { resume_reps: resumeRepsPayload } : {}),
+          duration_minutes: exerciseDuration
+        })
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(errorText || 'Failed to start Rehab Engine');
+      }
       
-      // Only reset backend DTW recognition state if starting a new exercise or new set
+      const responseData = await response.json().catch(() => ({}));
+      const engineTarget = responseData?.target_reps ?? targetReps ?? null;
+      setCurrentResults(prev => ({
+        ...prev,
+        targetReps: engineTarget,
+        stopReason: null
+      }));
+      
+      
       if (shouldPerformReset) {
-        console.log('🔄 Resetting recognition (new exercise/set)');
-        await fetch('http://127.0.0.1:8000/api/infer/reset/', {
-          method: 'POST'
-        });
-        
-        // Reset reps and frame count for new exercise
+        isSavingRef.current = false;
+        lastSavedRepsRef.current = 0;
+        // Keep previously accumulated metrics so multiple sets share a single dataset
+        lastEngineRepetitionTimesLengthRef.current = 0;
+        lastEngineSparcScoresLengthRef.current = 0;
+        lastEngineRomScoresLengthRef.current = 0;
         setCurrentResults(prev => ({ 
           ...prev, 
           reps: 0, 
           distance: 0, 
-          state: 'OUT' 
+          state: 'OUT',
+          stopReason: null,
+          targetReps: engineTarget
         }));
-        frameCountRef.current = 0;
-        pausedRepsRef.current = 0; // Reset paused reps for new exercise
-        lastRepsRef.current = 0; // Reset repetition tracking
-        currentRepStartTimeRef.current = Date.now(); // Start timing for first repetition
+        pausedRepsRef.current = 0;
+        lastRepsRef.current = 0;
+        currentRepStartTimeRef.current = Date.now();
         nextSetShouldResetRef.current = false;
       } else {
-        console.log('▶️ Continuing recognition (paused exercise resumed)');
-        console.log('   - Previous reps saved:', pausedRepsRef.current);
-        console.log('   - Will add to backend reps when recognition starts');
-        // Don't reset backend or frontend state when resuming from pause
-        // pausedRepsRef.current already has the saved value from stopRecognition
         if (currentRepStartTimeRef.current === null) {
           currentRepStartTimeRef.current = Date.now();
         }
       }
       
-      // Start DTW recognition loop
+      if (recognitionIntervalRef.current) {
+        clearInterval(recognitionIntervalRef.current);
+      }
+      recognitionIntervalRef.current = setInterval(() => {
+        pollRehabStatus();
+      }, 1000);
+
       setIsRecognitionActive(true);
-      
-      // Use a small delay to ensure state is updated before starting the interval
-      setTimeout(() => {
-        recognitionIntervalRef.current = setInterval(sendFrameForRecognition, 200); // 5 FPS
-      }, 50);
-      
     } catch (error) {
-      console.error('Error setting up DTW recognition:', error);
-      toast.error(`Failed to setup recognition: ${error.message}`);
+      console.error('Error starting recognition:', error);
+      toast.error(`Failed to start recognition: ${error.message}`);
+      engineWaitingRef.current = false;
+      showEngineStartErrorToast();
     }
   };
 
-  const stopRecognition = () => {
+  const stopRecognition = ({ skipApi = false, overrideReps = null } = {}) => {
     if (recognitionIntervalRef.current) {
       clearInterval(recognitionIntervalRef.current);
       recognitionIntervalRef.current = null;
     }
+    engineWaitingRef.current = false;
+    dismissEngineToast();
     
-    // Save current reps count when pausing
+    if (Number.isFinite(overrideReps)) {
+      pausedRepsRef.current = overrideReps;
+    } else {
     pausedRepsRef.current = currentResults.reps;
-    console.log('⏸️ Paused - saved reps count:', pausedRepsRef.current);
-    
-    // Stop the exercise timer when recognition stops
+    }
     stopExerciseTimer();
-    
     setIsRecognitionActive(false);
     setIsExercisePaused(true);
+
+    if (!skipApi) {
+      fetch(`${REHAB_ENGINE_URL}/stop`, { method: 'POST' }).catch(error => {
+        console.error('Failed to stop Rehab Engine:', error);
+      });
+    }
   };
 
   const resetSession = () => {
     stopRecognition();
-    setCurrentResults({ reps: 0, distance: 0, state: 'OUT' });
+    setCurrentResults({
+      reps: 0,
+      distance: 0,
+      state: 'OUT',
+      totalTime: 0,
+      startTime: null,
+      exerciseStartTime: null,
+      targetReps: null,
+      stopReason: null
+    });
   };
 
   // Start countdown before exercise
@@ -985,18 +1253,7 @@ const PatientExercisePage = () => {
     lastRepsRef.current = newReps;
     currentRepStartTimeRef.current = Date.now(); // Start timing for next rep
     
-    // IMPORTANT: Tell backend to reset, then immediately update pausedReps
-    // This ensures backend starts counting from 0, and we add our manual count on top
-    try {
-      await fetch('http://127.0.0.1:8000/api/infer/reset/', {
-        method: 'POST'
-      });
-      // After reset, backend will count from 0
-      // So we set pausedReps to our manual count
       pausedRepsRef.current = newReps;
-    } catch (error) {
-      console.error('Failed to reset backend:', error);
-    }
     
     setCurrentResults(prev => ({
       ...prev,
@@ -1008,12 +1265,7 @@ const PatientExercisePage = () => {
     // Check if target reached
     if (newReps >= selectedExercise.reps_per_set) {
       console.log('🎯 Manual target reached!');
-      // Stop recognition immediately to prevent backend from resetting
-      if (recognitionIntervalRef.current) {
-        clearInterval(recognitionIntervalRef.current);
-        recognitionIntervalRef.current = null;
-        setIsRecognitionActive(false);
-      }
+      stopRecognition({ skipApi: true, overrideReps: newReps });
       // Trigger the same logic as automatic completion
       setTimeout(() => {
         handleExerciseCompletion(newReps);
@@ -1079,7 +1331,9 @@ const PatientExercisePage = () => {
       state: 'OUT',
       totalTime: 0,
       startTime: null,
-      exerciseStartTime: null
+      exerciseStartTime: null,
+      targetReps: null,
+      stopReason: null
     });
     
     // Reset refs
@@ -1089,7 +1343,7 @@ const PatientExercisePage = () => {
     pausedRepsRef.current = 0;
     lastRepsRef.current = 0;
     sessionStartTimeRef.current = null;
-    resetRepetitionTimes();
+    resetRepMetrics();
     
     console.log('✅ Exercise force stopped and state reset');
   };
@@ -1106,7 +1360,7 @@ const PatientExercisePage = () => {
     } else {
       setCurrentRepTime(0);
     }
-  }, [isRecognitionActive, currentResults.reps]); // Reset when reps change
+  }, [isRecognitionActive]); // Removed currentResults.reps to prevent infinite loop
 
   // Load data on component mount
   useEffect(() => {
@@ -1127,7 +1381,9 @@ const PatientExercisePage = () => {
       state: 'OUT',
       totalTime: 0,
       startTime: null,
-      exerciseStartTime: null
+      exerciseStartTime: null,
+      targetReps: null,
+      stopReason: null
     });
     
     // Fetch treatment data
@@ -1135,7 +1391,6 @@ const PatientExercisePage = () => {
     
     // Cleanup on unmount
     return () => {
-      stopCamera();
       stopRecognition();
       // Clear rest timer
       if (restTimerRef.current) {
@@ -1229,7 +1484,7 @@ const PatientExercisePage = () => {
                 variant={isRecognitionActive ? 'outlined' : 'contained'}
                 startIcon={isRecognitionActive ? <PauseIcon /> : <PlayIcon />}
                 onClick={isRecognitionActive ? stopRecognition : (isResting ? endRestPeriod : startExercise)}
-                disabled={!selectedExercise || isCountingDown}
+                disabled={!isTreatmentActive || !selectedExercise || isCountingDown}
                 color={isRecognitionActive ? 'warning' : (isResting ? 'warning' : 'success')}
                 size="large"
                 sx={{ py: 1.5, px: 4 }}
@@ -1247,9 +1502,29 @@ const PatientExercisePage = () => {
               </Button>
               {!isCountingDown && (
                 <Typography variant="caption" color="text.secondary" sx={{ mt: 0.5, ml: 1 }}>
-                  {isRecognitionActive ? 'Temporarily pause to rest' : (isExercisePaused ? 'Resume your exercise' : 'Begin your exercise session')}
+                {!isTreatmentActive
+                  ? 'This treatment has ended.'
+                  : (isRecognitionActive ? 'Temporarily pause to rest' : (isExercisePaused ? 'Resume your exercise' : 'Begin your exercise session'))}
                 </Typography>
               )}
+            </Box>
+            
+            {/* Emergency Stop Button */}
+            <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'stretch', minWidth: 220 }}>
+              <Button
+                variant="contained"
+                color="error"
+                size="large"
+                startIcon={<WarningIcon />}
+                onClick={handleEmergencyStop}
+                disabled={!isTreatmentActive}
+                sx={{ py: 1.8, px: 4, fontWeight: 600 }}
+              >
+                Emergency Stop
+              </Button>
+              <Typography variant="caption" color="text.secondary" sx={{ mt: 0.5, textAlign: 'center' }}>
+                Tap to emergency stop and notify your emergency contact.
+              </Typography>
             </Box>
             
             {/* End Exercise Button (for when user is too tired) */}
@@ -1260,14 +1535,16 @@ const PatientExercisePage = () => {
                 size="large"
                 startIcon={<StopIcon />}
                 onClick={() => setShowStopDialog(true)}
-                disabled={(!isRecognitionActive && !isExercisePaused && !isResting) || isCountingDown}
+                disabled={(!isRecognitionActive && !isExercisePaused && !isResting) || isCountingDown || !isTreatmentActive}
                 sx={{ py: 1.5, px: 4 }}
               >
                 End Exercise
               </Button>
               {!isCountingDown && (
                 <Typography variant="caption" color="text.secondary" sx={{ mt: 0.5, ml: 1 }}>
-                  {(isRecognitionActive || isExercisePaused || isResting) ? 'Stop completely & save progress' : 'End session when unable to continue'}
+                  {!isTreatmentActive
+                    ? 'This treatment has ended.'
+                    : (isRecognitionActive || isExercisePaused || isResting) ? 'Stop completely & save progress' : 'End session when unable to continue'}
                 </Typography>
               )}
             </Box>
@@ -1325,390 +1602,208 @@ const PatientExercisePage = () => {
         </Alert>
       )}
 
-      {/* All Exercises Completed Card */}
-      {allExercisesCompleted && (
-        <Card 
-          sx={{ 
-            mb: 3,
-            textAlign: 'center',
-            bgcolor: 'success.50',
-            border: '2px solid',
-            borderColor: 'success.main',
-            borderRadius: 3
-          }}
-        >
-          <CardContent sx={{ py: 6 }}>
-            <CheckIcon sx={{ fontSize: 80, color: 'success.main', mb: 2 }} />
-            <Typography variant="h3" fontWeight={700} color="success.dark" gutterBottom>
-              Excellent Work!
+      {activeTreatment && (
+        <Grid container spacing={2} sx={{ mb: 3 }} alignItems="stretch">
+          <Grid item xs={12} md={8} sx={{ display: 'flex' }}>
+            <Card sx={{ width: '100%', height: '100%' }}>
+              <CardContent>
+                <Box sx={{ display: 'flex', flexDirection: { xs: 'column', md: 'row' }, justifyContent: 'space-between', gap: 2 }}>
+                  <Box>
+                <Typography variant="h5" fontWeight={600}>
+                  {activeTreatment.name || 'Active Treatment Plan'}
             </Typography>
-            <Typography variant="h6" color="text.secondary" sx={{ mb: 3 }}>
-              You've completed all exercises in today's treatment plan
+                  </Box>
+                  <Chip 
+                label={isTreatmentActive ? 'In Progress' : 'Ended'} 
+                color={isTreatmentActive ? 'success' : 'default'} 
+                    variant="outlined" 
+                    sx={{ alignSelf: { xs: 'flex-start', md: 'center' } }}
+                  />
+                </Box>
+
+                <Stack direction="row" spacing={1.5} flexWrap="wrap" sx={{ mt: 2 }}>
+                  <Chip label={`Started: ${formatDate(activeTreatment.start_date)}`} color="primary" variant="outlined" />
+                  <Chip label={`Ends: ${formatDate(activeTreatment.end_date)}`} color="primary" variant="outlined" />
+              <Chip label={`Exercises: ${totalExercises}`} color="secondary" variant="outlined" />
+                </Stack>
+
+                {activeTreatment.goal_notes && (
+                  <Typography variant="body2" color="text.secondary" sx={{ mt: 2 }}>
+                    {activeTreatment.goal_notes}
             </Typography>
-            <Typography variant="body1" color="text.secondary" sx={{ mb: 4, maxWidth: 600, mx: 'auto' }}>
-              Your progress has been saved. Take time to rest and recover. 
-              Your next exercise session will be available tomorrow.
-            </Typography>
-            <Stack direction="row" spacing={2} justifyContent="center">
-              <Button 
-                variant="contained" 
-                color="success" 
-                size="large"
-                onClick={() => window.location.reload()}
-                startIcon={<RefreshIcon />}
-              >
-                View Summary
-              </Button>
-            </Stack>
+                )}
           </CardContent>
         </Card>
-      )}
-
-      <Grid container spacing={3}>
-        {/* Left Panel - Video Feed */}
-        <Grid item xs={12} md={7}>
-          <Card sx={{ height: '100%' }}>
+          </Grid>
+          <Grid item xs={12} md={4} sx={{ display: 'flex' }}>
+            <Card sx={{ height: '100%', width: '100%', display: 'flex', flexDirection: 'column' }}>
             <CardContent>
-              {/* Exercise Name and Description */}
-              {selectedExercise ? (
-                <Box sx={{ mb: 2, p: 2, backgroundColor: 'rgba(25, 118, 210, 0.04)', borderRadius: 2 }}>
-                  <Typography variant="h5" color="primary" fontWeight={600} gutterBottom>
-                    {selectedExercise.exercise_name}
-                  </Typography>
-                  <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
-                    {selectedExercise.instructions || 'No instructions available'}
-                  </Typography>
-                </Box>
-              ) : (
-                <Box sx={{ mb: 2, p: 2, backgroundColor: '#f5f5f5', borderRadius: 2, textAlign: 'center' }}>
-                  <Typography variant="body1" color="text.secondary">
-                    Please select an exercise to start
-                  </Typography>
-                </Box>
-              )}
-              
-              <Box sx={{ 
-                position: 'relative', 
-                width: '100%',
-                height: 480,
-                overflow: 'hidden',
-                borderRadius: 1,
-                backgroundColor: '#f5f5f5'
-              }}>
-                <video
-                  ref={videoRef}
-                  autoPlay
-                  playsInline
-                  muted
-                  style={{
-                    width: '100%',
-                    height: '100%',
-                    objectFit: 'cover',
-                    backgroundColor: '#f0f0f0'
-                  }}
-                />
-                
-                {/* Hidden canvas for frame capture */}
-                <canvas
-                  ref={canvasRef}
-                  style={{ display: 'none' }}
-                />
-                
-                {!isCameraActive && (
-                  <Box
-                    sx={{
-                      position: 'absolute',
-                      top: 0,
-                      left: 0,
-                      right: 0,
-                      bottom: 0,
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      backgroundColor: 'rgba(0,0,0,0.5)',
-                      color: 'white',
-                      borderRadius: 1
-                    }}
-                  >
-                    <Typography variant="h6">Camera not active</Typography>
-                  </Box>
-                )}
-                
-                {isRecognitionActive && (
-                  <Box
-                    sx={{
-                      position: 'absolute',
-                      top: 8,
-                      right: 8,
-                      display: 'flex',
-                      gap: 0.5,
-                      alignItems: 'center',
-                      zIndex: 10
-                    }}
-                  >
-                    <Chip label="LIVE" color="error" size="small" sx={{ fontSize: '0.7rem', height: 20 }} />
-                    <Chip 
-                      label={currentResults.state} 
-                      color={currentResults.state === 'IN' ? 'success' : 'default'} 
-                      size="small" 
-                      sx={{ fontSize: '0.7rem', height: 20 }}
-                    />
-                  </Box>
-                )}
-              </Box>
-
-              {/* Next Exercise Information Section */}
-              <Card sx={{ mt: 2 }}>
-                <CardContent>
-                  <Typography variant="h6" gutterBottom>
-                    Next Exercise
-                  </Typography>
-                  {(() => {
-                    const nextExerciseIndex = currentExerciseIndex + 1;
-                    const hasNextExercise = nextExerciseIndex < treatmentExercises.length;
-                    const nextExercise = hasNextExercise ? treatmentExercises[nextExerciseIndex] : null;
-
-                    if (!hasNextExercise) {
-                      return (
-                        <Box sx={{ textAlign: 'center', py: 2 }}>
-                          <Typography variant="body1" color="text.secondary" sx={{ fontStyle: 'italic' }}>
-                            This is the last exercise
-                          </Typography>
-                        </Box>
-                      );
-                    }
-
-                    return (
-                      <Box sx={{ display: 'flex', gap: 2, alignItems: 'center' }}>
-                        <Box sx={{ flex: 1 }}>
-                          <Typography variant="body2" color="text.secondary" gutterBottom>
-                            Exercise Name
-                          </Typography>
-                          <Typography variant="h6" color="primary" fontWeight={600}>
-                            {nextExercise?.exercise_name || 'Unknown'}
-                          </Typography>
-                        </Box>
-                        <Box sx={{ flex: 1 }}>
-                          <Typography variant="body2" color="text.secondary" gutterBottom>
-                            Target Reps
-                          </Typography>
-                          <Typography variant="h6" color="info.main" fontWeight={600}>
-                            {nextExercise?.reps_per_set || 0} Reps
-                          </Typography>
-                        </Box>
-                        <Box sx={{ flex: 1 }}>
-                          <Typography variant="body2" color="text.secondary" gutterBottom>
-                            Target Sets
-                          </Typography>
-                          <Typography variant="h6" color="secondary.main" fontWeight={600}>
-                            {nextExercise?.sets || 0} Sets
-                          </Typography>
-                        </Box>
-                      </Box>
-                    );
-                  })()}
-                </CardContent>
-              </Card>
-            </CardContent>
-          </Card>
-        </Grid>
-
-        {/* Right Panel - Exercises and Controls */}
-        <Grid item xs={12} md={5}>
-          <Stack spacing={2}>
-
-            {/* Demo Video */}
-            <Card>
-              <CardContent>
                 <Typography variant="h6" gutterBottom>
-                  Demo Video
-                </Typography>
-                {selectedExercise?.demo_video_url ? (
-                  <Box sx={{ 
-                    width: '100%', 
-                    height: 300, 
-                    borderRadius: 2, 
-                    overflow: 'hidden',
-                    backgroundColor: '#f0f0f0',
-                    border: '2px solid #e0e0e0'
-                  }}>
-                    <video
-                      key={selectedExercise.exercise_id || selectedExercise.exercise_name}
-                      ref={demoVideoRef}
-                      controls
-                      autoPlay
-                      loop
-                      style={{
-                        width: '100%',
-                        height: '100%',
-                        objectFit: 'cover'
-                      }}
-                    >
-                      <source 
-                        src={selectedExercise.demo_video_url.startsWith('http') 
-                          ? selectedExercise.demo_video_url 
-                          : `http://127.0.0.1:8000${selectedExercise.demo_video_url}`} 
-                        type="video/mp4" 
-                      />
-                      <source 
-                        src={selectedExercise.demo_video_url.startsWith('http') 
-                          ? selectedExercise.demo_video_url 
-                          : `http://127.0.0.1:8000${selectedExercise.demo_video_url}`} 
-                        type="video/webm" 
-                      />
-                      Your browser does not support the video tag.
-                    </video>
-                  </Box>
-                ) : (
-                  <Box sx={{ 
-                    width: '100%', 
-                    height: 300, 
-                    borderRadius: 2, 
-                    overflow: 'hidden',
-                    backgroundColor: '#f0f0f0',
-                    border: '2px solid #e0e0e0',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center'
-                  }}>
-                    <Typography color="text.secondary">
-                      No demo video available
-                    </Typography>
-                  </Box>
-                )}
-              </CardContent>
-            </Card>
-
-
-            {/* Current Results */}
-            <Card>
-              <CardContent>
-                <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 2, mb: 2 }}>
-                  <Typography variant="h6">
-                    Exercise {currentExerciseIndex + 1} of {treatmentExercises.length}
+                  Therapist Information
                   </Typography>
+                <Typography variant="h4" fontWeight={600} sx={{ mb: 1 }}>
+                  {activeTreatment.therapist_name || 'Therapist Assigned'}
+                  </Typography>
+                <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+                  This therapist created your plan. Reach out if you have questions or need adjustments.
+                  </Typography>
+
+                <Stack spacing={1.5} sx={{ mt: 'auto' }}>
                   <Button
                     variant="outlined"
-                    size="small"
-                    onClick={handleManualRepIncrement}
-                    disabled={!isRecognitionActive && !isExercisePaused}
+                    startIcon={<WhatsAppIcon />}
+                    component="a"
+                    href={getWhatsappLink(activeTreatment.therapist_contact) || undefined}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    disabled={!getWhatsappLink(activeTreatment.therapist_contact)}
+                      sx={{
+                      borderRadius: 999,
+                      textTransform: 'none',
+                      fontWeight: 600,
+                      py: 1,
+                    }}
                   >
-                    🧪 +1 Rep (Test)
+                    {activeTreatment.therapist_contact
+                      ? `WhatsApp ${activeTreatment.therapist_contact}`
+                      : 'Contact not available'}
                   </Button>
-                </Box>
-                
-                <Stack spacing={2}>
-                  {/* Reps and Sets in Grid Layout */}
-                  <Grid container spacing={2}>
-                    {/* Reps Section */}
-                    <Grid item xs={6}>
-                      <Box sx={{ 
-                        p: 2, 
-                        bgcolor: 'primary.50', 
-                        borderRadius: 2,
-                        textAlign: 'center',
-                        border: '1px solid',
-                        borderColor: 'primary.200'
-                      }}>
-                        <Typography variant="h3" color="primary" fontWeight="bold">
-                          {currentResults.reps}/{selectedExercise?.reps_per_set || 0}
-                        </Typography>
-                        <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
-                          Repetitions
-                        </Typography>
-                        {/* Progress Bar */}
-                        <Box sx={{ width: '100%', mt: 1.5 }}>
-                          <LinearProgress 
-                            variant="determinate" 
-                            value={selectedExercise?.reps_per_set ? (currentResults.reps / selectedExercise.reps_per_set * 100) : 0}
-                            sx={{ 
-                              height: 8, 
-                              borderRadius: 4,
-                              bgcolor: 'grey.200',
-                              '& .MuiLinearProgress-bar': {
-                                borderRadius: 4,
-                                bgcolor: currentResults.reps >= selectedExercise?.reps_per_set ? 'success.main' : 'primary.main'
-                              }
-                            }}
-                          />
-                          <Typography variant="caption" color="text.secondary" sx={{ display: 'block', textAlign: 'center', mt: 0.5 }}>
-                            {selectedExercise?.reps_per_set ? Math.round((currentResults.reps / selectedExercise.reps_per_set * 100)) : 0}% Complete
-                          </Typography>
-                        </Box>
-                      </Box>
-                    </Grid>
-                    
-                    {/* Sets Section */}
-                    <Grid item xs={6}>
-                      <Box sx={{ 
-                        p: 2, 
-                        bgcolor: 'secondary.50', 
-                        borderRadius: 2,
-                        textAlign: 'center',
-                        border: '1px solid',
-                        borderColor: 'secondary.200',
-                        height: '100%',
-                        display: 'flex',
-                        flexDirection: 'column',
-                        justifyContent: 'center'
-                      }}>
-                        <Typography variant="h3" color="secondary" fontWeight="bold">
-                          {completedSets}/{selectedExercise?.sets || 0}
-                        </Typography>
-                        <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
-                          Completed Sets
-                        </Typography>
-                      </Box>
-                    </Grid>
-                  </Grid>
-                  
-                  {/* Total Time and Pauses in Grid */}
-                  <Grid container spacing={2}>
-                    <Grid item xs={pauseCount > 0 ? 6 : 12}>
-                      <Box sx={{ 
-                        p: 1.5, 
-                        bgcolor: 'success.50', 
-                        borderRadius: 2,
-                        textAlign: 'center',
-                        border: '1px solid',
-                        borderColor: 'success.200'
-                      }}>
-                        <Typography variant="h5" color="success.main" fontWeight="bold">
-                          {formatTime(exerciseTime)}
-                        </Typography>
-                        <Typography variant="caption" color="text.secondary">
-                          Total Time
-                        </Typography>
-                      </Box>
-                    </Grid>
-                    {pauseCount > 0 && (
-                      <Grid item xs={6}>
-                        <Box sx={{ 
-                          p: 1.5, 
-                          bgcolor: 'warning.50', 
-                          borderRadius: 2,
-                          textAlign: 'center',
-                          border: '1px solid',
-                          borderColor: 'warning.200'
-                        }}>
-                          <Typography variant="h5" color="warning.main" fontWeight="bold" sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 0.5 }}>
-                            <PauseIcon sx={{ fontSize: 20 }} />
-                            {pauseCount}
-                          </Typography>
-                          <Typography variant="caption" color="text.secondary">
-                            Pauses
-                          </Typography>
-                        </Box>
-                      </Grid>
-                    )}
-                  </Grid>
-                  
                 </Stack>
               </CardContent>
             </Card>
-          </Stack>
+          </Grid>
         </Grid>
-      </Grid>
+      )}
+
+      <Card sx={{ mt: 3 }}>
+                <CardContent>
+          {treatmentExercises.length === 0 ? (
+            <Box sx={{ textAlign: 'center', py: 3 }}>
+              <Typography variant="body1" color="text.secondary">
+                A therapist has not assigned any exercises yet.
+                          </Typography>
+                        </Box>
+          ) : (
+            <Stack spacing={2}>
+              {treatmentExercises.map((exercise, index) => {
+                const isCurrent = index === currentExerciseIndex;
+                const isCompleted = index < currentExerciseIndex;
+                const baseStatusLabel = isCurrent ? 'Current' : (isCompleted ? 'Completed' : 'Upcoming');
+                const exerciseStatusLabel = !isTreatmentActive ? 'Ended' : baseStatusLabel;
+                const statusColor = !isTreatmentActive
+                  ? 'default'
+                  : isCurrent ? 'info' : (isCompleted ? 'success' : 'default');
+                const exerciseReps = exercise.reps_per_set || 0;
+                const exerciseSets = exercise.sets || 0;
+                const exerciseDuration = exercise.duration || 1;
+                const isSelected = exercise.exercise_id === selectedExercise?.exercise_id;
+
+                    return (
+                  <Card
+                    key={exercise.treatment_exercise_id || `${exercise.exercise_id}_${index}`}
+                    variant="outlined"
+                    sx={{
+                      borderColor: isCurrent ? 'primary.main' : 'grey.300',
+                      backgroundColor: isSelected ? 'rgba(25,118,210,0.06)' : 'background.paper',
+                    }}
+                  >
+                    <CardContent
+                      sx={{ display: 'flex', flexDirection: { xs: 'column', lg: 'row' }, gap: 3, alignItems: 'stretch' }}
+                    >
+                      <Box sx={{ flex: { xs: '1 1 auto', lg: '0 0 60%' } }}>
+                        <Typography variant="h6" fontWeight={600} sx={{ mb: 1 }}>
+                          {exercise.exercise_name}
+                          </Typography>
+                        <Typography variant="body2" color="text.secondary">
+                          {exercise.instructions || 'No description available.'}
+                          </Typography>
+                        </Box>
+
+                      <Box
+                        sx={{
+                          flex: { xs: '1 1 auto', lg: '0 0 10%' },
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center'
+                        }}
+                      >
+                        <Button
+                          variant="outlined"
+                          startIcon={<PlayCircleOutlineIcon />}
+                          sx={{ textTransform: 'none', fontWeight: 600 }}
+                        >
+                          Demo Video
+                        </Button>
+                  </Box>
+
+                      <Box
+                        sx={{
+                          flex: { xs: '1 1 auto', lg: '0 0 40%' },
+                    display: 'flex',
+                    alignItems: 'center',
+                          justifyContent: 'space-evenly',
+                          color: 'text.primary'
+                        }}
+                      >
+                        <Box sx={{ textAlign: 'center', minWidth: 120 }}>
+                          <Typography variant="caption" color="text.secondary">
+                            Reps / Set
+                    </Typography>
+                          <Typography variant="subtitle1" fontWeight={600} color="error.main">
+                            {exerciseReps}
+                  </Typography>
+                </Box>
+                        <Divider orientation="vertical" flexItem />
+                        <Box sx={{ textAlign: 'center', minWidth: 120 }}>
+                          <Typography variant="caption" color="text.secondary">
+                            Sets
+                        </Typography>
+                          <Typography variant="subtitle1" fontWeight={600} color="error.main">
+                            {exerciseSets}
+                          </Typography>
+                        </Box>
+                        <Divider orientation="vertical" flexItem />
+                        <Box sx={{ textAlign: 'center', minWidth: 160 }}>
+                          <Typography variant="caption" color="text.secondary">
+                            Target Reps
+                        </Typography>
+                          <Typography variant="subtitle1" fontWeight={600} color="error.main">
+                            {exerciseReps} reps × {exerciseSets} sets
+                        </Typography>
+                          <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.5 }}>
+                            Complete within
+                        </Typography>
+                          <Typography variant="subtitle1" fontWeight={600} color="error.main">
+                            {exerciseDuration} min
+                        </Typography>
+                          {isCurrent && (
+                            <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.5 }}>
+                              {isRecognitionActive ? 'Live counting in progress' : 'Waiting to resume'}
+                          </Typography>
+                          )}
+                        </Box>
+                        <Divider orientation="vertical" flexItem />
+                        <Box sx={{ textAlign: 'center', minWidth: 140 }}>
+                          <Typography variant="caption" color="text.secondary">
+                            Status
+                          </Typography>
+                          <Typography
+                            variant="subtitle1"
+                            fontWeight={600}
+                            color={!isTreatmentActive ? 'text.secondary' : isCurrent ? 'info.main' : isCompleted ? 'success.main' : 'text.secondary'}
+                          >
+                            {exerciseStatusLabel}
+                          </Typography>
+                        </Box>
+                      </Box>
+              </CardContent>
+            </Card>
+                );
+              })}
+          </Stack>
+          )}
+        </CardContent>
+      </Card>
 
       {/* End Exercise Confirmation Dialog */}
       <Dialog

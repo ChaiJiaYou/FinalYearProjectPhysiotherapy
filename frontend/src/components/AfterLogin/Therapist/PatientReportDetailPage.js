@@ -24,6 +24,12 @@ import {
   TableRow,
   Tooltip,
   IconButton,
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  DialogActions,
+  Checkbox,
+  FormControlLabel,
 } from "@mui/material";
 import {
   LineChart,
@@ -45,6 +51,11 @@ import AccessTimeIcon from "@mui/icons-material/AccessTime";
 import TrendingUpIcon from "@mui/icons-material/TrendingUp";
 import AssessmentIcon from "@mui/icons-material/Assessment";
 import InfoOutlinedIcon from "@mui/icons-material/InfoOutlined";
+import FileDownloadIcon from "@mui/icons-material/FileDownload";
+import ExpandMoreIcon from "@mui/icons-material/ExpandMore";
+import ExpandLessIcon from "@mui/icons-material/ExpandLess";
+import jsPDF from "jspdf";
+import autoTable from "jspdf-autotable";
 
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
 
@@ -224,6 +235,26 @@ const PatientReportDetailPage = () => {
   const [selectedRecord, setSelectedRecord] = useState(null);
   const [allTreatments, setAllTreatments] = useState([]);
   const [selectedDateTreatmentExercises, setSelectedDateTreatmentExercises] = useState([]);
+  const [treatmentExercisesOverview, setTreatmentExercisesOverview] = useState([]);
+  const [exportDialogOpen, setExportDialogOpen] = useState(false);
+  const [expandedDates, setExpandedDates] = useState(new Set()); // Track which dates are expanded
+  const [exportConfig, setExportConfig] = useState({
+    includePatientInfo: true,
+    includeTreatmentInfo: true,
+    includeExercisesList: true,
+    includeStatistics: true,
+    includeExerciseRecords: true,
+    exerciseRecordsColumns: {
+      date: true,
+      exercise_name: true,
+      reps: true,
+      sets: true,
+      avg_time: true,
+      consistency: true,
+      fatigue: true,
+      pauses: true,
+    },
+  });
   
   // Use refs to store latest values for event handlers
   const selectedDateRef = useRef(null);
@@ -371,6 +402,47 @@ const PatientReportDetailPage = () => {
   const currentTreatment = useMemo(() => {
     return selectedDate && selectedDateTreatment ? selectedDateTreatment : activeTreatment;
   }, [selectedDate, selectedDateTreatment, activeTreatment]);
+
+  const treatmentIdForOverview = useMemo(() => {
+    if (selectedDate && selectedDateTreatment?.treatment_id) {
+      return selectedDateTreatment.treatment_id;
+    }
+    return currentTreatment?.treatment_id || null;
+  }, [selectedDate, selectedDateTreatment, currentTreatment]);
+
+  useEffect(() => {
+    if (!treatmentIdForOverview) {
+      setTreatmentExercisesOverview([]);
+      return;
+    }
+
+    let isMounted = true;
+    const fetchExercisesOverview = async () => {
+      try {
+        const response = await fetch(
+          `http://127.0.0.1:8000/api/treatment-exercises-all/${treatmentIdForOverview}/`
+        );
+        if (!response.ok) {
+          throw new Error("Failed to load treatment exercises");
+        }
+        const data = await response.json();
+        if (isMounted) {
+          setTreatmentExercisesOverview(Array.isArray(data) ? data : []);
+        }
+      } catch (error) {
+        console.error("Failed to fetch treatment exercises:", error);
+        if (isMounted) {
+          setTreatmentExercisesOverview([]);
+        }
+      }
+    };
+
+    fetchExercisesOverview();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [treatmentIdForOverview]);
 
   // Calculate chart data from exercise records (use currentTreatment)
   const repsTrendData = useMemo(() => {
@@ -557,16 +629,17 @@ const PatientReportDetailPage = () => {
         
         if (response.ok) {
           const exercisesData = await response.json();
-          // Transform to match the format expected by the UI
-          const transformedExercises = Array.isArray(exercisesData)
-            ? exercisesData.map((ex) => ({
-                treatment_exercise_id: ex.treatment_exercise_id,
-                exercise_name: ex.exercise_name,
-                reps_per_set: ex.reps_per_set,
-                sets: ex.sets,
-                order_in_treatment: ex.order_in_treatment,
-              }))
+          const activeExercises = Array.isArray(exercisesData)
+            ? exercisesData.filter(ex => ex.is_active !== false)
             : [];
+          // Transform to match the format expected by the UI
+          const transformedExercises = activeExercises.map((ex) => ({
+            treatment_exercise_id: ex.treatment_exercise_id,
+            exercise_name: ex.exercise_name,
+            reps_per_set: ex.reps_per_set,
+            sets: ex.sets,
+            order_in_treatment: ex.order_in_treatment,
+          }));
           setSelectedDateTreatmentExercises(transformedExercises);
         } else {
           setSelectedDateTreatmentExercises([]);
@@ -598,6 +671,71 @@ const PatientReportDetailPage = () => {
       return record.treatment_id === treatmentId;
     });
   }, [selectedDate, selectedDateTreatment, exerciseRecords]);
+
+  // Group exercise records by date
+  const exerciseRecordsByDate = useMemo(() => {
+    const recordsToGroup = selectedDate ? selectedDateExerciseRecords : filteredExerciseRecords;
+    if (!recordsToGroup || recordsToGroup.length === 0) return [];
+    
+    const grouped = {};
+    recordsToGroup.forEach((record) => {
+      // Get date key in YYYY-MM-DD format
+      let dateKey;
+      if (record.date) {
+        // If date is already in YYYY-MM-DD format, use it directly
+        if (typeof record.date === 'string' && record.date.match(/^\d{4}-\d{2}-\d{2}$/)) {
+          dateKey = record.date;
+        } else {
+          // Otherwise, parse it and format
+          const date = new Date(record.date);
+          dateKey = formatDateKey(date);
+        }
+      } else {
+        // Extract from start_time or recorded_at
+        const dateStr = record.start_time || record.recorded_at;
+        if (dateStr) {
+          const date = new Date(dateStr);
+          dateKey = formatDateKey(date);
+        } else {
+          return; // Skip records without date
+        }
+      }
+      
+      if (!grouped[dateKey]) {
+        grouped[dateKey] = [];
+      }
+      grouped[dateKey].push(record);
+    });
+    
+    // Convert to array and sort by date (newest first)
+    return Object.entries(grouped)
+      .map(([date, records]) => ({
+        date,
+        records: records.sort((a, b) => {
+          const dateA = new Date(a.start_time || a.recorded_at || a.date);
+          const dateB = new Date(b.start_time || b.recorded_at || b.date);
+          return dateB - dateA;
+        }),
+      }))
+      .sort((a, b) => {
+        const dateA = new Date(a.date);
+        const dateB = new Date(b.date);
+        return dateB - dateA; // Newest first
+      });
+  }, [filteredExerciseRecords, selectedDate, selectedDateExerciseRecords]);
+
+  // Toggle date expansion
+  const toggleDateExpansion = (date) => {
+    setExpandedDates((prev) => {
+      const newSet = new Set(prev);
+      if (newSet.has(date)) {
+        newSet.delete(date);
+      } else {
+        newSet.add(date);
+      }
+      return newSet;
+    });
+  };
 
   // Auto-select the first exercise record when selectedDate changes
   useEffect(() => {
@@ -690,11 +828,31 @@ const PatientReportDetailPage = () => {
       ? recordsWithAvgTime.reduce((sum, r) => sum + r.avg_time, 0) / recordsWithAvgTime.length
       : null;
 
-    // Calculate average consistency score
-    const recordsWithConsistency = treatmentRecords.filter((r) => r.consistency !== null && r.consistency !== undefined);
-    const avgConsistency = recordsWithConsistency.length > 0
-      ? recordsWithConsistency.reduce((sum, r) => sum + (r.consistency / 100), 0) / recordsWithConsistency.length
-      : null;
+    // Calculate consistency using SPARC (Consistency = 1 - CV(SPARC))
+    const sparcValues = treatmentRecords
+      .flatMap((record) =>
+        Array.isArray(record.rep_sparc_scores)
+          ? record.rep_sparc_scores
+              .filter((value) => typeof value === "number" && Number.isFinite(value))
+              .map((value) => Math.abs(value))
+          : []
+      )
+      .filter((value) => Number.isFinite(value));
+
+    let sparcDerivedConsistency = null;
+    if (sparcValues.length >= 2) {
+      const mean = sparcValues.reduce((sum, value) => sum + value, 0) / sparcValues.length;
+      if (Math.abs(mean) > 1e-6) {
+        const variance =
+          sparcValues.reduce((sum, value) => sum + Math.pow(value - mean, 2), 0) / sparcValues.length;
+        const stdDev = Math.sqrt(variance);
+        const cv = stdDev / Math.abs(mean);
+        const consistencyCandidate = 1 - cv;
+        sparcDerivedConsistency = Math.max(0, Math.min(1, consistencyCandidate));
+      }
+    }
+
+    const avgConsistency = sparcDerivedConsistency;
 
     // Calculate average fatigue index
     const recordsWithFatigue = treatmentRecords.filter((r) => r.fatigue !== null && r.fatigue !== undefined);
@@ -714,6 +872,229 @@ const PatientReportDetailPage = () => {
       avgFatigueIndex,
     };
   }, [currentTreatment, exerciseRecords, selectedDate, selectedDateTreatment, selectedDateTreatmentExercises]);
+
+  // Generate PDF with configurable options
+  const generatePDF = (config) => {
+    if (!currentTreatment) return;
+
+    const doc = new jsPDF();
+    const pageWidth = doc.internal.pageSize.getWidth();
+    const pageHeight = doc.internal.pageSize.getHeight();
+    let yPos = 20;
+
+    // Title
+    doc.setFontSize(20);
+    doc.setFont(undefined, "bold");
+    doc.text("Treatment Report", pageWidth / 2, yPos, { align: "center" });
+    yPos += 10;
+
+    // Patient Information Section (if enabled)
+    if (config.includePatientInfo) {
+      doc.setFontSize(14);
+      doc.setFont(undefined, "bold");
+      doc.text("Patient Information", 20, yPos);
+      yPos += 8;
+
+      doc.setFontSize(11);
+      doc.setFont(undefined, "normal");
+      doc.text(`Name: ${patientInfo?.username || patientInfo?.full_name || "-"}`, 20, yPos);
+      yPos += 6;
+      doc.text(`ID: ${patientInfo?.id || patientId}`, 20, yPos);
+      yPos += 6;
+      if (patientInfo?.phone) {
+        doc.text(`Phone: ${patientInfo.phone}`, 20, yPos);
+        yPos += 6;
+      }
+      yPos += 5;
+    }
+
+    // Treatment Information Section (if enabled)
+    if (config.includeTreatmentInfo) {
+      doc.setFontSize(14);
+      doc.setFont(undefined, "bold");
+      if (yPos > pageHeight - 50) {
+        doc.addPage();
+        yPos = 20;
+      }
+      doc.text("Treatment Information", 20, yPos);
+      yPos += 8;
+
+      doc.setFontSize(11);
+      doc.setFont(undefined, "normal");
+      doc.text(`Treatment Name: ${currentTreatment.name || "-"}`, 20, yPos);
+      yPos += 6;
+      doc.text(`Start Date: ${currentTreatment.start_date ? formatDate(currentTreatment.start_date) : "-"}`, 20, yPos);
+      yPos += 6;
+      doc.text(`End Date: ${currentTreatment.end_date ? formatDate(currentTreatment.end_date) : "-"}`, 20, yPos);
+      yPos += 8;
+    }
+
+    // Exercises List (if enabled)
+    if (config.includeExercisesList && currentTreatment.exercises && currentTreatment.exercises.length > 0) {
+      doc.setFontSize(12);
+      doc.setFont(undefined, "bold");
+      if (yPos > pageHeight - 50) {
+        doc.addPage();
+        yPos = 20;
+      }
+      doc.text("Exercises:", 20, yPos);
+      yPos += 6;
+      doc.setFontSize(10);
+      doc.setFont(undefined, "normal");
+      currentTreatment.exercises.forEach((exercise, index) => {
+        if (yPos > pageHeight - 30) {
+          doc.addPage();
+          yPos = 20;
+        }
+        doc.text(`${index + 1}. ${exercise.exercise_name || "Unknown"}`, 25, yPos);
+        yPos += 5;
+        doc.text(`   Reps: ${exercise.reps_per_set || "-"} | Sets: ${exercise.sets || "-"} | Duration: ${exercise.duration || "-"} min`, 25, yPos);
+        yPos += 6;
+      });
+      yPos += 5;
+    }
+
+    // Statistics Section (if enabled)
+    if (config.includeStatistics) {
+      doc.setFontSize(14);
+      doc.setFont(undefined, "bold");
+      if (yPos > pageHeight - 50) {
+        doc.addPage();
+        yPos = 20;
+      }
+      doc.text("Performance Statistics", 20, yPos);
+      yPos += 8;
+
+      doc.setFontSize(11);
+      doc.setFont(undefined, "normal");
+      const stats = [
+        ["Sessions Completion Rate", displayStats.sessionsCompletionRate !== null && displayStats.sessionsCompletionRate !== undefined
+          ? `${displayStats.sessionsCompletionRate.toFixed(1)}%`
+          : "-"],
+        ["Total Reps Completed", `${displayStats.totalRepsCompleted || 0} / ${displayStats.shouldCompletedReps || 0}`],
+        ["Reps Completion Rate", displayStats.repsCompletionRate !== null && displayStats.repsCompletionRate !== undefined
+          ? `${displayStats.repsCompletionRate.toFixed(1)}%`
+          : "-"],
+        ["Average Rep Duration", displayStats.avgRepDuration !== null && displayStats.avgRepDuration !== undefined
+          ? `${displayStats.avgRepDuration.toFixed(2)}s`
+          : "-"],
+        ["Consistency Score", displayStats.consistencyScore !== null && displayStats.consistencyScore !== undefined
+          ? `${displayStats.consistencyScore.toFixed(1)}%`
+          : "-"],
+        ["Average Fatigue Index", displayStats.avgFatigueIndex !== null && displayStats.avgFatigueIndex !== undefined
+          ? `${displayStats.avgFatigueIndex.toFixed(1)}%`
+          : "-"],
+      ];
+
+      stats.forEach(([label, value]) => {
+        if (yPos > pageHeight - 20) {
+          doc.addPage();
+          yPos = 20;
+        }
+        doc.text(`${label}: ${value}`, 20, yPos);
+        yPos += 6;
+      });
+      yPos += 5;
+    }
+
+    // Exercise Records Table (if enabled)
+    if (config.includeExerciseRecords && exerciseRecords && exerciseRecords.length > 0) {
+      if (yPos > pageHeight - 40) {
+        doc.addPage();
+        yPos = 20;
+      }
+
+      doc.setFontSize(14);
+      doc.setFont(undefined, "bold");
+      doc.text("Exercise Records", 20, yPos);
+      yPos += 10;
+
+      // Build columns based on config
+      const columns = [];
+      const columnKeys = [];
+      
+      if (config.exerciseRecordsColumns.date) {
+        columns.push("Date");
+        columnKeys.push("date");
+      }
+      if (config.exerciseRecordsColumns.exercise_name) {
+        columns.push("Exercise");
+        columnKeys.push("exercise_name");
+      }
+      if (config.exerciseRecordsColumns.reps) {
+        columns.push("Reps");
+        columnKeys.push("reps");
+      }
+      if (config.exerciseRecordsColumns.sets) {
+        columns.push("Sets");
+        columnKeys.push("sets");
+      }
+      if (config.exerciseRecordsColumns.avg_time) {
+        columns.push("Avg Time");
+        columnKeys.push("avg_time");
+      }
+      if (config.exerciseRecordsColumns.consistency) {
+        columns.push("Consistency");
+        columnKeys.push("consistency");
+      }
+      if (config.exerciseRecordsColumns.fatigue) {
+        columns.push("Fatigue");
+        columnKeys.push("fatigue");
+      }
+      if (config.exerciseRecordsColumns.pauses) {
+        columns.push("Pauses");
+        columnKeys.push("pauses");
+      }
+
+      const tableData = exerciseRecords.map(record => {
+        const row = [];
+        columnKeys.forEach(key => {
+          if (key === "date") {
+            row.push(formatDate(record.date) || "-");
+          } else if (key === "avg_time") {
+            row.push(record.avg_time ? `${record.avg_time}s` : "-");
+          } else if (key === "consistency") {
+            row.push(record.consistency ? `${record.consistency}%` : "-");
+          } else if (key === "fatigue") {
+            row.push(record.fatigue ? `${record.fatigue}%` : "-");
+          } else {
+            row.push(record[key] || "-");
+          }
+        });
+        return row;
+      });
+
+      if (columns.length > 0 && tableData.length > 0) {
+        autoTable(doc, {
+          startY: yPos,
+          head: [columns],
+          body: tableData,
+          theme: "striped",
+          headStyles: { fillColor: [25, 118, 210], textColor: 255, fontStyle: "bold" },
+          styles: { fontSize: 8, cellPadding: 2 },
+          margin: { left: 20, right: 20 },
+        });
+      }
+    }
+
+    // Footer with export date
+    const totalPages = doc.internal.pages.length - 1;
+    for (let i = 1; i <= totalPages; i++) {
+      doc.setPage(i);
+      doc.setFontSize(8);
+      doc.setFont(undefined, "italic");
+      doc.text(
+        `Exported on: ${new Date().toLocaleString()}`,
+        pageWidth / 2,
+        pageHeight - 10,
+        { align: "center" }
+      );
+    }
+
+    // Save PDF
+    const fileName = `Treatment_Report_${patientInfo?.username || patientId}_${new Date().toISOString().split("T")[0]}.pdf`;
+    doc.save(fileName);
+  };
 
   // Use currentTreatmentStats when date is selected, otherwise use original stats
   const displayStats = selectedDate && currentTreatment
@@ -763,6 +1144,7 @@ const PatientReportDetailPage = () => {
                   display: "flex",
                   alignItems: "center",
                   gap: 2,
+                  position: "relative",
                 }}
               >
                 <Avatar
@@ -796,6 +1178,22 @@ const PatientReportDetailPage = () => {
                     )}
                   </Stack>
                 </Box>
+                {currentTreatment && (
+                  <Button
+                    variant="contained"
+                    startIcon={<FileDownloadIcon />}
+                    onClick={() => setExportDialogOpen(true)}
+                    sx={{
+                      bgcolor: "rgba(255, 255, 255, 0.2)",
+                      color: "white",
+                      "&:hover": {
+                        bgcolor: "rgba(255, 255, 255, 0.3)",
+                      },
+                    }}
+                  >
+                    Export Current Treatment Info
+                  </Button>
+                )}
               </Box>
             </Card>
           </Grid>
@@ -841,6 +1239,157 @@ const PatientReportDetailPage = () => {
 
                       <Divider />
 
+                      {/* Treatment Exercises */}
+                      {(() => {
+                        const exercisesForTreatment =
+                          (treatmentExercisesOverview && treatmentExercisesOverview.length > 0
+                            ? treatmentExercisesOverview
+                            : null) ||
+                          (selectedDate && selectedDateTreatment
+                            ? selectedDateTreatmentExercises
+                            : currentTreatment?.exercises || []);
+
+                        if (!exercisesForTreatment.length) {
+                          return null;
+                        }
+
+                        const activeExercises = exercisesForTreatment.filter((exercise) => exercise.is_active !== false);
+                        const inactiveExercises = exercisesForTreatment.filter((exercise) => exercise.is_active === false);
+
+                        return (
+                          <>
+                            <Box>
+                              <Typography variant="caption" color="text.secondary" sx={{ mb: 1.5, display: "block" }}>
+                                Active Exercises
+                              </Typography>
+                              <Stack spacing={1.5}>
+                                {activeExercises.map((exercise, index) => (
+                                  <Paper
+                                    key={exercise.treatment_exercise_id || `active-${index}`}
+                                    elevation={0}
+                                    sx={{
+                                      p: 2,
+                                      bgcolor: "grey.50",
+                                      borderRadius: 2,
+                                      border: "1px solid",
+                                      borderColor: "divider",
+                                    }}
+                                  >
+                                    <Stack direction="row" spacing={2} alignItems="center">
+                                      <Box
+                                        sx={{
+                                          width: 32,
+                                          height: 32,
+                                          borderRadius: "50%",
+                                          bgcolor: "primary.main",
+                                          color: "white",
+                                          display: "flex",
+                                          alignItems: "center",
+                                          justifyContent: "center",
+                                          fontWeight: 600,
+                                          fontSize: "0.875rem",
+                                        }}
+                                      >
+                                        {exercise.order_in_treatment || index + 1}
+                                      </Box>
+                                      <Box sx={{ flex: 1 }}>
+                                        <Typography variant="body1" fontWeight={500}>
+                                          {exercise.exercise_name}
+                                        </Typography>
+                                      <Stack direction="row" spacing={2} sx={{ mt: 0.5 }}>
+                                        {exercise.reps_per_set && (
+                                          <Typography variant="caption" color="text.secondary">
+                                            Reps: {exercise.reps_per_set}
+                                          </Typography>
+                                        )}
+                                        {exercise.sets && (
+                                          <Typography variant="caption" color="text.secondary">
+                                            Sets: {exercise.sets}
+                                          </Typography>
+                                        )}
+                                        {exercise.duration && (
+                                          <Typography variant="caption" color="text.secondary">
+                                            Duration: {exercise.duration} min
+                                          </Typography>
+                                        )}
+                                      </Stack>
+                                      </Box>
+                                    </Stack>
+                                  </Paper>
+                                ))}
+                              </Stack>
+                            </Box>
+
+                            {inactiveExercises.length > 0 && (
+                              <>
+                                <Divider sx={{ my: 2 }} />
+                                <Box>
+                                  <Typography variant="caption" color="text.secondary" sx={{ mb: 1.5, display: "block" }}>
+                                    Inactive Exercises
+                                  </Typography>
+                                  <Stack spacing={1.5}>
+                                    {inactiveExercises.map((exercise, index) => (
+                                      <Paper
+                                        key={exercise.treatment_exercise_id || `inactive-${index}`}
+                                        elevation={0}
+                                        sx={{
+                                          p: 2,
+                                          bgcolor: "warning.50",
+                                          borderRadius: 2,
+                                          border: "1px dashed",
+                                          borderColor: "warning.light",
+                                        }}
+                                      >
+                                        <Stack direction="row" spacing={2} alignItems="center">
+                                          <Box
+                                            sx={{
+                                              width: 32,
+                                              height: 32,
+                                              borderRadius: "50%",
+                                              bgcolor: "warning.main",
+                                              color: "white",
+                                              display: "flex",
+                                              alignItems: "center",
+                                              justifyContent: "center",
+                                              fontWeight: 600,
+                                              fontSize: "0.875rem",
+                                            }}
+                                          >
+                                            {exercise.order_in_treatment || index + 1}
+                                          </Box>
+                                          <Box sx={{ flex: 1 }}>
+                                            <Typography variant="body1" fontWeight={500}>
+                                              {exercise.exercise_name}
+                                            </Typography>
+                                            <Stack direction="row" spacing={2} sx={{ mt: 0.5 }}>
+                                              {exercise.reps_per_set && (
+                                                <Typography variant="caption" color="text.secondary">
+                                                  Reps: {exercise.reps_per_set}
+                                                </Typography>
+                                              )}
+                                              {exercise.sets && (
+                                                <Typography variant="caption" color="text.secondary">
+                                                  Sets: {exercise.sets}
+                                                </Typography>
+                                              )}
+                                              {exercise.duration && (
+                                                <Typography variant="caption" color="text.secondary">
+                                                  Duration: {exercise.duration} min
+                                                </Typography>
+                                              )}
+                                            </Stack>
+                                          </Box>
+                                        </Stack>
+                                      </Paper>
+                                    ))}
+                                  </Stack>
+                                </Box>
+                              </>
+                            )}
+                          </>
+                        );
+                      })()}
+
                       <Grid container spacing={3}>
                         <Grid item xs={12} sm={6}>
                           <Box>
@@ -872,75 +1421,7 @@ const PatientReportDetailPage = () => {
 
                       <Divider />
 
-                      {/* Treatment Exercises */}
-                      {(() => {
-                        const exercisesToShow = selectedDate && selectedDateTreatment
-                          ? selectedDateTreatmentExercises 
-                          : (currentTreatment?.exercises || []);
-                        
-                        return exercisesToShow.length > 0 && (
-                          <>
-                            <Box>
-                              <Typography variant="caption" color="text.secondary" sx={{ mb: 1.5, display: "block" }}>
-                                Treatment Exercises
-                              </Typography>
-                              <Stack spacing={1.5}>
-                                {exercisesToShow.map((exercise, index) => (
-                                <Paper
-                                  key={exercise.treatment_exercise_id || index}
-                                  elevation={0}
-                                  sx={{
-                                    p: 2,
-                                    bgcolor: "grey.50",
-                                    borderRadius: 2,
-                                    border: "1px solid",
-                                    borderColor: "divider",
-                                  }}
-                                >
-                                  <Stack direction="row" spacing={2} alignItems="center">
-                                    <Box
-                                      sx={{
-                                        width: 32,
-                                        height: 32,
-                                        borderRadius: "50%",
-                                        bgcolor: "primary.main",
-                                        color: "white",
-                                        display: "flex",
-                                        alignItems: "center",
-                                        justifyContent: "center",
-                                        fontWeight: 600,
-                                        fontSize: "0.875rem",
-                                      }}
-                                    >
-                                      {exercise.order_in_treatment || index + 1}
-                                    </Box>
-                                    <Box sx={{ flex: 1 }}>
-                                      <Typography variant="body1" fontWeight={500}>
-                                        {exercise.exercise_name}
-                                      </Typography>
-                                      <Stack direction="row" spacing={2} sx={{ mt: 0.5 }}>
-                                        {exercise.reps_per_set && (
-                                          <Typography variant="caption" color="text.secondary">
-                                            Reps: {exercise.reps_per_set}
-                                          </Typography>
-                                        )}
-                                        {exercise.sets && (
-                                          <Typography variant="caption" color="text.secondary">
-                                            Sets: {exercise.sets}
-                                          </Typography>
-                                        )}
-                                      </Stack>
-                                    </Box>
-                                  </Stack>
-                                </Paper>
-                                ))}
-                              </Stack>
-                            </Box>
-                            <Divider />
-                          </>
-                        );
-                      })()}
-
+                      <Divider sx={{ my: 2 }} />
                       {/* Last Exercise and Previous Treatment */}
                       <Grid container spacing={3}>
                         {lastExerciseDate && (
@@ -1201,7 +1682,7 @@ const PatientReportDetailPage = () => {
                   borderRadius: 3,
                   border: "1px solid",
                   borderColor: "divider",
-                  flex: { xs: "1 1 100%", sm: "1 1 calc(50% - 8px)", md: "1 1 0" },
+                  flex: { xs: "1 1 100%", sm: "1 1 calc(50% - 8px)", md: "1 1 calc(25% - 16px)" },
                   minWidth: 0,
                   transition: "all 0.3s",
                   "&:hover": {
@@ -1232,7 +1713,7 @@ const PatientReportDetailPage = () => {
                   borderRadius: 3,
                   border: "1px solid",
                   borderColor: "divider",
-                  flex: { xs: "1 1 100%", sm: "1 1 calc(50% - 8px)", md: "1 1 0" },
+                  flex: { xs: "1 1 100%", sm: "1 1 calc(50% - 8px)", md: "1 1 calc(25% - 16px)" },
                   minWidth: 0,
                   transition: "all 0.3s",
                   "&:hover": {
@@ -1263,7 +1744,7 @@ const PatientReportDetailPage = () => {
                   borderRadius: 3,
                   border: "1px solid",
                   borderColor: "divider",
-                  flex: { xs: "1 1 100%", sm: "1 1 calc(50% - 8px)", md: "1 1 0" },
+                  flex: { xs: "1 1 100%", sm: "1 1 calc(50% - 8px)", md: "1 1 calc(25% - 16px)" },
                   minWidth: 0,
                   transition: "all 0.3s",
                   "&:hover": {
@@ -1294,7 +1775,7 @@ const PatientReportDetailPage = () => {
                   borderRadius: 3,
                   border: "1px solid",
                   borderColor: "divider",
-                  flex: { xs: "1 1 100%", sm: "1 1 calc(50% - 8px)", md: "1 1 0" },
+                  flex: { xs: "1 1 100%", sm: "1 1 calc(50% - 8px)", md: "1 1 calc(25% - 16px)" },
                   minWidth: 0,
                   transition: "all 0.3s",
                   "&:hover": {
@@ -1305,7 +1786,7 @@ const PatientReportDetailPage = () => {
               >
                 <CardContent sx={{ p: 2.5 }}>
                   <Typography variant="caption" color="text.secondary" sx={{ mb: 1, display: "block" }}>
-                    Average Consistency Score
+                    Consistency
                   </Typography>
                   {/* <Typography variant="caption" color="text.secondary" sx={{ fontSize: "0.65rem", mb: 1, display: "block", opacity: 0.7 }}>
                     Reflects how consistent the patient's repetition times are; higher scores indicate steadier and more controlled movements.
@@ -1313,37 +1794,6 @@ const PatientReportDetailPage = () => {
                   <Typography variant="h4" fontWeight={700} color="primary.main">
                     {displayStats.consistencyScore !== null && displayStats.consistencyScore !== undefined
                       ? `${(displayStats.consistencyScore * 100).toFixed(1)}%`
-                      : "-"}
-                  </Typography>
-                </CardContent>
-              </Card>
-
-              {/* 5. Average Fatigue Index */}
-              <Card
-                elevation={0}
-                sx={{
-                  borderRadius: 3,
-                  border: "1px solid",
-                  borderColor: "divider",
-                  flex: { xs: "1 1 100%", sm: "1 1 calc(50% - 8px)", md: "1 1 0" },
-                  minWidth: 0,
-                  transition: "all 0.3s",
-                  "&:hover": {
-                    boxShadow: 2,
-                    transform: "translateY(-2px)",
-                  },
-                }}
-              >
-                <CardContent sx={{ p: 2.5 }}>
-                  <Typography variant="caption" color="text.secondary" sx={{ mb: 1, display: "block" }}>
-                    Average Fatigue Index
-                  </Typography>
-                  {/* <Typography variant="caption" color="text.secondary" sx={{ fontSize: "0.65rem", mb: 1, display: "block", opacity: 0.7 }}>
-                    Measures how much the patient's movement speed drops in the second half of each exercise, indicating fatigue level.
-                  </Typography> */}
-                  <Typography variant="h4" fontWeight={700} color="primary.main">
-                    {displayStats.avgFatigueIndex !== null && displayStats.avgFatigueIndex !== undefined
-                      ? `${displayStats.avgFatigueIndex.toFixed(1)}%`
                       : "-"}
                   </Typography>
                 </CardContent>
@@ -1440,8 +1890,8 @@ const PatientReportDetailPage = () => {
         </Grid>
       )}
 
-      {/* Exercise Records Table */}
-      {!loading && !error && (selectedDate ? selectedDateExerciseRecords.length > 0 : filteredExerciseRecords.length > 0) && (
+      {/* Exercise Records Table - Grouped by Date */}
+      {!loading && !error && exerciseRecordsByDate.length > 0 && (
         <Box sx={{ mt: 4 }}>
           <Stack direction="row" spacing={2} alignItems="center" sx={{ mb: 2 }}>
             <Typography variant="h6" fontWeight={600}>
@@ -1456,73 +1906,131 @@ const PatientReportDetailPage = () => {
               />
             )}
           </Stack>
-          <Card elevation={0} sx={{ borderRadius: 3, border: "1px solid", borderColor: "divider" }}>
-            <TableContainer>
-              <Table>
-                <TableHead>
-                  <TableRow>
-                    <TableCell>Date</TableCell>
-                    <TableCell>Exercise</TableCell>
-                    <TableCell align="center">Total Reps</TableCell>
-                    <TableCell align="center">Sets</TableCell>
-                    <TableCell align="center">Avg Time</TableCell>
-                    <TableCell align="center">Consistency</TableCell>
-                    <TableCell align="center">Fatigue</TableCell>
-                    <TableCell align="center">Pauses</TableCell>
-                    <TableCell align="center">Action</TableCell>
-                  </TableRow>
-                </TableHead>
-                <TableBody>
-                  {selectedDate && selectedDateExerciseRecords.length === 0 ? (
-                    <TableRow>
-                      <TableCell colSpan={9} align="center" sx={{ py: 4 }}>
-                        <Typography variant="body2" color="text.secondary">
-                          No exercise records found for the treatment on {formatDate(selectedDate)}
-                        </Typography>
-                      </TableCell>
-                    </TableRow>
-                  ) : (
-                    (selectedDate ? selectedDateExerciseRecords : filteredExerciseRecords).map((record) => (
-                    <TableRow key={record.record_id} hover>
-                      <TableCell>{formatDate(record.date)}</TableCell>
-                      <TableCell>{record.exercise_name || "-"}</TableCell>
-                      <TableCell align="center">{record.reps}</TableCell>
-                      <TableCell align="center">{record.sets}</TableCell>
-                      <TableCell align="center">
-                        {record.avg_time !== null && record.avg_time !== undefined
-                          ? `${record.avg_time}s`
-                          : "-"}
-                      </TableCell>
-                      <TableCell align="center">
-                        {record.consistency !== null && record.consistency !== undefined
-                          ? `${record.consistency}%`
-                          : "-"}
-                      </TableCell>
-                      <TableCell align="center">
-                        {record.fatigue !== null && record.fatigue !== undefined
-                          ? `${record.fatigue}%`
-                          : "-"}
-                      </TableCell>
-                      <TableCell align="center">{record.pauses}</TableCell>
-                      <TableCell align="center">
-                        <Button
-                          size="small"
-                          variant="text"
-                          color="primary"
-                          onClick={() => {
-                            setSelectedRecord(record);
-                          }}
-                        >
-                          View
-                        </Button>
-                      </TableCell>
-                    </TableRow>
-                    ))
+          
+          <Stack spacing={2}>
+            {exerciseRecordsByDate.map(({ date, records }) => {
+              const isExpanded = expandedDates.has(date);
+              const formattedDate = formatDate(date);
+              
+              return (
+                <Card 
+                  key={date} 
+                  elevation={0} 
+                  sx={{ 
+                    borderRadius: 3, 
+                    border: "1px solid", 
+                    borderColor: "divider",
+                    overflow: "hidden"
+                  }}
+                >
+                  {/* Date Header Row */}
+                  <Box
+                    sx={{
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "space-between",
+                      p: 2,
+                      bgcolor: isExpanded ? "primary.main" : "transparent",
+                      color: isExpanded ? "white" : "text.primary",
+                      cursor: "pointer",
+                      transition: "all 0.2s",
+                      "&:hover": {
+                        bgcolor: isExpanded ? "primary.dark" : "action.hover",
+                      },
+                    }}
+                    onClick={() => toggleDateExpansion(date)}
+                  >
+                    <Typography variant="h6" fontWeight={600}>
+                      {formattedDate}
+                    </Typography>
+                    <IconButton
+                      size="small"
+                      sx={{
+                        color: isExpanded ? "white" : "text.primary",
+                      }}
+                    >
+                      {isExpanded ? <ExpandLessIcon /> : <ExpandMoreIcon />}
+                    </IconButton>
+                  </Box>
+                  
+                  {/* Expandable Table */}
+                  {isExpanded && (
+                    <TableContainer>
+                      <Table>
+                        <TableHead>
+                          <TableRow>
+                            <TableCell>Exercise</TableCell>
+                            <TableCell align="center">Reps To Complete</TableCell>
+                            <TableCell align="center">Sets To Complete</TableCell>
+                            <TableCell align="center">Duration Set</TableCell>
+                            <TableCell align="center">Total Reps</TableCell>
+                            <TableCell align="center">Sets</TableCell>
+                            <TableCell align="center">Avg Time</TableCell>
+                            <TableCell align="center">Consistency</TableCell>
+                            <TableCell align="center">Fatigue</TableCell>
+                            <TableCell align="center">Pauses</TableCell>
+                            <TableCell align="center">Action</TableCell>
+                          </TableRow>
+                        </TableHead>
+                        <TableBody>
+                          {records.map((record) => (
+                            <TableRow key={record.record_id} hover>
+                              <TableCell>{record.exercise_name || "-"}</TableCell>
+                              <TableCell align="center">
+                                {record.reps_to_complete !== null && record.reps_to_complete !== undefined
+                                  ? record.reps_to_complete
+                                  : "-"}
+                              </TableCell>
+                              <TableCell align="center">
+                                {record.sets_to_complete !== null && record.sets_to_complete !== undefined
+                                  ? record.sets_to_complete
+                                  : "-"}
+                              </TableCell>
+                              <TableCell align="center">
+                                {record.duration_set !== null && record.duration_set !== undefined
+                                  ? `${record.duration_set} min`
+                                  : "-"}
+                              </TableCell>
+                              <TableCell align="center">{record.reps}</TableCell>
+                              <TableCell align="center">{record.sets}</TableCell>
+                              <TableCell align="center">
+                                {record.avg_time !== null && record.avg_time !== undefined
+                                  ? `${record.avg_time}s`
+                                  : "-"}
+                              </TableCell>
+                              <TableCell align="center">
+                                {record.consistency !== null && record.consistency !== undefined
+                                  ? `${record.consistency}%`
+                                  : "-"}
+                              </TableCell>
+                              <TableCell align="center">
+                                {record.fatigue !== null && record.fatigue !== undefined
+                                  ? `${record.fatigue}%`
+                                  : "-"}
+                              </TableCell>
+                              <TableCell align="center">{record.pauses}</TableCell>
+                              <TableCell align="center">
+                                <Button
+                                  size="small"
+                                  variant="text"
+                                  color="primary"
+                                  onClick={() => {
+                                    setSelectedRecord(record);
+                                  }}
+                                >
+                                  View
+                                </Button>
+                              </TableCell>
+                            </TableRow>
+                          ))}
+                        </TableBody>
+                      </Table>
+                    </TableContainer>
                   )}
-                </TableBody>
-              </Table>
-            </TableContainer>
-          </Card>
+                </Card>
+              );
+            })}
+          </Stack>
         </Box>
       )}
 
@@ -1536,61 +2044,62 @@ const PatientReportDetailPage = () => {
                 bgcolor: "primary.main",
                 color: "white",
                 p: 2.5,
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "center",
               }}
             >
-              <Typography variant="h6" fontWeight={600}>
-                {selectedRecord.exercise_name}
-              </Typography>
-              <Typography variant="body2" sx={{ opacity: 0.9, mt: 0.5 }}>
-                {formatDate(selectedRecord.date)}
-              </Typography>
+              <Box>
+                <Typography variant="h6" fontWeight={600}>
+                  {selectedRecord.exercise_name}
+                </Typography>
+                <Typography variant="body2" sx={{ opacity: 0.9, mt: 0.5 }}>
+                  {formatDate(selectedRecord.date)}
+                </Typography>
+              </Box>
+              
+              {/* Completion Info - Right Side */}
+              <Box sx={{ display: "flex", flexDirection: "row", gap: 3, alignItems: "center" }}>
+                <Box sx={{ textAlign: "right" }}>
+                  <Typography variant="caption" sx={{ opacity: 0.8, display: "block" }}>
+                    Reps Completed
+                  </Typography>
+                  <Typography variant="body1" fontWeight={600}>
+                    {selectedRecord.reps} / {(() => {
+                      const repsPerSet = selectedRecord.reps_to_complete;
+                      const sets = selectedRecord.sets_to_complete;
+                      if (repsPerSet !== null && repsPerSet !== undefined && 
+                          sets !== null && sets !== undefined) {
+                        return repsPerSet * sets;
+                      }
+                      return "-";
+                    })()}
+                  </Typography>
+                </Box>
+                <Box sx={{ textAlign: "right" }}>
+                  <Typography variant="caption" sx={{ opacity: 0.8, display: "block" }}>
+                    Sets Completed
+                  </Typography>
+                  <Typography variant="body1" fontWeight={600}>
+                    {selectedRecord.sets} / {selectedRecord.sets_to_complete !== null && selectedRecord.sets_to_complete !== undefined
+                      ? selectedRecord.sets_to_complete
+                      : "-"}
+                  </Typography>
+                </Box>
+                <Box sx={{ textAlign: "right" }}>
+                  <Typography variant="caption" sx={{ opacity: 0.8, display: "block" }}>
+                    Duration
+                  </Typography>
+                  <Typography variant="body1" fontWeight={600}>
+                    {selectedRecord.duration_set !== null && selectedRecord.duration_set !== undefined
+                      ? `${selectedRecord.duration_set} min`
+                      : "-"}
+                  </Typography>
+                </Box>
+              </Box>
             </Box>
 
             <CardContent sx={{ p: 3 }}>
-              {/* Basic Info - Grid Layout */}
-              <Grid container spacing={2} sx={{ mb: 3 }}>
-                <Grid item xs={6} sm={3}>
-                  <Box sx={{ textAlign: "center", p: 2, bgcolor: "grey.50", borderRadius: 2 }}>
-                    <Typography variant="h5" fontWeight={700} color="primary.main">
-                      {selectedRecord.reps}
-                    </Typography>
-                    <Typography variant="caption" color="text.secondary">
-                      Total Reps
-                    </Typography>
-                  </Box>
-                </Grid>
-                <Grid item xs={6} sm={3}>
-                  <Box sx={{ textAlign: "center", p: 2, bgcolor: "grey.50", borderRadius: 2 }}>
-                    <Typography variant="h5" fontWeight={700} color="primary.main">
-                      {selectedRecord.sets}
-                    </Typography>
-                    <Typography variant="caption" color="text.secondary">
-                      sets
-                    </Typography>
-                  </Box>
-                </Grid>
-                <Grid item xs={6} sm={3}>
-                  <Box sx={{ textAlign: "center", p: 2, bgcolor: "grey.50", borderRadius: 2 }}>
-                    <Typography variant="h5" fontWeight={700} color="primary.main">
-                      {selectedRecord.avg_time ? `${selectedRecord.avg_time}s` : "-"}
-                    </Typography>
-                    <Typography variant="caption" color="text.secondary">
-                      Avg Time
-                    </Typography>
-                  </Box>
-                </Grid>
-                <Grid item xs={6} sm={3}>
-                  <Box sx={{ textAlign: "center", p: 2, bgcolor: "grey.50", borderRadius: 2 }}>
-                    <Typography variant="h5" fontWeight={700} color="primary.main">
-                      {selectedRecord.consistency ? `${selectedRecord.consistency}%` : "-"}
-                    </Typography>
-                    <Typography variant="caption" color="text.secondary">
-                      Consistency
-                    </Typography>
-                  </Box>
-                </Grid>
-              </Grid>
-
               {/* Repetition Time Chart */}
               <Box>
                 <Typography variant="subtitle2" fontWeight={600} sx={{ mb: 2 }}>
@@ -1664,53 +2173,82 @@ const PatientReportDetailPage = () => {
                     };
                     
                     return (
-                      <>
-                        <ResponsiveContainer width="100%" height={180}>
-                          <LineChart
-                            data={chartData}
-                            margin={{ top: 10, right: 20, left: 10, bottom: 20 }}
-                          >
-                            <CartesianGrid strokeDasharray="3 3" stroke="#e0e0e0" />
-                            <XAxis 
-                              dataKey="index" 
-                              label={{ value: 'Repetition', position: 'insideBottom', offset: -15 }}
-                              tick={{ fontSize: 11 }}
-                            />
-                            <YAxis 
-                              label={{ value: 'Time (s)', angle: -90, position: 'insideLeft' }}
-                              tick={{ fontSize: 11 }}
-                            />
-                            <RechartsTooltip content={<CustomTooltip />} />
-                            <Line 
-                              type="monotone"
-                              dataKey="time" 
-                              stroke="#1976d2"
-                              strokeWidth={2}
-                              dot={<CustomDot />}
-                              activeDot={{ r: 6 }}
-                            />
-                          </LineChart>
-                        </ResponsiveContainer>
-                        {/* Min/Max Section */}
-                        <Box sx={{ mt: 2, display: 'flex', gap: 2 }}>
-                          <Box sx={{ flex: 1, p: 1.5, bgcolor: 'grey.50', borderRadius: 1 }}>
-                            <Typography variant="caption" color="text.secondary" display="block" sx={{ mb: 0.5 }}>
-                              Min Time
-                            </Typography>
-                            <Typography variant="h6" fontWeight={600} color="primary.main">
-                              {minTime.toFixed(2)}s
-                            </Typography>
-                          </Box>
-                          <Box sx={{ flex: 1, p: 1.5, bgcolor: 'grey.50', borderRadius: 1 }}>
-                            <Typography variant="caption" color="text.secondary" display="block" sx={{ mb: 0.5 }}>
-                              Max Time
-                            </Typography>
-                            <Typography variant="h6" fontWeight={600} color="primary.main">
-                              {maxTime.toFixed(2)}s
-                            </Typography>
-                          </Box>
+                      <Box
+                        sx={{
+                          display: 'flex',
+                          flexDirection: { xs: 'column', md: 'row' },
+                          gap: 3,
+                          alignItems: 'stretch',
+                        }}
+                      >
+                        <Box sx={{ flex: { xs: '1 1 100%', md: '0 0 65%' } }}>
+                          <ResponsiveContainer width="100%" height={300}>
+                            <LineChart
+                              data={chartData}
+                              margin={{ top: 10, right: 20, left: 10, bottom: 20 }}
+                            >
+                              <CartesianGrid strokeDasharray="3 3" stroke="#e0e0e0" />
+                              <XAxis 
+                                dataKey="index" 
+                                label={{ value: 'Repetition', position: 'insideBottom', offset: -15 }}
+                                tick={{ fontSize: 11 }}
+                              />
+                              <YAxis 
+                                label={{ value: 'Time (s)', angle: -90, position: 'insideLeft' }}
+                                tick={{ fontSize: 11 }}
+                              />
+                              <RechartsTooltip content={<CustomTooltip />} />
+                              <Line 
+                                type="monotone"
+                                dataKey="time" 
+                                stroke="#1976d2"
+                                strokeWidth={2}
+                                dot={<CustomDot />}
+                                activeDot={{ r: 6 }}
+                              />
+                            </LineChart>
+                          </ResponsiveContainer>
                         </Box>
-                      </>
+                        {/* Min/Max/Avg Section */}
+                        <Box
+                          sx={{
+                            display: 'flex',
+                            flexDirection: 'column',
+                            gap: 2,
+                            minWidth: { xs: '100%', md: '35%' },
+                            pr: { xs: 0, md: 1.5 },
+                          }}
+                        >
+                          {[
+                            { label: 'Min Time', value: minTime.toFixed(2) },
+                            { label: 'Max Time', value: maxTime.toFixed(2) },
+                            { label: 'Avg Time', value: avgTime.toFixed(2) },
+                          ].map((metric) => (
+                            <Box
+                              key={metric.label}
+                              sx={{
+                                p: 2,
+                                borderRadius: 2,
+                                border: '1px solid',
+                                borderColor: 'divider',
+                                bgcolor: 'background.paper',
+                              }}
+                            >
+                              <Typography
+                                variant="caption"
+                                color="text.secondary"
+                                display="block"
+                                sx={{ mb: 0.5 }}
+                              >
+                                {metric.label}
+                              </Typography>
+                              <Typography variant="h5" fontWeight={600} color="primary.main">
+                                {metric.value}s
+                              </Typography>
+                            </Box>
+                          ))}
+                        </Box>
+                      </Box>
                     );
                   })()
                 ) : (
@@ -1729,404 +2267,280 @@ const PatientReportDetailPage = () => {
                 )}
               </Box>
 
-              {/* Consistency Analysis */}
-              {selectedRecord.repetition_times && selectedRecord.repetition_times.length > 1 && (
-                <Box sx={{ mt: 3, pt: 3, borderTop: "1px solid", borderColor: "divider" }}>
+              {/* ROM Chart */}
+              {selectedRecord.rep_rom_scores && selectedRecord.rep_rom_scores.length > 0 && (
+                <Box sx={{ mt: 4 }}>
                   <Typography variant="subtitle2" fontWeight={600} sx={{ mb: 2 }}>
-                    Consistency Analysis
+                    Range of Motion per Repetition
                   </Typography>
-                  
                   {(() => {
-                    const times = selectedRecord.repetition_times;
-                    const n = times.length;
-                    
-                    // Calculate Mean
-                    const mean = times.reduce((sum, t) => sum + t, 0) / n;
-                    
-                    // Calculate Standard Deviation
-                    const variance = times.reduce((sum, t) => sum + Math.pow(t - mean, 2), 0) / n;
-                    const std = Math.sqrt(variance);
-                    
-                    // Calculate Coefficient of Variation
-                    const cv = mean > 0 ? std / mean : 0;
-                    
-                    // Calculate Consistency Score
-                    const consistencyScore = (1 / (1 + cv)) * 100;
-                    
-                    // Determine Interpretation
-                    let interpretation = "";
-                    let interpretationColor = "";
-                    if (consistencyScore >= 70) {
-                      interpretation = "High Stability";
-                      interpretationColor = "success.main";
-                    } else if (consistencyScore >= 40) {
-                      interpretation = "Moderate Stability";
-                      interpretationColor = "warning.main";
-                    } else {
-                      interpretation = "Low Stability";
-                      interpretationColor = "error.main";
-                    }
-                    
-                    return (
-                      <Grid container spacing={2}>
-                        <Grid item xs={12} sm={6} md={3}>
-                          <Box sx={{ p: 2, bgcolor: "grey.50", borderRadius: 2 }}>
-                            <Typography variant="caption" color="text.secondary" display="block">
-                              Mean Rep Time
-                            </Typography>
-                            <Typography variant="h6" fontWeight={600} color="text.primary">
-                              {mean.toFixed(2)}s
-                            </Typography>
-                          </Box>
-                        </Grid>
-                        
-                        <Grid item xs={12} sm={6} md={3}>
-                          <Box sx={{ p: 2, bgcolor: "grey.50", borderRadius: 2 }}>
-                            <Typography variant="caption" color="text.secondary" display="block">
-                              Standard Deviation
-                            </Typography>
-                            <Typography variant="h6" fontWeight={600} color="text.primary">
-                              {std.toFixed(2)}s
-                            </Typography>
-                          </Box>
-                        </Grid>
-                        
-                        <Grid item xs={12} sm={6} md={3}>
-                          <Box sx={{ p: 2, bgcolor: "grey.50", borderRadius: 2 }}>
-                            <Typography variant="caption" color="text.secondary" display="block">
-                              Coefficient of Variation
-                            </Typography>
-                            <Typography variant="h6" fontWeight={600} color="text.primary">
-                              {cv.toFixed(2)}
-                            </Typography>
-                          </Box>
-                        </Grid>
-                        
-                        <Grid item xs={12} sm={6} md={3}>
-                          <Box sx={{ p: 2, bgcolor: "grey.50", borderRadius: 2 }}>
-                            <Typography variant="caption" color="text.secondary" display="block">
-                              Consistency Score
-                            </Typography>
-                            <Typography variant="h6" fontWeight={600} color="text.primary">
-                              {consistencyScore.toFixed(1)}%
-                            </Typography>
-                          </Box>
-                        </Grid>
-                        
-                        <Grid item xs={12}>
-                          <Box 
-                            sx={{ 
-                              p: 2, 
-                              bgcolor: interpretationColor === "success.main" ? "success.50" : 
-                                       interpretationColor === "warning.main" ? "warning.50" : "error.50",
-                              borderRadius: 2,
-                              textAlign: "center",
-                              position: "relative"
+                    const romScores = selectedRecord.rep_rom_scores;
+                    const avgRom =
+                      romScores.reduce((sum, val) => sum + (Number(val) || 0), 0) / romScores.length;
+                    const minRom = Math.min(...romScores);
+                    const maxRom = Math.max(...romScores);
+
+                    const romChartData = romScores.map((rom, index) => ({
+                      index: index + 1,
+                      rep: `${index + 1}`,
+                      rom: rom,
+                      deviation: rom - avgRom,
+                    }));
+
+                    const RomCustomDot = ({ cx, cy }) => (
+                      <circle cx={cx} cy={cy} r={4} fill="#ff9800" stroke="white" strokeWidth={2} />
+                    );
+
+                    const RomTooltip = ({ active, payload }) => {
+                      if (active && payload && payload.length) {
+                        const data = payload[0].payload;
+                        const deviationSign = data.deviation >= 0 ? '+' : '';
+                        return (
+                          <Box
+                            sx={{
+                              bgcolor: 'rgba(255, 255, 255, 0.95)',
+                              border: '1px solid #ccc',
+                              borderRadius: 1,
+                              p: 1.5,
+                              boxShadow: 2,
                             }}
                           >
-                            <Box sx={{ display: "flex", alignItems: "center", justifyContent: "center", mb: 0.5 }}>
-                              <Typography variant="caption" color="text.secondary">
-                                Interpretation
-                              </Typography>
-                              <Tooltip
-                                title={
-                                  <Box sx={{ p: 1 }}>
-                                    <Typography variant="body2" sx={{ mb: 0.5, fontWeight: 600 }}>
-                                      Stability Criteria:
-                                    </Typography>
-                                    <Typography variant="body2" sx={{ mb: 0.3 }}>
-                                      ≥ 70% → High Stability
-                                    </Typography>
-                                    <Typography variant="body2" sx={{ mb: 0.3 }}>
-                                      40–69% → Moderate Stability
-                                    </Typography>
-                                    <Typography variant="body2">
-                                      &lt; 40% → Low Stability
-                                    </Typography>
-                                  </Box>
-                                }
-                                arrow
-                                placement="top"
-                              >
-                                <IconButton size="small" sx={{ ml: 0.5, p: 0 }}>
-                                  <InfoOutlinedIcon sx={{ fontSize: 14, color: "text.secondary" }} />
-                                </IconButton>
-                              </Tooltip>
-                            </Box>
-                            <Typography variant="h6" fontWeight={600} sx={{ color: interpretationColor }}>
-                              {interpretation}
+                            <Typography variant="body2" fontWeight={600} sx={{ mb: 0.5 }}>
+                              Rep #{data.index}
+                            </Typography>
+                            <Typography variant="body2" sx={{ mb: 0.5 }}>
+                              ROM: {data.rom.toFixed(2)}°
+                            </Typography>
+                            <Typography variant="body2">
+                              Deviation from Avg: {deviationSign}
+                              {data.deviation.toFixed(2)}°
                             </Typography>
                           </Box>
-                        </Grid>
-                      </Grid>
-                    );
-                  })()}
-                </Box>
-              )}
+                        );
+                      }
+                      return null;
+                    };
 
-              {/* Fatigue Analysis */}
-              {selectedRecord.repetition_times && selectedRecord.repetition_times.length > 1 && (
-                <Box sx={{ mt: 3, pt: 3, borderTop: "1px solid", borderColor: "divider" }}>
-                  <Typography variant="subtitle2" fontWeight={600} sx={{ mb: 2 }}>
-                    Fatigue Analysis
-                  </Typography>
-                  
-                  {(() => {
-                    const times = selectedRecord.repetition_times;
-                    const n = times.length;
-                    const halfIndex = Math.floor(n / 2);
-                    
-                    // Calculate First-half and Second-half averages
-                    const firstHalf = times.slice(0, halfIndex);
-                    const secondHalf = times.slice(halfIndex);
-                    
-                    const firstHalfAvg = firstHalf.length > 0 
-                      ? firstHalf.reduce((sum, t) => sum + t, 0) / firstHalf.length 
-                      : 0;
-                    const secondHalfAvg = secondHalf.length > 0 
-                      ? secondHalf.reduce((sum, t) => sum + t, 0) / secondHalf.length 
-                      : 0;
-                    
-                    // Calculate Fatigue Index
-                    const fatigueIndex = firstHalfAvg > 0 
-                      ? ((secondHalfAvg - firstHalfAvg) / firstHalfAvg) * 100 
-                      : 0;
-                    
-                    // Set to 0 if negative
-                    const displayFatigue = Math.max(0, fatigueIndex);
-                    
-                    // Determine Interpretation
-                    let interpretation = "";
-                    let interpretationColor = "";
-                    if (displayFatigue < 10) {
-                      interpretation = "Low Fatigue";
-                      interpretationColor = "success.main";
-                    } else if (displayFatigue < 30) {
-                      interpretation = "Moderate Fatigue";
-                      interpretationColor = "warning.main";
-                    } else {
-                      interpretation = "High Fatigue";
-                      interpretationColor = "error.main";
-                    }
-                    
                     return (
-                      <Grid container spacing={2}>
-                        <Grid item xs={12} sm={4}>
-                          <Box sx={{ p: 2, bgcolor: "grey.50", borderRadius: 2 }}>
-                            <Typography variant="caption" color="text.secondary" display="block">
-                              First-half Avg
-                            </Typography>
-                            <Typography variant="h6" fontWeight={600} color="text.primary">
-                              {firstHalfAvg.toFixed(2)}s
-                            </Typography>
-                          </Box>
-                        </Grid>
-                        
-                        <Grid item xs={12} sm={4}>
-                          <Box sx={{ p: 2, bgcolor: "grey.50", borderRadius: 2 }}>
-                            <Typography variant="caption" color="text.secondary" display="block">
-                              Second-half Avg
-                            </Typography>
-                            <Typography variant="h6" fontWeight={600} color="text.primary">
-                              {secondHalfAvg.toFixed(2)}s
-                            </Typography>
-                          </Box>
-                        </Grid>
-                        
-                        <Grid item xs={12} sm={4}>
-                          <Box sx={{ p: 2, bgcolor: "grey.50", borderRadius: 2 }}>
-                            <Typography variant="caption" color="text.secondary" display="block">
-                              Fatigue Index
-                            </Typography>
-                            <Typography variant="h6" fontWeight={600} color="text.primary">
-                              {displayFatigue.toFixed(1)}%
-                            </Typography>
-                          </Box>
-                        </Grid>
-                        
-                        <Grid item xs={12}>
-                          <Box 
-                            sx={{ 
-                              p: 2, 
-                              bgcolor: interpretationColor === "success.main" ? "success.50" : 
-                                       interpretationColor === "warning.main" ? "warning.50" : "error.50",
-                              borderRadius: 2,
-                              textAlign: "center",
-                              position: "relative"
-                            }}
-                          >
-                            <Box sx={{ display: "flex", alignItems: "center", justifyContent: "center", mb: 0.5 }}>
-                              <Typography variant="caption" color="text.secondary">
-                                Interpretation
-                              </Typography>
-                              <Tooltip
-                                title={
-                                  <Box sx={{ p: 1 }}>
-                                    <Typography variant="body2" sx={{ mb: 0.5, fontWeight: 600 }}>
-                                      Fatigue Criteria:
-                                    </Typography>
-                                    <Typography variant="body2" sx={{ mb: 0.3 }}>
-                                      &lt; 10% → Low Fatigue
-                                    </Typography>
-                                    <Typography variant="body2" sx={{ mb: 0.3 }}>
-                                      10–30% → Moderate Fatigue
-                                    </Typography>
-                                    <Typography variant="body2">
-                                      ≥ 30% → High Fatigue
-                                    </Typography>
-                                  </Box>
-                                }
-                                arrow
-                                placement="top"
-                              >
-                                <IconButton size="small" sx={{ ml: 0.5, p: 0 }}>
-                                  <InfoOutlinedIcon sx={{ fontSize: 14, color: "text.secondary" }} />
-                                </IconButton>
-                              </Tooltip>
-                            </Box>
-                            <Typography variant="h6" fontWeight={600} sx={{ color: interpretationColor }}>
-                              {interpretation}
-                            </Typography>
-                          </Box>
-                        </Grid>
-                      </Grid>
-                    );
-                  })()}
-                </Box>
-              )}
-
-              {/* Performance Score */}
-              {selectedRecord.repetition_times && selectedRecord.repetition_times.length > 1 && (
-                <Box sx={{ mt: 3, pt: 3, borderTop: "1px solid", borderColor: "divider" }}>
-                  <Typography variant="subtitle2" fontWeight={600} sx={{ mb: 2 }}>
-                    Performance Score
-                  </Typography>
-                  
-                  {(() => {
-                    const times = selectedRecord.repetition_times;
-                    const n = times.length;
-                    
-                    // 1. Calculate Consistency Score (40%)
-                    const mean = times.reduce((sum, t) => sum + t, 0) / n;
-                    const variance = times.reduce((sum, t) => sum + Math.pow(t - mean, 2), 0) / n;
-                    const std = Math.sqrt(variance);
-                    const cv = mean > 0 ? std / mean : 0;
-                    const consistencyScore = (1 / (1 + cv)) * 100;
-                    const consistencyPoints = (consistencyScore / 100) * 40;
-                    
-                    // 2. Calculate Fatigue Score (20%)
-                    const halfIndex = Math.floor(n / 2);
-                    const firstHalf = times.slice(0, halfIndex);
-                    const secondHalf = times.slice(halfIndex);
-                    const firstHalfAvg = firstHalf.length > 0 ? firstHalf.reduce((sum, t) => sum + t, 0) / firstHalf.length : 0;
-                    const secondHalfAvg = secondHalf.length > 0 ? secondHalf.reduce((sum, t) => sum + t, 0) / secondHalf.length : 0;
-                    const fatigueIndex = firstHalfAvg > 0 ? ((secondHalfAvg - firstHalfAvg) / firstHalfAvg) * 100 : 0;
-                    const displayFatigue = Math.max(0, fatigueIndex);
-                    // Lower fatigue is better: 0% = 100 points, 100% = 0 points
-                    const fatigueScore = Math.max(0, 100 - displayFatigue);
-                    const fatiguePoints = (fatigueScore / 100) * 20;
-                    
-                    // 3. Calculate Duration Score (20%)
-                    // Assume ideal duration is around mean, penalize if too slow or too fast
-                    // For simplicity, use consistency as proxy: more consistent = better duration control
-                    const durationScore = consistencyScore; // Reuse consistency logic
-                    const durationPoints = (durationScore / 100) * 20;
-                    
-                    // 4. Calculate Pauses Score (20%)
-                    const pauses = selectedRecord.pauses || 0;
-                    // Assume 0 pauses = 100 points, each pause reduces score
-                    // Penalty: -10 points per pause (max 10 pauses = 0 points)
-                    const pauseScore = Math.max(0, 100 - (pauses * 10));
-                    const pausePoints = (pauseScore / 100) * 20;
-                    
-                    // Total Performance Score
-                    const performanceScore = Math.round(consistencyPoints + fatiguePoints + durationPoints + pausePoints);
-                    
-                    // Determine color based on score
-                    let scoreColor = "";
-                    let scoreBgColor = "";
-                    if (performanceScore >= 80) {
-                      scoreColor = "success.main";
-                      scoreBgColor = "success.50";
-                    } else if (performanceScore >= 60) {
-                      scoreColor = "info.main";
-                      scoreBgColor = "info.50";
-                    } else if (performanceScore >= 40) {
-                      scoreColor = "warning.main";
-                      scoreBgColor = "warning.50";
-                    } else {
-                      scoreColor = "error.main";
-                      scoreBgColor = "error.50";
-                    }
-                    
-                    return (
-                      <Box>
-                        <Box 
-                          sx={{ 
-                            p: 3, 
-                            bgcolor: scoreBgColor,
-                            borderRadius: 2,
-                            textAlign: "center"
+                      <Box
+                        sx={{
+                          display: 'flex',
+                          flexDirection: { xs: 'column', md: 'row' },
+                          gap: 3,
+                          alignItems: 'stretch',
+                        }}
+                      >
+                        <Box sx={{ flex: { xs: '1 1 100%', md: '0 0 65%' } }}>
+                          <ResponsiveContainer width="100%" height={300}>
+                            <LineChart
+                              data={romChartData}
+                              margin={{ top: 10, right: 20, left: 10, bottom: 20 }}
+                            >
+                              <CartesianGrid strokeDasharray="3 3" stroke="#e0e0e0" />
+                              <XAxis
+                                dataKey="index"
+                                label={{ value: 'Repetition', position: 'insideBottom', offset: -15 }}
+                                tick={{ fontSize: 11 }}
+                              />
+                              <YAxis
+                                label={{ value: 'ROM (°)', angle: -90, position: 'insideLeft' }}
+                                tick={{ fontSize: 11 }}
+                              />
+                              <RechartsTooltip content={<RomTooltip />} />
+                              <Line
+                                type="monotone"
+                                dataKey="rom"
+                                stroke="#ff9800"
+                                strokeWidth={2}
+                                dot={<RomCustomDot />}
+                                activeDot={{ r: 6 }}
+                              />
+                            </LineChart>
+                          </ResponsiveContainer>
+                        </Box>
+                        <Box
+                          sx={{
+                            display: 'flex',
+                            flexDirection: 'column',
+                            gap: 2,
+                            minWidth: { xs: '100%', md: '35%' },
+                            pr: { xs: 0, md: 1.5 },
                           }}
                         >
-                          <Typography variant="caption" color="text.secondary" display="block" sx={{ mb: 1 }}>
-                            Overall Performance
-                          </Typography>
-                          <Typography variant="h3" fontWeight={700} sx={{ color: scoreColor }}>
-                            {performanceScore}/100
-                          </Typography>
+                          {[
+                            { label: 'Min ROM', value: minRom.toFixed(2) },
+                            { label: 'Max ROM', value: maxRom.toFixed(2) },
+                            { label: 'Avg ROM', value: avgRom.toFixed(2) },
+                          ].map((metric) => (
+                            <Box
+                              key={metric.label}
+                              sx={{
+                                p: 2,
+                                borderRadius: 2,
+                                border: '1px solid',
+                                borderColor: 'divider',
+                                bgcolor: 'background.paper',
+                              }}
+                            >
+                              <Typography
+                                variant="caption"
+                                color="text.secondary"
+                                display="block"
+                                sx={{ mb: 0.5 }}
+                              >
+                                {metric.label}
+                              </Typography>
+                              <Typography variant="h5" fontWeight={600} color="primary.main">
+                                {metric.value}°
+                              </Typography>
+                            </Box>
+                          ))}
                         </Box>
-                        
-                        <Grid container spacing={2} sx={{ mt: 2 }}>
-                          <Grid item xs={6} sm={3}>
-                            <Box sx={{ p: 1.5, bgcolor: "grey.50", borderRadius: 2, textAlign: "center" }}>
-                              <Typography variant="caption" color="text.secondary" display="block">
-                                Consistency (40%)
-                              </Typography>
-                              <Typography variant="body1" fontWeight={600} color="text.primary">
-                                {consistencyPoints.toFixed(1)}
-                              </Typography>
-                            </Box>
-                          </Grid>
-                          
-                          <Grid item xs={6} sm={3}>
-                            <Box sx={{ p: 1.5, bgcolor: "grey.50", borderRadius: 2, textAlign: "center" }}>
-                              <Typography variant="caption" color="text.secondary" display="block">
-                                Fatigue (20%)
-                              </Typography>
-                              <Typography variant="body1" fontWeight={600} color="text.primary">
-                                {fatiguePoints.toFixed(1)}
-                              </Typography>
-                            </Box>
-                          </Grid>
-                          
-                          <Grid item xs={6} sm={3}>
-                            <Box sx={{ p: 1.5, bgcolor: "grey.50", borderRadius: 2, textAlign: "center" }}>
-                              <Typography variant="caption" color="text.secondary" display="block">
-                                Duration (20%)
-                              </Typography>
-                              <Typography variant="body1" fontWeight={600} color="text.primary">
-                                {durationPoints.toFixed(1)}
-                              </Typography>
-                            </Box>
-                          </Grid>
-                          
-                          <Grid item xs={6} sm={3}>
-                            <Box sx={{ p: 1.5, bgcolor: "grey.50", borderRadius: 2, textAlign: "center" }}>
-                              <Typography variant="caption" color="text.secondary" display="block">
-                                Pauses (20%)
-                              </Typography>
-                              <Typography variant="body1" fontWeight={600} color="text.primary">
-                                {pausePoints.toFixed(1)}
-                              </Typography>
-                            </Box>
-                          </Grid>
-                        </Grid>
                       </Box>
                     );
                   })()}
                 </Box>
               )}
+
+              {/* Smoothness (SPARC) Chart */}
+              {selectedRecord.rep_sparc_scores && selectedRecord.rep_sparc_scores.length > 0 && (
+                <Box sx={{ mt: 4 }}>
+                  <Typography variant="subtitle2" fontWeight={600} sx={{ mb: 2 }}>
+                    Smoothness (SPARC) per Repetition
+                  </Typography>
+                  {(() => {
+                    const sparcScores = selectedRecord.rep_sparc_scores.map(Number).filter((val) => !Number.isNaN(val));
+                    if (!sparcScores.length) return null;
+
+                    const avgSparc = sparcScores.reduce((sum, val) => sum + val, 0) / sparcScores.length;
+                    const minSparc = Math.min(...sparcScores);
+                    const maxSparc = Math.max(...sparcScores);
+                    const variance = sparcScores.reduce((sum, val) => sum + Math.pow(val - avgSparc, 2), 0) / sparcScores.length;
+                    const stdDev = Math.sqrt(variance);
+                    const cv = avgSparc !== 0 ? stdDev / Math.abs(avgSparc) : 0;
+
+                    const sparcChartData = sparcScores.map((score, index) => ({
+                      index: index + 1,
+                      sparc: score,
+                      deviation: score - avgSparc,
+                    }));
+
+                    const SparcDot = ({ cx, cy }) => (
+                      <circle cx={cx} cy={cy} r={4} fill="#673ab7" stroke="white" strokeWidth={2} />
+                    );
+
+                    const SparcTooltip = ({ active, payload }) => {
+                      if (active && payload && payload.length) {
+                        const data = payload[0].payload;
+                        const deviationSign = data.deviation >= 0 ? '+' : '';
+                        return (
+                          <Box
+                            sx={{
+                              bgcolor: 'rgba(255, 255, 255, 0.95)',
+                              border: '1px solid #ccc',
+                              borderRadius: 1,
+                              p: 1.5,
+                              boxShadow: 2,
+                            }}
+                          >
+                            <Typography variant="body2" fontWeight={600} sx={{ mb: 0.5 }}>
+                              Rep #{data.index}
+                            </Typography>
+                            <Typography variant="body2" sx={{ mb: 0.5 }}>
+                              SPARC: {data.sparc.toFixed(3)}
+                            </Typography>
+                            <Typography variant="body2">
+                              Δ Avg: {deviationSign}
+                              {data.deviation.toFixed(3)}
+                            </Typography>
+                          </Box>
+                        );
+                      }
+                      return null;
+                    };
+
+                    return (
+                      <Box
+                        sx={{
+                          display: 'flex',
+                          flexDirection: { xs: 'column', md: 'row' },
+                          gap: 3,
+                          alignItems: 'stretch',
+                        }}
+                      >
+                        <Box sx={{ flex: { xs: '1 1 100%', md: '0 0 65%' } }}>
+                          <ResponsiveContainer width="100%" height={300}>
+                            <LineChart
+                              data={sparcChartData}
+                              margin={{ top: 10, right: 20, left: 10, bottom: 20 }}
+                            >
+                              <CartesianGrid strokeDasharray="3 3" stroke="#e0e0e0" />
+                              <XAxis
+                                dataKey="index"
+                                label={{ value: 'Repetition', position: 'insideBottom', offset: -15 }}
+                                tick={{ fontSize: 11 }}
+                              />
+                              <YAxis
+                                label={{ value: 'SPARC', angle: -90, position: 'insideLeft' }}
+                                tick={{ fontSize: 11 }}
+                              />
+                              <RechartsTooltip content={<SparcTooltip />} />
+                              <Line
+                                type="monotone"
+                                dataKey="sparc"
+                                stroke="#673ab7"
+                                strokeWidth={2}
+                                dot={<SparcDot />}
+                                activeDot={{ r: 6 }}
+                              />
+                            </LineChart>
+                          </ResponsiveContainer>
+                        </Box>
+                        <Box
+                          sx={{
+                            display: 'flex',
+                            flexDirection: 'column',
+                            gap: 2,
+                            minWidth: { xs: '100%', md: '35%' },
+                            pr: { xs: 0, md: 1.5 },
+                          }}
+                        >
+                          {[
+                            { label: 'Min SPARC', value: minSparc.toFixed(3) },
+                            { label: 'Max SPARC', value: maxSparc.toFixed(3) },
+                            { label: 'Avg SPARC', value: avgSparc.toFixed(3) },
+                            { label: 'CV', value: `${(cv * 100).toFixed(1)}%` },
+                          ].map((metric) => (
+                            <Box
+                              key={metric.label}
+                              sx={{
+                                p: 2,
+                                borderRadius: 2,
+                                border: '1px solid',
+                                borderColor: 'divider',
+                                bgcolor: 'background.paper',
+                              }}
+                            >
+                              <Typography
+                                variant="caption"
+                                color="text.secondary"
+                                display="block"
+                                sx={{ mb: 0.5 }}
+                              >
+                                {metric.label}
+                              </Typography>
+                              <Typography variant="h5" fontWeight={600} color="primary.main">
+                                {metric.value}
+                              </Typography>
+                            </Box>
+                          ))}
+                        </Box>
+                      </Box>
+                    );
+                  })()}
+                </Box>
+              )}
+
             </CardContent>
           </Card>
         </Box>
@@ -2138,6 +2552,144 @@ const PatientReportDetailPage = () => {
         </Box>
       )}
       {error && <Alert severity="error">{error}</Alert>}
+
+      {/* Export Configuration Dialog */}
+      <Dialog
+        open={exportDialogOpen}
+        onClose={() => setExportDialogOpen(false)}
+        maxWidth="md"
+        fullWidth
+      >
+        <DialogTitle>Export Configuration</DialogTitle>
+        <DialogContent>
+          <Box sx={{ pt: 2 }}>
+            <Typography variant="subtitle1" fontWeight={600} sx={{ mb: 2 }}>
+              Select Sections to Include:
+            </Typography>
+            
+            <FormControlLabel
+              control={
+                <Checkbox
+                  checked={exportConfig.includePatientInfo}
+                  onChange={(e) =>
+                    setExportConfig({
+                      ...exportConfig,
+                      includePatientInfo: e.target.checked,
+                    })
+                  }
+                />
+              }
+              label="Patient Information"
+            />
+            <br />
+            <FormControlLabel
+              control={
+                <Checkbox
+                  checked={exportConfig.includeTreatmentInfo}
+                  onChange={(e) =>
+                    setExportConfig({
+                      ...exportConfig,
+                      includeTreatmentInfo: e.target.checked,
+                    })
+                  }
+                />
+              }
+              label="Treatment Information"
+            />
+            <br />
+            <FormControlLabel
+              control={
+                <Checkbox
+                  checked={exportConfig.includeExercisesList}
+                  onChange={(e) =>
+                    setExportConfig({
+                      ...exportConfig,
+                      includeExercisesList: e.target.checked,
+                    })
+                  }
+                />
+              }
+              label="Exercises List"
+            />
+            <br />
+            <FormControlLabel
+              control={
+                <Checkbox
+                  checked={exportConfig.includeStatistics}
+                  onChange={(e) =>
+                    setExportConfig({
+                      ...exportConfig,
+                      includeStatistics: e.target.checked,
+                    })
+                  }
+                />
+              }
+              label="Performance Statistics"
+            />
+            <br />
+            <FormControlLabel
+              control={
+                <Checkbox
+                  checked={exportConfig.includeExerciseRecords}
+                  onChange={(e) =>
+                    setExportConfig({
+                      ...exportConfig,
+                      includeExerciseRecords: e.target.checked,
+                    })
+                  }
+                />
+              }
+              label="Exercise Records Table"
+            />
+
+            {exportConfig.includeExerciseRecords && (
+              <Box sx={{ mt: 3 }}>
+                <Typography variant="subtitle1" fontWeight={600} sx={{ mb: 2 }}>
+                  Select Table Columns:
+                </Typography>
+                <Grid container spacing={2}>
+                  {Object.entries(exportConfig.exerciseRecordsColumns).map(([key, value]) => (
+                    <Grid item xs={6} sm={4} key={key}>
+                      <FormControlLabel
+                        control={
+                          <Checkbox
+                            checked={value}
+                            onChange={(e) =>
+                              setExportConfig({
+                                ...exportConfig,
+                                exerciseRecordsColumns: {
+                                  ...exportConfig.exerciseRecordsColumns,
+                                  [key]: e.target.checked,
+                                },
+                              })
+                            }
+                          />
+                        }
+                        label={key
+                          .split("_")
+                          .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+                          .join(" ")}
+                      />
+                    </Grid>
+                  ))}
+                </Grid>
+              </Box>
+            )}
+          </Box>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setExportDialogOpen(false)}>Cancel</Button>
+          <Button
+            variant="contained"
+            onClick={() => {
+              generatePDF(exportConfig);
+              setExportDialogOpen(false);
+            }}
+          >
+            Export PDF
+          </Button>
+        </DialogActions>
+      </Dialog>
     </Box>
   );
 };

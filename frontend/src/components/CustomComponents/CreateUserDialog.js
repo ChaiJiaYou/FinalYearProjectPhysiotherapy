@@ -12,6 +12,8 @@ import DeleteIcon from "@mui/icons-material/Delete";
 import InfoOutlinedIcon from "@mui/icons-material/InfoOutlined";
 import CheckCircleIcon from "@mui/icons-material/CheckCircle";
 import PhotoCamera from "@mui/icons-material/PhotoCamera";
+import Visibility from "@mui/icons-material/Visibility";
+import VisibilityOff from "@mui/icons-material/VisibilityOff";
 import { alpha } from "@mui/material/styles";
 
 const CreateUserDialog = ({ open, onClose, onSubmit, isSubmitting = false }) => {
@@ -37,6 +39,9 @@ const CreateUserDialog = ({ open, onClose, onSubmit, isSubmitting = false }) => 
   const [avatarFile, setAvatarFile] = useState(null);
   const [loading, setLoading] = useState(false);
   const [currentUserAdminRole, setCurrentUserAdminRole] = useState(null); // Store current user's admin role
+  const [showPassword, setShowPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
+  const [confirmPassword, setConfirmPassword] = useState("");
 
   // Fetch current user's admin role
   React.useEffect(() => {
@@ -78,6 +83,9 @@ const CreateUserDialog = ({ open, onClose, onSubmit, isSubmitting = false }) => 
     setAvatarPreview(null);
     setAvatarFile(null);
     setLoading(false);
+    setShowPassword(false);
+    setShowConfirmPassword(false);
+    setConfirmPassword("");
   };
 
   const handleInputChange = (e) => {
@@ -168,6 +176,13 @@ const CreateUserDialog = ({ open, onClose, onSubmit, isSubmitting = false }) => 
       tempErrors.password = "Password is required";
     } else if (newUser.password.length < 8) {
       tempErrors.password = "Password must be at least 8 characters";
+    }
+
+    // Confirm Password validation
+    if (!confirmPassword.trim()) {
+      tempErrors.confirmPassword = "Please re-enter your password";
+    } else if (newUser.password !== confirmPassword) {
+      tempErrors.confirmPassword = "Passwords do not match";
     }
 
     // Gender validation
@@ -427,7 +442,7 @@ const CreateUserDialog = ({ open, onClose, onSubmit, isSubmitting = false }) => 
             fullWidth 
             label="Password" 
             name="password" 
-            type="password" 
+            type={showPassword ? "text" : "password"}
             value={newUser.password} 
             onChange={handleInputChange} 
             error={!!errors.password} 
@@ -435,6 +450,53 @@ const CreateUserDialog = ({ open, onClose, onSubmit, isSubmitting = false }) => 
             autoComplete="new-password"
             inputProps={{
               maxLength: 128
+            }}
+            InputProps={{
+              endAdornment: (
+                <IconButton
+                  aria-label="toggle password visibility"
+                  onClick={() => setShowPassword(!showPassword)}
+                  edge="end"
+                >
+                  {showPassword ? <VisibilityOff /> : <Visibility />}
+                </IconButton>
+              ),
+            }}
+          />
+        </Grid>
+        <Grid item xs={12}>
+          <TextField 
+            fullWidth 
+            label="Re-enter Password" 
+            name="confirmPassword" 
+            type={showConfirmPassword ? "text" : "password"}
+            value={confirmPassword} 
+            onChange={(e) => {
+              setConfirmPassword(e.target.value);
+              // Clear error when user starts typing
+              if (errors.confirmPassword) {
+                setErrors((prevErrors) => ({
+                  ...prevErrors,
+                  confirmPassword: ''
+                }));
+              }
+            }} 
+            error={!!errors.confirmPassword} 
+            helperText={errors.confirmPassword || "Re-enter your password to confirm"} 
+            autoComplete="new-password"
+            inputProps={{
+              maxLength: 128
+            }}
+            InputProps={{
+              endAdornment: (
+                <IconButton
+                  aria-label="toggle password visibility"
+                  onClick={() => setShowConfirmPassword(!showConfirmPassword)}
+                  edge="end"
+                >
+                  {showConfirmPassword ? <VisibilityOff /> : <Visibility />}
+                </IconButton>
+              ),
             }}
           />
         </Grid>

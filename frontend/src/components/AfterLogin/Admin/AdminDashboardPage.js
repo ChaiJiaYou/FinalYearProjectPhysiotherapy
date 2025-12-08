@@ -178,8 +178,7 @@ const AdminDashboardPage = () => {
   const quickActions = [
     { label: 'Create New User', icon: <PersonAddIcon />, color: '#3b82f6', route: '/users' },
     { label: 'Manage Appointments', icon: <CalendarTodayIcon />, color: '#8b5cf6', route: '/admin-appointments' },
-    { label: 'View All Treatments', icon: <AssignmentIcon />, color: '#ef4444', route: '/admin-treatment' },
-    { label: 'AI Action Center', icon: <SmartToyIcon />, color: '#10b981', route: '/action-learning' }
+    { label: 'View All Treatments', icon: <AssignmentIcon />, color: '#ef4444', route: '/admin-treatment' }
   ];
 
   if (loading) {

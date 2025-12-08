@@ -15,8 +15,6 @@ import {
   Grid,
   IconButton,
   Divider,
-  Tabs,
-  Tab,
   Table,
   TableBody,
   TableCell,
@@ -24,7 +22,8 @@ import {
   TableHead,
   TableRow,
   Avatar,
-  TextField
+  TextField,
+  Tooltip
 } from "@mui/material";
 import { 
   CalendarToday, 
@@ -36,29 +35,31 @@ import {
   History,
   Close,
   CheckCircle,
-  Pending,
   Visibility,
-  Cancel
+  Cancel,
+  EditCalendar
 } from "@mui/icons-material";
 import { toast } from "react-toastify";
 import { useNavigate } from "react-router-dom";
 import CreateAppointmentDialog from "./CreateAppointmentDialog";
 import AppointmentHistoryModal from "./AppointmentHistoryModal";
+import RescheduleAppointmentDialog from "../Therapist/RescheduleAppointmentDialog";
 
 const PatientAppointmentPage = () => {
   const [appointments, setAppointments] = useState([]);
-  const [pendingAppointments, setPendingAppointments] = useState([]);
   const [allAppointments, setAllAppointments] = useState([]);
+  const [therapists, setTherapists] = useState([]);
   const [selectedAppointment, setSelectedAppointment] = useState(null);
   const [showDetails, setShowDetails] = useState(false);
   const [showCreateDialog, setShowCreateDialog] = useState(false);
   const [showHistoryModal, setShowHistoryModal] = useState(false);
   const [error, setError] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState(0);
   const [showCancelDialog, setShowCancelDialog] = useState(false);
   const [cancelReason, setCancelReason] = useState('');
   const [appointmentToCancel, setAppointmentToCancel] = useState(null);
+  const [showRescheduleDialog, setShowRescheduleDialog] = useState(false);
+  const [appointmentToReschedule, setAppointmentToReschedule] = useState(null);
   const navigate = useNavigate();
 
   const fetchAppointments = async () => {
@@ -94,13 +95,6 @@ const PatientAppointmentPage = () => {
       console.log('Filtered upcoming appointments:', upcomingAppointments);
       setAppointments(upcomingAppointments);
       
-      // Filter pending appointments (all pending, not just future)
-      const pendingApps = (data.appointments || []).filter(appointment => {
-        return appointment.status === "Pending";
-      });
-      console.log('Filtered pending appointments:', pendingApps);
-      setPendingAppointments(pendingApps);
-      
       setError(null);
     } catch (error) {
       console.error("Error fetching appointments:", error);
@@ -111,8 +105,27 @@ const PatientAppointmentPage = () => {
     }
   };
 
+  // Fetch therapists on page load
+  const fetchTherapists = async () => {
+    try {
+      const res = await fetch("http://127.0.0.1:8000/api/list-therapists/");
+      if (res.ok) {
+        const data = await res.json();
+        setTherapists(data || []);
+        console.log('Therapists loaded:', data?.length || 0);
+      } else {
+        console.error("Failed to fetch therapists:", res.status);
+        setTherapists([]);
+      }
+    } catch (error) {
+      console.error("Error fetching therapists:", error);
+      setTherapists([]);
+    }
+  };
+
   useEffect(() => {
     fetchAppointments();
+    fetchTherapists(); // Load therapists when page loads
   }, []);
 
   const handleViewDetails = (appointment) => {
@@ -131,14 +144,18 @@ const PatientAppointmentPage = () => {
   const handleAppointmentCreated = (newAppointment) => {
     if (newAppointment) {
       // 乐观更新：直接添加新预约到状态，而不是重新获取所有数据
-      // 患者创建的预约状态是 Pending
-      setPendingAppointments((prev) => [...prev, newAppointment]);
+      // 患者创建的预约状态是 Scheduled
+      if (newAppointment.status === 'Scheduled') {
+        const appointmentDate = new Date(newAppointment.start_at);
+        const today = new Date();
+        const isTodayOrFuture = appointmentDate >= new Date(today.getFullYear(), today.getMonth(), today.getDate());
+        if (isTodayOrFuture) {
+          setAppointments((prev) => [...prev, newAppointment]);
+        }
+      }
       
       // 添加到 allAppointments
       setAllAppointments((prev) => [...prev, newAppointment]);
-      
-      // 注意：新创建的 Pending 预约不会显示在 appointments（Scheduled）列表中
-      // 因为 appointments 只包含 Scheduled 状态的预约
     }
     setShowCreateDialog(false);
   };
@@ -209,6 +226,23 @@ const PatientAppointmentPage = () => {
     }
   };
 
+  const handleRescheduleAppointment = (appointment) => {
+    setAppointmentToReschedule(appointment);
+    setShowRescheduleDialog(true);
+  };
+
+  const handleCloseRescheduleDialog = () => {
+    setShowRescheduleDialog(false);
+    setAppointmentToReschedule(null);
+  };
+
+  const handleRescheduleSuccess = async (updatedAppointment) => {
+    toast.success('Appointment rescheduled successfully!');
+    // Refresh appointments
+    await fetchAppointments();
+    handleCloseRescheduleDialog();
+  };
+
   const formatDateTime = (dateTime) => {
     return new Date(dateTime).toLocaleString('en-US', {
       year: 'numeric',
@@ -264,8 +298,6 @@ const PatientAppointmentPage = () => {
     switch (status) {
       case 'Scheduled':
         return 'primary';
-      case 'Pending':
-        return 'warning';
       case 'Completed':
         return 'success';
       case 'Cancelled':
@@ -279,8 +311,6 @@ const PatientAppointmentPage = () => {
     switch (status) {
       case 'Scheduled':
         return <CheckCircle />;
-      case 'Pending':
-        return <Pending />;
       default:
         return <Schedule />;
     }
@@ -353,22 +383,36 @@ const PatientAppointmentPage = () => {
                 </TableCell>
                 <TableCell>
                   <Box display="flex" gap={1}>
-                    <IconButton 
-                      size="small" 
-                      onClick={() => handleViewDetails(appointment)}
-                      sx={{ color: 'text.secondary' }}
-                    >
-                      <Visibility />
-                    </IconButton>
-                    {(appointment.status === 'Scheduled' || appointment.status === 'Pending') && (
+                    <Tooltip title="View Details">
                       <IconButton 
                         size="small" 
-                        onClick={() => handleCancelAppointment(appointment)}
-                        sx={{ color: 'error.main' }}
-                        title="Cancel Appointment"
+                        onClick={() => handleViewDetails(appointment)}
+                        sx={{ color: 'text.secondary' }}
                       >
-                        <Cancel />
+                        <Visibility />
                       </IconButton>
+                    </Tooltip>
+                    {appointment.status === 'Scheduled' && (
+                      <>
+                        <Tooltip title="Reschedule Appointment">
+                          <IconButton 
+                            size="small" 
+                            onClick={() => handleRescheduleAppointment(appointment)}
+                            sx={{ color: 'warning.main' }}
+                          >
+                            <EditCalendar />
+                          </IconButton>
+                        </Tooltip>
+                        <Tooltip title="Cancel Appointment">
+                          <IconButton 
+                            size="small" 
+                            onClick={() => handleCancelAppointment(appointment)}
+                            sx={{ color: 'error.main' }}
+                          >
+                            <Cancel />
+                          </IconButton>
+                        </Tooltip>
+                      </>
                     )}
                   </Box>
                 </TableCell>
@@ -405,7 +449,7 @@ const PatientAppointmentPage = () => {
             My Appointments
           </Typography>
           <Typography variant="body1" color="text.secondary">
-            View your upcoming and pending appointments
+            View your upcoming appointments
           </Typography>
         </Box>
 
@@ -445,164 +489,12 @@ const PatientAppointmentPage = () => {
           </Stack>
         </Box>
 
-        {/* Tabs and Pending Appointments Card Row */}
+        {/* Appointments Table */}
         <Box>
-          <Grid container spacing={3} alignItems="flex-start">
-            {/* Tabs Section */}
-            <Grid item xs={12} md={8}>
-              <Tabs 
-                value={activeTab} 
-                onChange={(e, newValue) => setActiveTab(newValue)}
-                sx={{ borderBottom: 1, borderColor: 'divider' }}
-              >
-                <Tab 
-                  label={`Upcoming Appointments (${appointments.length})`}
-                  icon={<CheckCircle />}
-                  iconPosition="start"
-                />
-                <Tab 
-                  label={`Pending Appointments (${pendingAppointments.length})`}
-                  icon={<Pending />}
-                  iconPosition="start"
-                />
-              </Tabs>
-              
-              {/* Tab Content - Table directly below tabs */}
-              <Box sx={{ mt: 2, minHeight: 400 }}>
-                {activeTab === 0 && (
-                  <Box>
-                    <Typography variant="h6" gutterBottom>
-                      Upcoming Appointments ({appointments.length})
-                    </Typography>
-                    {renderAppointmentTable(appointments, "No upcoming appointments")}
-                  </Box>
-                )}
-                
-                {activeTab === 1 && (
-                  <Box>
-                    <Typography variant="h6" gutterBottom>
-                      Pending Appointments ({pendingAppointments.length})
-                    </Typography>
-                    {renderAppointmentTable(pendingAppointments, "No pending appointments")}
-                  </Box>
-                )}
-              </Box>
-            </Grid>
-            
-            {/* Pending Appointments Card - Right side */}
-            <Grid item xs={12} md={4}>
-              <Card sx={{ borderRadius: 3, border: '1px solid', borderColor: 'grey.200' }}>
-                <CardContent>
-                  <Box display="flex" alignItems="center" gap={2} mb={2}>
-                    <Pending color="warning" />
-                    <Typography variant="h6" color="warning.main">
-                      Pending ({pendingAppointments.length})
-                    </Typography>
-                  </Box>
-                  <Typography variant="body2" color="text.secondary" gutterBottom>
-                    Waiting for therapist confirmation
-                  </Typography>
-                  <Stack spacing={1}>
-                    {pendingAppointments.length > 0 ? (
-                      pendingAppointments.slice(0, 3).map((appointment) => {
-                        const appointmentDate = new Date(appointment.start_at);
-                        const isPast = appointmentDate < new Date();
-                        
-                        return (
-                          <Paper 
-                            key={appointment.id}
-                            sx={{ 
-                              p: 1.5, 
-                              bgcolor: isPast ? 'rgba(211, 47, 47, 0.08)' : 'rgba(255, 152, 0, 0.08)', 
-                              borderRadius: 2,
-                              border: '1px solid',
-                              borderColor: isPast ? 'rgba(211, 47, 47, 0.3)' : 'rgba(255, 152, 0, 0.3)'
-                            }}
-                          >
-                            <Box display="flex" justifyContent="space-between" alignItems="flex-start" mb={0.5}>
-                              <Typography variant="body2" fontWeight="bold" color="text.primary">
-                                {formatDateTime(appointment.start_at)}
-                              </Typography>
-                              <Box display="flex" gap={0.5} alignItems="center">
-                                {isPast && (
-                                  <Chip 
-                                    label="Past" 
-                                    size="small" 
-                                    color="error"
-                                    sx={{ height: 20, fontSize: '0.7rem', borderRadius: 1 }}
-                                  />
-                                )}
-                                <Chip 
-                                  label="Pending" 
-                                  size="small" 
-                                  color="warning"
-                                  icon={<Pending sx={{ fontSize: 12 }} />}
-                                  sx={{ height: 20, fontSize: '0.7rem', borderRadius: 1 }}
-                                />
-                                <IconButton 
-                                  size="small" 
-                                  onClick={() => handleCancelAppointment(appointment)}
-                                  sx={{ 
-                                    color: 'error.main',
-                                    p: 0.5,
-                                    ml: 0.5
-                                  }}
-                                  title="Cancel Appointment"
-                                >
-                                  <Cancel sx={{ fontSize: 16 }} />
-                                </IconButton>
-                              </Box>
-                            </Box>
-                            <Typography variant="caption" color="text.primary" display="block">
-                              Dr. {appointment.therapist?.username || 'Unknown'} • {appointment.duration_min}min
-                            </Typography>
-                            {appointment.patient_message && (
-                              <Typography 
-                                variant="caption" 
-                                sx={{ 
-                                  color: 'text.primary',
-                                  display: 'block',
-                                  maxHeight: 30,
-                                  overflow: 'hidden',
-                                  textOverflow: 'ellipsis',
-                                  mt: 0.5
-                                }}
-                                title={appointment.patient_message}
-                              >
-                                Messages : {appointment.patient_message}
-                              </Typography>
-                            )}
-                          </Paper>
-                        );
-                      })
-                    ) : (
-                      <Box 
-                        display="flex" 
-                        flexDirection="column" 
-                        alignItems="center" 
-                        justifyContent="center" 
-                        py={3}
-                        textAlign="center"
-                      >
-                        <Pending sx={{ fontSize: 48, color: 'grey.300', mb: 1 }} />
-                        <Typography variant="body2" color="text.secondary">
-                          No pending appointments
-                        </Typography>
-                        <Typography variant="caption" color="text.secondary">
-                          All appointments are confirmed
-                        </Typography>
-                      </Box>
-                    )}
-                    {pendingAppointments.length > 3 && (
-                      <Typography variant="caption" color="text.secondary" textAlign="center">
-                        +{pendingAppointments.length - 3} more pending appointments
-                      </Typography>
-                    )}
-                  </Stack>
-                </CardContent>
-              </Card>
-            </Grid>
-          </Grid>
+          <Typography variant="h6" gutterBottom>
+            Upcoming Appointments ({appointments.length})
+          </Typography>
+          {renderAppointmentTable(appointments, "No upcoming appointments")}
         </Box>
 
         {/* Appointment Details Modal */}
@@ -724,6 +616,7 @@ const PatientAppointmentPage = () => {
           open={showCreateDialog}
           onClose={handleCloseCreateDialog}
           onAppointmentCreated={handleAppointmentCreated}
+          therapists={therapists}
         />
 
         {/* History Modal */}
@@ -793,6 +686,14 @@ const PatientAppointmentPage = () => {
             </Button>
           </DialogActions>
         </Dialog>
+
+        {/* Reschedule Appointment Dialog */}
+        <RescheduleAppointmentDialog
+          open={showRescheduleDialog}
+          onClose={handleCloseRescheduleDialog}
+          onSuccess={handleRescheduleSuccess}
+          appointment={appointmentToReschedule}
+        />
       </Stack>
     </Box>
   );

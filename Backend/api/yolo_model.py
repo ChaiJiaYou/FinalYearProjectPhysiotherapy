@@ -3,21 +3,28 @@ import torch
 import numpy as np
 import os
 
-# Try to load the model, fallback to default YOLO pose model if custom model not found
-try:
-    model_path = r"C:\Workspace\Jupyter\FinalYearProject\Notebooks\runs\pose\train\weights\best.pt"
-    if os.path.exists(model_path):
-        model = YOLO(model_path)
-        print("Loaded custom pose model")
-    else:
-        # Fallback to default YOLO pose model
-        model = YOLO("yolov8n-pose.pt")
-        print("Loaded default YOLO pose model")
-except Exception as e:
-    print(f"Error loading model: {e}")
-    # Fallback to default YOLO pose model
-    model = YOLO("yolov8n-pose.pt")
-    print("Loaded default YOLO pose model as fallback")
+# Lazy loading: model is loaded only when first used
+_model = None
+
+def _get_model():
+    """Lazy load the YOLO model - only loads when first needed"""
+    global _model
+    if _model is None:
+        try:
+            model_path = r"C:\Workspace\Jupyter\FinalYearProject\Notebooks\runs\pose\train\weights\best.pt"
+            if os.path.exists(model_path):
+                _model = YOLO(model_path)
+                print("Loaded custom pose model")
+            else:
+                # Fallback to default YOLO pose model
+                _model = YOLO("yolov8n-pose.pt")
+                print("Loaded default YOLO pose model")
+        except Exception as e:
+            print(f"Error loading model: {e}")
+            # Fallback to default YOLO pose model
+            _model = YOLO("yolov8n-pose.pt")
+            print("Loaded default YOLO pose model as fallback")
+    return _model
 
 def predict_pose_opencv(image_np):
     """
@@ -25,6 +32,7 @@ def predict_pose_opencv(image_np):
     返回 None 表示未检测到
     """
     try:
+        model = _get_model()  # Lazy load model only when needed
         results = model.predict(source=image_np, imgsz=224, conf=0.5, verbose=False)
         
         if len(results) == 0 or results[0].keypoints is None:

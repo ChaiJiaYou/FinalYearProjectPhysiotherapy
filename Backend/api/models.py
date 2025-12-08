@@ -140,7 +140,6 @@ class Patient(models.Model):
     
 class Appointment(models.Model):
     STATUS_CHOICES = [
-        ("Pending", "Pending"),
         ("Scheduled", "Scheduled"),
         ("Cancelled", "Cancelled"),
         ("Completed", "Completed"),
@@ -395,31 +394,29 @@ class Notification(models.Model):
 
 # 1. Exercise - Independent exercise library
 class Exercise(models.Model):
-    DIFFICULTY_CHOICES = [
-        ('beginner', 'Beginner'),
-        ('intermediate', 'Intermediate'), 
-        ('advanced', 'Advanced'),
-    ]
-    
-    CATEGORY_CHOICES = [
-        ('upper_body', 'Upper Body'),
-        ('lower_body', 'Lower Body'),
-        ('full_body', 'Full Body'),
-    ]
-    
     exercise_id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     name = models.CharField(max_length=100, default='Unnamed Exercise')  # e.g., Wall Crawl, Shoulder Flexion
-    category = models.CharField(max_length=20, choices=CATEGORY_CHOICES, default='upper_body')
-    difficulty = models.CharField(max_length=20, choices=DIFFICULTY_CHOICES, default='beginner')
     instructions = models.TextField(default='No instructions provided')  # Exercise instructions
-    action_id = models.ForeignKey('Action', on_delete=models.SET_NULL, null=True, blank=True, related_name="exercises")
+    activity_name = models.CharField(
+        max_length=120,
+        blank=True,
+        null=True,
+        help_text="Rehab Engine activity name (must match supported model labels)"
+    )
+    demo_video_url = models.CharField(
+        max_length=255,
+        blank=True,
+        null=True,
+        help_text="URL path to demo video (e.g., /media/exercise_videos/exercise_xxx.mp4)"
+    )
+    # action_id removed - Action Learning feature deleted
     created_by = models.ForeignKey(CustomUser, on_delete=models.CASCADE, related_name="created_exercises", limit_choices_to={'role': 'therapist'}, null=True, blank=True)
     
     def __str__(self):
-        return f"{self.name} ({self.category})"
+        return f"{self.name}"
     
     class Meta:
-        ordering = ['category', 'name']
+        ordering = ['name']
 
 # 2. Treatment - Main treatment records
 class Treatment(models.Model):
@@ -468,6 +465,7 @@ class TreatmentExercise(models.Model):
     # Exercise parameters for this treatment plan
     reps_per_set = models.IntegerField(blank=True, null=True)
     sets = models.IntegerField(default=1, help_text="Number of sets for this exercise")
+    duration = models.IntegerField(default=1, help_text="Time to complete the entire exercise within this duration (in minutes). Exercise will stop if it exceeds this time.")
     notes = models.TextField(blank=True, null=True)
     
     # Exercise scheduling
@@ -495,6 +493,9 @@ class ExerciseRecord(models.Model):
     # Performance data
     repetitions_completed = models.IntegerField(blank=True, null=True)
     sets_completed = models.IntegerField(blank=True, null=True)
+    target_reps_per_set = models.IntegerField(blank=True, null=True, help_text="Assigned reps per set when this session was recorded")
+    target_sets = models.IntegerField(blank=True, null=True, help_text="Assigned total sets when this session was recorded")
+    target_duration_minutes = models.IntegerField(blank=True, null=True, help_text="Assigned duration limit (minutes) when this session was recorded")
     
     # Timing data
     start_time = models.DateTimeField(blank=True, null=True, help_text="Exercise session start time")
@@ -503,6 +504,8 @@ class ExerciseRecord(models.Model):
     pause_count = models.IntegerField(default=0, help_text="Number of pauses during exercise")
     # avg_duration removed - calculated dynamically from repetition_times or start/end time
     repetition_times = models.JSONField(default=list, blank=True, null=True, help_text="Array of time taken for each repetition in seconds")
+    rep_sparc_scores = models.JSONField(default=list, blank=True, null=True, help_text="Spectral Arc Length smoothness score for each repetition")
+    rep_rom_scores = models.JSONField(default=list, blank=True, null=True, help_text="Range of Motion per repetition")
     
     recorded_at = models.DateTimeField(auto_now_add=True)
     
@@ -513,68 +516,6 @@ class ExerciseRecord(models.Model):
         ordering = ['-recorded_at']
 
 
-# ==================== NEW ACTION LEARNING MODELS ====================
-# Support for "demo video → automatic learning → real-time recognition & counting"
-
-class Action(models.Model):
-    """
-    Main action definition supporting video-based learning workflow
-    """
-    MODE_CHOICES = [
-        ('dtw', 'DTW Recognition'),
-        ('clf', 'Classifier Model'),
-    ]
-    
-    id = models.AutoField(primary_key=True)
-    name = models.CharField(max_length=120)
-    description = models.TextField(blank=True)
-    mode = models.CharField(max_length=10, choices=MODE_CHOICES, default='dtw')
-    params_json = models.JSONField(default=dict)  # thresholds, window, etc.
-    model_path = models.CharField(max_length=255, blank=True)  # for trained models
-    created_by = models.IntegerField(null=True, blank=True)  # optional FK to user
-    created_at = models.DateTimeField(auto_now_add=True)
-    
-    def __str__(self):
-        return f"Action: {self.name} ({self.mode})"
-    
-    class Meta:
-        ordering = ['-created_at']
-
-
-class ActionSample(models.Model):
-    """
-    Demo video samples and extracted keypoints for action learning
-    """
-    id = models.AutoField(primary_key=True)
-    action = models.ForeignKey(Action, on_delete=models.CASCADE, related_name='samples')
-    video_url = models.CharField(max_length=255, blank=True)  # optional video file path
-    keypoints_json = models.JSONField(default=dict)  # frame->keypoints mapping
-    fps = models.IntegerField(default=30)
-    weak_labels_json = models.JSONField(default=dict)  # auto-segmentation labels
-    refined_labels_json = models.JSONField(default=dict)  # user-refined labels
-    created_at = models.DateTimeField(auto_now_add=True)
-    
-    def __str__(self):
-        return f"Sample for {self.action.name} - {self.created_at.date()}"
-    
-    class Meta:
-        ordering = ['-created_at']
-
-
-class ActionTemplate(models.Model):
-    """
-    Individual action templates (one per detected repetition)
-    """
-    id = models.AutoField(primary_key=True)
-    action = models.ForeignKey(Action, on_delete=models.CASCADE, related_name='templates')
-    seq_json = models.JSONField(default=dict)  # {'T':int,'F':int,'data':[[...],...]}
-    length = models.IntegerField()  # T (time steps)
-    feature_dim = models.IntegerField()  # F (feature dimensions)
-    created_at = models.DateTimeField(auto_now_add=True)
-    
-    def __str__(self):
-        return f"Template for {self.action.name} - {self.length}T×{self.feature_dim}F"
-    
-    class Meta:
-        ordering = ['-created_at']
+# Action Learning models removed - replaced with new model and pipeline
+# Models Action, ActionSample, ActionTemplate have been deleted
 

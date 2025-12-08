@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useMemo } from "react";
 import {
   Dialog,
   DialogTitle,
@@ -38,9 +38,8 @@ import {
 import { Avatar } from "@mui/material";
 import { toast } from "react-toastify";
 
-const CreateAppointmentDialog = ({ open, onClose, onAppointmentCreated }) => {
+const CreateAppointmentDialog = ({ open, onClose, onAppointmentCreated, therapists = [] }) => {
   const [activeStep, setActiveStep] = useState(0);
-  const [therapists, setTherapists] = useState([]);
   const [selectedTherapist, setSelectedTherapist] = useState("");
   const [selectedDate, setSelectedDate] = useState("");
   const [selectedTime, setSelectedTime] = useState("");
@@ -60,19 +59,6 @@ const CreateAppointmentDialog = ({ open, onClose, onAppointmentCreated }) => {
     const period = hours >= 12 ? 'PM' : 'AM';
     const displayHours = hours === 0 ? 12 : hours > 12 ? hours - 12 : hours;
     return `${displayHours}:${minutes.toString().padStart(2, '0')} ${period}`;
-  };
-
-  // Fetch therapists
-  const fetchTherapists = async () => {
-    try {
-      const res = await fetch("http://127.0.0.1:8000/api/list-therapists/");
-      if (res.ok) {
-        const data = await res.json();
-        setTherapists(data || []);
-      }
-    } catch (error) {
-      console.error("Error fetching therapists:", error);
-    }
   };
 
   // Fetch available time slots - 显示所有时间段，标记不可用的
@@ -119,7 +105,7 @@ const CreateAppointmentDialog = ({ open, onClose, onAppointmentCreated }) => {
         existingAppointments = appointmentsData.appointments || [];
       }
       
-      // 4. 标记不可用和已预约的时间段
+      // 4. 标记不可用和已预约的时间段（区分 Scheduled 和 Completed）
       const slotsWithStatus = allSlots.map(slot => {
         const slotStart = new Date(`${dateStr}T${slot.time}:00`);
         const slotEnd = new Date(slotStart.getTime() + 60 * 60 * 1000); // +1 hour
@@ -131,19 +117,48 @@ const CreateAppointmentDialog = ({ open, onClose, onAppointmentCreated }) => {
           return unavailableStart < slotEnd && unavailableEnd > slotStart;
         });
         
-        // 检查是否已预约（考虑所有活跃状态的预约，包括Pending）
-        const isBooked = existingAppointments.some(appointment => {
-          // 检查Scheduled、Completed和Pending状态的预约，Cancelled预约不占用时间段
-          if (!['Scheduled', 'Completed', 'Pending'].includes(appointment.status)) {
+        // 检查是否有 Scheduled 预约
+        const hasScheduledAppointment = existingAppointments.some(appointment => {
+          if (appointment.status !== 'Scheduled') {
             return false;
           }
           const appointmentStart = new Date(appointment.start_at);
-          return Math.abs((appointmentStart - slotStart) / (1000 * 60 * 60)) < 1; // 1小时内
+          const appointmentEnd = new Date(appointment.end_at);
+          return appointmentStart < slotEnd && appointmentEnd > slotStart;
         });
+        
+        // 检查是否有 Completed 预约
+        const hasCompletedAppointment = existingAppointments.some(appointment => {
+          if (appointment.status !== 'Completed') {
+            return false;
+          }
+          const appointmentStart = new Date(appointment.start_at);
+          const appointmentEnd = new Date(appointment.end_at);
+          return appointmentStart < slotEnd && appointmentEnd > slotStart;
+        });
+        
+        const hasAppointment = hasScheduledAppointment || hasCompletedAppointment;
+        
+        // 确定状态
+        let status, available;
+        if (hasAppointment) {
+          status = 'Booked';
+          available = false;
+        } else if (isUnavailable) {
+          status = 'Unavailable';
+          available = false;
+        } else {
+          status = 'Available';
+          available = true;
+        }
         
         return {
           ...slot,
-          available: !isUnavailable && !isBooked
+          available,
+          status,
+          hasScheduledAppointment,
+          hasCompletedAppointment,
+          isUnavailable
         };
       });
       
@@ -158,7 +173,6 @@ const CreateAppointmentDialog = ({ open, onClose, onAppointmentCreated }) => {
 
   useEffect(() => {
     if (open) {
-      fetchTherapists();
       // Reset form
       setActiveStep(0);
       setSelectedTherapist("");
@@ -206,8 +220,8 @@ const CreateAppointmentDialog = ({ open, onClose, onAppointmentCreated }) => {
         start_at: `${selectedDate}T${selectedTime}:00`,
         duration_min: 60, // Default duration
         mode: "onsite", // Default mode
-        patient_message: patientMessage,
-        status: "Pending" // Patient-created appointments are pending by default
+        patient_message: patientMessage
+        // Status will be set to Scheduled by default on the backend
       };
 
       const res = await fetch("http://127.0.0.1:8000/api/appointments/", {
@@ -222,7 +236,7 @@ const CreateAppointmentDialog = ({ open, onClose, onAppointmentCreated }) => {
 
       if (res.ok) {
         const data = await res.json();
-        toast.success("Appointment created successfully! Please wait for therapist confirmation.");
+        toast.success("Appointment created successfully!");
         // 将新创建的预约传递给父组件，用于乐观更新
         onAppointmentCreated(data.appointment);
         onClose();
@@ -238,6 +252,18 @@ const CreateAppointmentDialog = ({ open, onClose, onAppointmentCreated }) => {
       setLoading(false);
     }
   };
+
+  // 优化：使用 useMemo 记忆化选中的治疗师值，避免每次渲染都执行 find
+  const selectedTherapistValue = useMemo(() => {
+    return therapists.find(t => t.id === selectedTherapist) || null;
+  }, [therapists, selectedTherapist]);
+
+  // Debug: 检查 therapists 数据
+  useEffect(() => {
+    if (open) {
+      console.log('CreateAppointmentDialog opened, therapists count:', therapists.length);
+    }
+  }, [open, therapists.length]);
 
   const getStepContent = (step) => {
     switch (step) {
@@ -259,22 +285,31 @@ const CreateAppointmentDialog = ({ open, onClose, onAppointmentCreated }) => {
               <Autocomplete
                 options={therapists}
                 getOptionLabel={(option) => `Dr. ${option.username}`}
-                value={therapists.find(t => t.id === selectedTherapist) || null}
+                isOptionEqualToValue={(option, value) => option.id === value?.id}
+                value={selectedTherapistValue}
                 onChange={(event, newValue) => {
                   setSelectedTherapist(newValue ? newValue.id : "");
                   setSelectedDate(""); // Reset date when therapist changes
                   setSelectedTime(""); // Reset time when therapist changes
                 }}
+                filterOptions={(options, { inputValue }) => {
+                  // 自定义过滤逻辑，提高性能
+                  const searchTerm = inputValue.toLowerCase();
+                  return options.filter(option => 
+                    option.username?.toLowerCase().includes(searchTerm) ||
+                    option.email?.toLowerCase().includes(searchTerm)
+                  );
+                }}
                 renderInput={(params) => (
                   <TextField
                     {...params}
-                    label="Search and Select Therapist"
+                    label="Select Therapist"
                     placeholder="Type to search therapists..."
                     variant="outlined"
                   />
                 )}
                 renderOption={(props, option) => (
-                  <Box component="li" {...props}>
+                  <Box component="li" {...props} key={option.id}>
                     <Box display="flex" alignItems="center" gap={2}>
                       {option.avatar ? (
                         <Avatar 
@@ -299,6 +334,7 @@ const CreateAppointmentDialog = ({ open, onClose, onAppointmentCreated }) => {
                   </Box>
                 )}
                 sx={{ mb: 3 }}
+                noOptionsText="No therapists found"
               />
             </Box>
 
@@ -346,58 +382,77 @@ const CreateAppointmentDialog = ({ open, onClose, onAppointmentCreated }) => {
                   </Box>
                 ) : (
                   <Grid container spacing={2} sx={{ mt: 1 }}>
-                    {availableSlots.map((slot) => (
-                      <Grid item xs={6} sm={4} md={3} key={slot.time}>
-                        <Card
-                          sx={{
-                            cursor: slot.available ? 'pointer' : 'not-allowed',
-                            border: selectedTime === slot.time ? 2 : 1,
-                            borderColor: selectedTime === slot.time ? '#3b82f6' : 
-                                       slot.available ? 'grey.300' : '#d32f2f',
-                            backgroundColor: selectedTime === slot.time ? '#f0f9ff' : 
-                                          slot.available ? 'white' : '#ffebee',
-                            opacity: slot.available ? 1 : 0.6,
-                            '&:hover': slot.available ? {
-                              boxShadow: 3,
-                              borderColor: '#3b82f6'
-                            } : {},
-                            transition: 'all 0.2s ease-in-out'
-                          }}
-                          onClick={() => slot.available && setSelectedTime(slot.time)}
-                        >
-                          <CardContent sx={{ p: 2, textAlign: 'center' }}>
-                            <AccessTime 
-                              color={selectedTime === slot.time ? "primary" : 
-                                     slot.available ? "action" : "error"} 
-                            />
-                            <Typography 
-                              variant="body1" 
-                              sx={{ 
-                                mt: 1, 
-                                fontWeight: selectedTime === slot.time ? 600 : 400,
-                                color: selectedTime === slot.time ? '#3b82f6' : 
-                                       slot.available ? 'text.primary' : '#d32f2f'
-                              }}
-                            >
-                              {formatTime(slot.time)}
-                            </Typography>
-                            {!slot.available && (
-                              <Typography 
-                                variant="caption" 
+                    {availableSlots.map((slot) => {
+                      // 根据状态设置颜色
+                      let borderColor, bgColor, textColor, statusColor;
+                      if (slot.status === 'Booked') {
+                        borderColor = selectedTime === slot.time ? '#3b82f6' : '#1976d2';
+                        bgColor = selectedTime === slot.time ? '#f0f9ff' : '#e3f2fd';
+                        textColor = '#1976d2';
+                        statusColor = 'primary';
+                      } else if (slot.status === 'Unavailable') {
+                        borderColor = selectedTime === slot.time ? '#3b82f6' : '#d32f2f';
+                        bgColor = selectedTime === slot.time ? '#f0f9ff' : '#ffebee';
+                        textColor = '#d32f2f';
+                        statusColor = 'error';
+                      } else {
+                        borderColor = selectedTime === slot.time ? '#3b82f6' : '#4caf50';
+                        bgColor = selectedTime === slot.time ? '#f0f9ff' : '#e8f5e9';
+                        textColor = '#4caf50';
+                        statusColor = 'success';
+                      }
+                      
+                      return (
+                        <Grid item xs={6} sm={4} md={3} key={slot.time}>
+                          <Card
+                            sx={{
+                              cursor: slot.available ? 'pointer' : 'not-allowed',
+                              border: selectedTime === slot.time ? 2 : 1,
+                              borderColor: borderColor,
+                              backgroundColor: bgColor,
+                              opacity: slot.available ? 1 : 0.7,
+                              '&:hover': slot.available ? {
+                                boxShadow: 3,
+                                borderColor: '#3b82f6',
+                                transform: 'translateY(-2px)'
+                              } : {},
+                              transition: 'all 0.2s ease-in-out'
+                            }}
+                            onClick={() => slot.available && setSelectedTime(slot.time)}
+                          >
+                            <CardContent sx={{ p: 2, textAlign: 'center' }}>
+                              <AccessTime 
                                 sx={{ 
-                                  color: '#d32f2f',
-                                  fontSize: '0.7rem',
-                                  display: 'block',
-                                  mt: 0.5
+                                  color: selectedTime === slot.time ? '#3b82f6' : textColor,
+                                  mb: 0.5
+                                }}
+                              />
+                              <Typography 
+                                variant="body1" 
+                                sx={{ 
+                                  fontWeight: selectedTime === slot.time ? 600 : 500,
+                                  color: selectedTime === slot.time ? '#3b82f6' : textColor,
+                                  mb: 0.5
                                 }}
                               >
-                                Unavailable
+                                {formatTime(slot.time)}
                               </Typography>
-                            )}
-                          </CardContent>
-                        </Card>
-                      </Grid>
-                    ))}
+                              <Chip
+                                label={slot.status}
+                                size="small"
+                                color={statusColor}
+                                sx={{
+                                  height: 20,
+                                  fontSize: '0.65rem',
+                                  fontWeight: 600,
+                                  mt: 0.5
+                                }}
+                              />
+                            </CardContent>
+                          </Card>
+                        </Grid>
+                      );
+                    })}
                   </Grid>
                 )}
               </Box>
@@ -458,7 +513,7 @@ const CreateAppointmentDialog = ({ open, onClose, onAppointmentCreated }) => {
                   <Box display="flex" alignItems="center" gap={1}>
                     <CheckCircle color="primary" />
                     <Typography variant="body1">
-                      <strong>Status:</strong> <Chip label="Pending" color="warning" size="small" />
+                      <strong>Status:</strong> <Chip label="Scheduled" color="primary" size="small" />
                     </Typography>
                   </Box>
                 </Stack>

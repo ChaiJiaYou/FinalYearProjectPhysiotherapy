@@ -222,7 +222,6 @@ const AppointmentHistoryModal = ({ open, onClose, appointments }) => {
         return { color: "success", icon: <CheckCircleIcon /> };
       case "Cancelled":
         return { color: "error", icon: <CancelIcon /> };
-      case "Pending":
         return { color: "warning", icon: <ScheduleIcon /> };
       default:
         return { color: "default", icon: <EventIcon /> };
@@ -332,7 +331,6 @@ const AppointmentHistoryModal = ({ open, onClose, appointments }) => {
               <MenuItem value="all">All Status</MenuItem>
               <MenuItem value="Completed">Completed</MenuItem>
               <MenuItem value="Cancelled">Cancelled</MenuItem>
-              <MenuItem value="Pending">Pending</MenuItem>
             </TextField>
             <TextField
               select

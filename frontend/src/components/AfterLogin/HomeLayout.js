@@ -109,10 +109,10 @@ function HomeLayout() {
       // Redirect to appropriate dashboard based on role
       switch (role) {
         case "admin":
-          navigate("/home/admin-dashboard", { replace: true });
+          navigate("/home/users", { replace: true });
           break;
         case "therapist":
-          navigate("/home/therapist-dashboard", { replace: true });
+          navigate("/home/therapist-appointments", { replace: true });
           break;
         case "patient":
           navigate("/home/appointments", { replace: true });
@@ -156,12 +156,10 @@ function HomeLayout() {
     switch (role) {
       case "admin":
         return [
-          { text: "Dashboard", icon: <Dashboard />, path: "/admin-dashboard" },
           { text: "User Management", icon: <Group />, path: "/users" },
           { text: "Appointment Overview", icon: <Event />, path: "/admin-appointments" },
           { text: "Treatment Admin", icon: <AdminPanelSettings />, path: "/admin-treatment" },
           { text: "Exercise Management", icon: <FitnessCenter />, path: "/exercise-management" },
-          { text: "Action Learning", icon: <FitnessCenter />, path: "/action-learning" },
           { text: "Patient Information", icon: <HistoryEdu />, path : "/patients" },
           { text: "Profile", icon: <AccountCircle />, path: "/profile" },
         ];
@@ -173,7 +171,6 @@ function HomeLayout() {
         ];
       case "therapist":
         return [
-          { text: "Dashboard", icon: <Dashboard />, path: "/therapist-dashboard" },
           { text: "Appointment", icon: <Event />, path: "/therapist-appointments" },
           { text: "Treatment", icon: <MedicalServices />, path: "/treatment" },
           { text: "Patient Information", icon: <HistoryEdu />, path : "/patients" },
@@ -314,8 +311,6 @@ function HomeLayout() {
           >
             {menuItems.map((item) => {
               const isActive = location.pathname === `/home${item.path}` || 
-                              (item.path === "/admin-dashboard" && location.pathname === "/home") ||
-                              (item.path === "/therapist-dashboard" && location.pathname === "/home") ||
                               (item.path === "/patient-dashboard" && location.pathname === "/home");
               
               return (

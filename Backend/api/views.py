@@ -387,14 +387,8 @@ def create_appointment(request):
                 "error": "This time slot conflicts with another appointment."
             }, status=status.HTTP_400_BAD_REQUEST)
 
-        # Determine status based on who is creating the appointment
-        # If patient is creating, status should be Pending
-        # If therapist is creating, status should be Scheduled
-        current_user = request.user
-        if hasattr(current_user, 'role') and current_user.role == 'patient':
-            appointment_status = "Pending"
-        else:
-            appointment_status = "Scheduled"  # 默认为治疗师创建
+        # All appointments are created as Scheduled (no Pending status)
+        appointment_status = "Scheduled"
         
         # Create appointment
         appointment = Appointment.objects.create(
@@ -1231,6 +1225,7 @@ def patient_treatments(request, patient_id):
                 'goal_notes': treatment.goal_notes,
                 'created_at': treatment.created_at,
                 'therapist_name': treatment.therapist_id.username if treatment.therapist_id else 'Unknown',
+                'therapist_contact': treatment.therapist_id.contact_number if treatment.therapist_id else None,
                 'exercise_count': exercise_count,
             })
         
@@ -1264,38 +1259,71 @@ def therapist_treatments(request, therapist_id):
 
 @api_view(['GET'])
 def treatment_exercises(request, treatment_id):
-    """Get all exercises for a treatment"""
+    """Get active exercises for a treatment (legacy endpoint)."""
     try:
-        exercises = TreatmentExercise.objects.filter(treatment_id=treatment_id).select_related('exercise_id', 'exercise_id__action_id')
+        exercises = (
+            TreatmentExercise.objects
+            .filter(treatment_id=treatment_id, is_active=True)
+            .select_related('exercise_id')
+            .order_by('order_in_treatment')
+        )
         
         data = []
         for te in exercises:
-            # Get demo video URL from linked action's samples
-            demo_video_url = None
-            if te.exercise_id and te.exercise_id.action_id:
-                # Get the first sample video URL from the action
-                action = te.exercise_id.action_id
-                # Get the first sample for this action
-                first_sample = action.samples.first()
-                if first_sample and first_sample.video_url:
-                    demo_video_url = first_sample.video_url
+            demo_video_url = te.exercise_id.demo_video_url if te.exercise_id and hasattr(te.exercise_id, 'demo_video_url') else None
             
             data.append({
                 'treatment_exercise_id': str(te.treatment_exercise_id),
                 'exercise_id': str(te.exercise_id.exercise_id) if te.exercise_id else None,
                 'exercise_name': te.exercise_id.name if te.exercise_id else 'Custom Exercise',
-                'category': te.exercise_id.category if te.exercise_id else 'N/A',
-                'difficulty': te.exercise_id.difficulty if te.exercise_id else 'N/A',
                 'instructions': te.exercise_id.instructions if te.exercise_id else '',
+                'activity_name': te.exercise_id.activity_name if te.exercise_id else None,
                 'reps_per_set': te.reps_per_set,
                 'sets': te.sets,
+                'duration': te.duration,
                 'notes': te.notes,
                 'order_in_treatment': te.order_in_treatment,
                 'is_active': te.is_active,
                 'start_date': te.start_date,
                 'end_date': te.end_date,
                 'demo_video_url': demo_video_url,
-                'action_id': str(te.exercise_id.action_id.id) if te.exercise_id and te.exercise_id.action_id else None,
+            })
+        
+        return Response(data, status=status.HTTP_200_OK)
+    except Exception as e:
+        return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(['GET'])
+def treatment_exercises_all(request, treatment_id):
+    """Get all exercises for a treatment, including inactive ones."""
+    try:
+        exercises = (
+            TreatmentExercise.objects
+            .filter(treatment_id=treatment_id)
+            .select_related('exercise_id')
+            .order_by('order_in_treatment')
+        )
+        
+        data = []
+        for te in exercises:
+            demo_video_url = te.exercise_id.demo_video_url if te.exercise_id and hasattr(te.exercise_id, 'demo_video_url') else None
+            
+            data.append({
+                'treatment_exercise_id': str(te.treatment_exercise_id),
+                'exercise_id': str(te.exercise_id.exercise_id) if te.exercise_id else None,
+                'exercise_name': te.exercise_id.name if te.exercise_id else 'Custom Exercise',
+                'instructions': te.exercise_id.instructions if te.exercise_id else '',
+                'activity_name': te.exercise_id.activity_name if te.exercise_id else None,
+                'reps_per_set': te.reps_per_set,
+                'sets': te.sets,
+                'duration': te.duration,
+                'notes': te.notes,
+                'order_in_treatment': te.order_in_treatment,
+                'is_active': te.is_active,
+                'start_date': te.start_date,
+                'end_date': te.end_date,
+                'demo_video_url': demo_video_url,
             })
         
         return Response(data, status=status.HTTP_200_OK)
@@ -1304,21 +1332,63 @@ def treatment_exercises(request, treatment_id):
 
 @api_view(['POST'])
 def create_treatment_exercise(request):
-    """Create a new exercise for a treatment"""
+    """Create a new exercise for a treatment or re-activate an existing one"""
     try:
         data = request.data
-        
         treatment = get_object_or_404(Treatment, treatment_id=data.get('treatment_id'))
         exercise = get_object_or_404(Exercise, exercise_id=data.get('exercise_id'))
+        
+        def resolve_bool(value, default=True):
+            if value is None:
+                return default
+            if isinstance(value, bool):
+                return value
+            if isinstance(value, str):
+                return value.strip().lower() in ('true', '1', 'yes', 'on')
+            return bool(value)
+
+        reps_per_set = data.get('reps_per_set')
+        sets = data.get('sets', 1)
+        duration = data.get('duration', 1)
+        notes = data.get('notes')
+        order_in_treatment = data.get('order_in_treatment', 1)
+        is_active_flag = resolve_bool(data.get('is_active'), True)
+
+        existing_te = TreatmentExercise.objects.filter(
+            treatment_id=treatment,
+            exercise_id=exercise
+        ).first()
+
+        if existing_te:
+            existing_te.reps_per_set = reps_per_set
+            existing_te.sets = sets
+            existing_te.duration = duration
+            existing_te.notes = notes
+            existing_te.order_in_treatment = order_in_treatment
+            existing_te.is_active = is_active_flag
+            existing_te.save(update_fields=[
+                'reps_per_set',
+                'sets',
+                'duration',
+                'notes',
+                'order_in_treatment',
+                'is_active'
+            ])
+
+            return Response({
+                'exercise_id': str(existing_te.treatment_exercise_id),
+                'message': 'Existing treatment exercise re-activated'
+            }, status=status.HTTP_200_OK)
         
         treatment_exercise = TreatmentExercise.objects.create(
             treatment_id=treatment,
             exercise_id=exercise,
-            reps_per_set=data.get('reps_per_set'),
-            sets=data.get('sets', 1),
-            notes=data.get('notes'),
-            order_in_treatment=data.get('order_in_treatment', 1),
-            is_active=data.get('is_active', True),
+            reps_per_set=reps_per_set,
+            sets=sets,
+            duration=duration,
+            notes=notes,
+            order_in_treatment=order_in_treatment,
+            is_active=is_active_flag,
         )
         
         return Response({
@@ -1387,8 +1457,10 @@ def save_exercise_record(request):
                 end_time = make_aware(end_time, timezone=timezone.get_current_timezone())
             print(f"✅ Parsed end_time: {end_time}")
         
-        # Get repetition_times (no longer saving avg_duration to database)
+        # Get repetition_times and smoothness metrics
         repetition_times = data.get('repetition_times', [])
+        rep_sparc_scores = data.get('rep_sparc_scores', [])
+        rep_rom_scores = data.get('rep_rom_scores', [])
         
         # Prepare record data for printing/logging
         print("📝 Preparing record data for printing...")
@@ -1401,7 +1473,9 @@ def save_exercise_record(request):
             'end_time': end_time.isoformat() if end_time else None,
             'total_duration': data.get('total_duration'),
             'pause_count': data.get('pause_count', 0),
-            'repetition_times': repetition_times
+            'repetition_times': repetition_times,
+            'rep_sparc_scores': rep_sparc_scores,
+            'rep_rom_scores': rep_rom_scores,
         }
         
         # Print exercise record data to terminal (for testing)
@@ -1412,17 +1486,26 @@ def save_exercise_record(request):
         print("=" * 80)
         print("✅ Data logged successfully\n")
         
+        target_reps_per_set = treatment_exercise.reps_per_set
+        target_sets = treatment_exercise.sets
+        target_duration_minutes = treatment_exercise.duration
+        
         with transaction.atomic():
             exercise_record = ExerciseRecord.objects.create(
                 treatment_exercise_id=treatment_exercise,
                 patient_id=patient,
                 repetitions_completed=data.get('repetitions_completed', 0),
                 sets_completed=data.get('sets_completed', 0),
+                target_reps_per_set=target_reps_per_set,
+                target_sets=target_sets,
+                target_duration_minutes=target_duration_minutes,
                 start_time=start_time,
                 end_time=end_time,
                 total_duration=data.get('total_duration'),
                 pause_count=data.get('pause_count', 0),
-                repetition_times=repetition_times or []
+                repetition_times=repetition_times or [],
+                rep_sparc_scores=rep_sparc_scores or [],
+                rep_rom_scores=rep_rom_scores or []
             )
             print("💾 ExerciseRecord saved with ID:", exercise_record.record_id)
         
@@ -1621,6 +1704,8 @@ def patient_exercise_records(request, patient_id):
                 'pause_count': record.pause_count,
                 'avg_duration': avg_dur,
                 'repetition_times': record.repetition_times,
+                'rep_sparc_scores': record.rep_sparc_scores if record.rep_sparc_scores else [],
+                'rep_rom_scores': record.rep_rom_scores if record.rep_rom_scores else [],
                 'recorded_at': record.recorded_at.isoformat() if record.recorded_at else None,
             })
         
@@ -1771,63 +1856,49 @@ def patient_report_detail(request, patient_id):
             if avg_durations:
                 avg_rep_duration = round(sum(avg_durations) / len(avg_durations), 2)
             
-            # Calculate consistency score
-            all_repetition_times = []
+            # Calculate consistency score using SPARC (Consistency = 1 - CV(SPARC))
+            sparc_values = []
             for record in active_treatment_records:
-                if record.repetition_times and isinstance(record.repetition_times, list):
-                    all_repetition_times.extend(record.repetition_times)
+                if record.rep_sparc_scores and isinstance(record.rep_sparc_scores, list):
+                    for score in record.rep_sparc_scores:
+                        if isinstance(score, (int, float)) and score is not None:
+                            sparc_values.append(abs(score))
             
-            if all_repetition_times and len(all_repetition_times) > 1:
-                mean_rep_time = statistics.mean(all_repetition_times)
-                if mean_rep_time > 0:
-                    std_rep_time = statistics.stdev(all_repetition_times)
-                    cv = std_rep_time / mean_rep_time
-                    consistency_score = round(1 / (1 + cv), 3)
-                    consistency_score = max(0, min(1, consistency_score))
+            if len(sparc_values) >= 2:
+                mean_sparc = statistics.mean(sparc_values)
+                if abs(mean_sparc) > 1e-6:
+                    std_sparc = statistics.stdev(sparc_values)
+                    cv = std_sparc / abs(mean_sparc)
+                    consistency_score = max(0, min(1, 1 - cv))
+                    consistency_score = round(consistency_score, 3)
             
-            # Calculate average fatigue index
+            # Calculate average fatigue index using ROM: FI = (ROM_first - ROM_last) / ROM_first
             session_fatigue_indices = []
             for record in active_treatment_records:
-                if record.repetition_times and isinstance(record.repetition_times, list) and len(record.repetition_times) > 1:
-                    rep_times = record.repetition_times
-                    
-                    # Remove outliers using IQR method
-                    if len(rep_times) > 4:  # Need at least 5 values for IQR to be meaningful
-                        sorted_times = sorted(rep_times)
-                        q1_index = len(sorted_times) // 4
-                        q3_index = (3 * len(sorted_times)) // 4
-                        q1 = sorted_times[q1_index]
-                        q3 = sorted_times[q3_index]
-                        iqr = q3 - q1
+                if record.rep_rom_scores and isinstance(record.rep_rom_scores, list) and len(record.rep_rom_scores) >= 2:
+                    try:
+                        rom_scores = [
+                            float(score) for score in record.rep_rom_scores
+                            if isinstance(score, (int, float)) and score is not None and score >= 0
+                        ]
                         
-                        # Filter outliers: values outside [Q1 - 1.5*IQR, Q3 + 1.5*IQR]
-                        lower_bound = q1 - 1.5 * iqr
-                        upper_bound = q3 + 1.5 * iqr
-                        filtered_times = [t for t in rep_times if lower_bound <= t <= upper_bound]
-                        
-                        # Only use filtered data if we have at least 2 values
-                        if len(filtered_times) >= 2:
-                            rep_times = filtered_times
+                        if len(rom_scores) >= 2:
+                            mid_point = len(rom_scores) // 2
+                            first_half = rom_scores[:mid_point]
+                            second_half = rom_scores[mid_point:]
                     
-                    total_reps = len(rep_times)
-                    if total_reps < 2:
+                            if first_half and second_half:
+                                        rom_first = statistics.mean(first_half)
+                                        rom_last = statistics.mean(second_half)
+                                        
+                                        # Calculate fatigue index for this session: FI = (ROM_first - ROM_last) / ROM_first
+                                        if rom_first > 0:
+                                            fatigue_index = ((rom_first - rom_last) / rom_first) * 100
+                                            fatigue_index = max(0, fatigue_index)  # Ensure non-negative
+                                            session_fatigue_indices.append(fatigue_index)
+                    except Exception as e:
+                        print(f"Error calculating fatigue index: {str(e)}")
                         continue
-                    
-                    # Divide into first half and second half
-                    mid_point = total_reps // 2
-                    first_half = rep_times[:mid_point]
-                    second_half = rep_times[mid_point:]
-                    
-                    if first_half and second_half:
-                        avg_first_half = statistics.mean(first_half)
-                        avg_second_half = statistics.mean(second_half)
-                        
-                        # Calculate fatigue index for this session
-                        if avg_first_half > 0:
-                            fatigue_index = ((avg_second_half - avg_first_half) / avg_first_half) * 100
-                            if fatigue_index < 0:
-                                fatigue_index = 0
-                            session_fatigue_indices.append(fatigue_index)
             
             # Calculate average fatigue index across all sessions
             if session_fatigue_indices:
@@ -1902,6 +1973,7 @@ def patient_report_detail(request, patient_id):
                     'exercise_name': te.exercise_id.name if te.exercise_id else 'Custom Exercise',
                     'reps_per_set': te.reps_per_set,
                     'sets': te.sets,
+                    'duration': te.duration,
                     'order_in_treatment': te.order_in_treatment,
                 })
             
@@ -1933,61 +2005,49 @@ def patient_report_detail(request, patient_id):
         for record in records:
             exercise = getattr(record.treatment_exercise_id, 'exercise_id', None)
             treatment = getattr(record.treatment_exercise_id, 'treatment_id', None)
+            treatment_exercise = getattr(record, 'treatment_exercise_id', None)
             
-            # Calculate consistency score for this record
+            # Calculate consistency score for this record using SPARC
             consistency = None
-            if record.repetition_times and isinstance(record.repetition_times, list) and len(record.repetition_times) > 1:
+            if record.rep_sparc_scores and isinstance(record.rep_sparc_scores, list) and len(record.rep_sparc_scores) >= 2:
                 try:
-                    mean_rep_time = statistics.mean(record.repetition_times)
-                    if mean_rep_time > 0:
-                        std_rep_time = statistics.stdev(record.repetition_times)
-                        cv = std_rep_time / mean_rep_time
-                        consistency = round(1 / (1 + cv), 3)
-                        consistency = max(0, min(1, consistency))
-                except:
+                    sparc_values = [
+                        abs(score)
+                        for score in record.rep_sparc_scores
+                        if isinstance(score, (int, float)) and score is not None
+                    ]
+                    if len(sparc_values) >= 2:
+                        mean_sparc = statistics.mean(sparc_values)
+                        if abs(mean_sparc) > 1e-6:
+                            std_sparc = statistics.stdev(sparc_values)
+                            cv = std_sparc / abs(mean_sparc)
+                            consistency_value = max(0, min(1, 1 - cv))
+                            consistency = round(consistency_value * 100, 1)
+                except Exception:
                     pass
             
-            # Calculate fatigue index for this record
+            # Calculate fatigue index for this record using ROM: FI = (ROM_first - ROM_last) / ROM_first
             fatigue = None
-            if record.repetition_times and isinstance(record.repetition_times, list) and len(record.repetition_times) > 1:
+            if record.rep_rom_scores and isinstance(record.rep_rom_scores, list) and len(record.rep_rom_scores) >= 2:
                 try:
-                    rep_times = record.repetition_times
+                    rom_scores = [
+                        float(score) for score in record.rep_rom_scores
+                        if isinstance(score, (int, float)) and score is not None and score >= 0
+                    ]
                     
-                    # Remove outliers using IQR method
-                    if len(rep_times) > 4:  # Need at least 5 values for IQR to be meaningful
-                        sorted_times = sorted(rep_times)
-                        q1_index = len(sorted_times) // 4
-                        q3_index = (3 * len(sorted_times)) // 4
-                        q1 = sorted_times[q1_index]
-                        q3 = sorted_times[q3_index]
-                        iqr = q3 - q1
-                        
-                        # Filter outliers: values outside [Q1 - 1.5*IQR, Q3 + 1.5*IQR]
-                        lower_bound = q1 - 1.5 * iqr
-                        upper_bound = q3 + 1.5 * iqr
-                        filtered_times = [t for t in rep_times if lower_bound <= t <= upper_bound]
-                        
-                        # Only use filtered data if we have at least 2 values
-                        if len(filtered_times) >= 2:
-                            rep_times = filtered_times
-                    
-                    total_reps = len(rep_times)
-                    if total_reps < 2:
-                        fatigue = None
-                    else:
-                        mid_point = total_reps // 2
-                        first_half = rep_times[:mid_point]
-                        second_half = rep_times[mid_point:]
+                    if len(rom_scores) >= 2:
+                        mid_point = len(rom_scores) // 2
+                        first_half = rom_scores[:mid_point]
+                        second_half = rom_scores[mid_point:]
                         
                         if first_half and second_half:
-                            avg_first_half = statistics.mean(first_half)
-                            avg_second_half = statistics.mean(second_half)
+                            rom_first = statistics.mean(first_half)
+                            rom_last = statistics.mean(second_half)
                             
-                            if avg_first_half > 0:
-                                fatigue = round(((avg_second_half - avg_first_half) / avg_first_half) * 100, 1)
-                                if fatigue < 0:
-                                    fatigue = 0
-                except:
+                            if rom_first > 0:
+                                fatigue_value = ((rom_first - rom_last) / rom_first) * 100
+                                fatigue = round(max(0, fatigue_value), 1)  # Ensure non-negative
+                except Exception:
                     pass
             
             # Send full datetime, let frontend format it in local timezone
@@ -2005,6 +2065,17 @@ def patient_report_detail(request, patient_id):
             total_reps = record.repetitions_completed or 0
             sets = record.sets_completed or 0
             
+            reps_to_complete = record.target_reps_per_set
+            sets_to_complete = record.target_sets
+            duration_set = record.target_duration_minutes
+
+            if reps_to_complete is None and treatment_exercise:
+                reps_to_complete = treatment_exercise.reps_per_set
+            if sets_to_complete is None and treatment_exercise:
+                sets_to_complete = treatment_exercise.sets
+            if duration_set is None and treatment_exercise:
+                duration_set = treatment_exercise.duration
+            
             exercise_records_data.append({
                 'record_id': str(record.record_id),
                 'treatment_id': str(treatment.treatment_id) if treatment else None,
@@ -2013,10 +2084,15 @@ def patient_report_detail(request, patient_id):
                 'reps': total_reps,  # Total reps completed (not per set)
                 'sets': sets,  # Sets completed (may be partial)
                 'avg_time': avg_time,
-                'consistency': round(consistency * 100, 1) if consistency is not None else None,
+                'consistency': consistency,  # Already in percentage format (e.g., 95.8)
                 'fatigue': fatigue,
                 'pauses': record.pause_count or 0,
                 'repetition_times': record.repetition_times if record.repetition_times else [],
+                'rep_sparc_scores': record.rep_sparc_scores if record.rep_sparc_scores else [],
+                'rep_rom_scores': record.rep_rom_scores if record.rep_rom_scores else [],
+                'reps_to_complete': reps_to_complete,
+                'sets_to_complete': sets_to_complete,
+                'duration_set': duration_set,
             })
         
         # Build response data
@@ -2120,6 +2196,8 @@ def update_treatment_exercise(request, exercise_id):
             exercise.reps_per_set = data['reps_per_set']
         if 'sets' in data:
             exercise.sets = data['sets']
+        if 'duration' in data:
+            exercise.duration = data['duration']
         if 'notes' in data:
             exercise.notes = data['notes']
         if 'is_active' in data:
@@ -2148,17 +2226,16 @@ def delete_treatment_exercise(request, exercise_id):
 def list_exercises(request):
     """Get all available exercises"""
     try:
-        exercises = Exercise.objects.all().order_by('category', 'name')
+        exercises = Exercise.objects.all().order_by('name')
         
         data = []
         for exercise in exercises:
             data.append({
                 'exercise_id': str(exercise.exercise_id),
                 'name': exercise.name,
-                'category': exercise.category,
-                'difficulty': exercise.difficulty,
                 'instructions': exercise.instructions,
-                'action_id': str(exercise.action_id.id) if exercise.action_id else None,
+                'activity_name': exercise.activity_name,
+                'demo_video_url': exercise.demo_video_url,
                 'created_by_name': exercise.created_by.username if exercise.created_by else 'System',
             })
         
@@ -2176,24 +2253,15 @@ def create_exercise(request):
         if not data.get('name') or data.get('name', '').strip() == '':
             return Response({'error': 'Exercise name is required'}, status=status.HTTP_400_BAD_REQUEST)
         
-        if not data.get('action_id'):
-            return Response({'error': 'Link to Action is required'}, status=status.HTTP_400_BAD_REQUEST)
-        
         # Get the user creating the exercise (admin or therapist)
         created_by = None
         if 'created_by' in data:
             created_by = get_object_or_404(CustomUser, id=data['created_by'], role__in=['therapist', 'admin'])
         
-        # Get the action (required)
-        from .models import Action
-        action_id = get_object_or_404(Action, id=data['action_id'])
-        
         exercise = Exercise.objects.create(
             name=data.get('name', 'Unnamed Exercise'),
-            category=data.get('category', 'upper_body'),
-            difficulty=data.get('difficulty', 'beginner'),
             instructions=data.get('instructions', 'No instructions provided'),
-            action_id=action_id,
+            activity_name=data.get('activity_name'),
             created_by=created_by,
         )
         
@@ -2215,22 +2283,9 @@ def exercise_detail(request, exercise_id):
             data = {
                 'exercise_id': str(exercise.exercise_id),
                 'exercise_name': exercise.name,
-                'body_part': exercise.body_part,
-                'category': exercise.category,
-                'difficulty': exercise.difficulty,
-                'description': exercise.instructions,
                 'instructions': exercise.instructions,
-                'default_target_metrics': exercise.default_metrics,
-                'default_sets': 3,  # Default values
-                'default_repetitions': 10,
-                'default_pain_threshold': 5,
-                'demo_video_url': exercise.demo_video_url,
-                'is_active': exercise.is_active,
-                'created_at': exercise.created_at,
+                'activity_name': exercise.activity_name,
                 'created_by_name': exercise.created_by.username if exercise.created_by else 'System',
-                'detection_rules': exercise.detection_rules or {},
-                'action_id': str(exercise.action_id.id) if exercise.action_id else None,
-                'action_name': exercise.action_id.name if exercise.action_id else None,
             }
             return Response(data, status=status.HTTP_200_OK)
             
@@ -2241,26 +2296,13 @@ def exercise_detail(request, exercise_id):
             if 'name' in data and (not data['name'] or data['name'].strip() == ''):
                 return Response({'error': 'Exercise name is required'}, status=status.HTTP_400_BAD_REQUEST)
             
-            # action_id is required - validate if it's being updated or if it's missing
-            if 'action_id' in data:
-                if not data['action_id'] or data['action_id'] == '':
-                    return Response({'error': 'Link to Action is required'}, status=status.HTTP_400_BAD_REQUEST)
-                from .models import Action
-                action = get_object_or_404(Action, id=data['action_id'])
-                exercise.action_id = action
-            elif not exercise.action_id:
-                # If action_id is not in the update data and current exercise has no action_id, it's invalid
-                return Response({'error': 'Link to Action is required'}, status=status.HTTP_400_BAD_REQUEST)
-            
             # Update fields if provided
             if 'name' in data:
                 exercise.name = data['name']
-            if 'category' in data:
-                exercise.category = data['category']
-            if 'difficulty' in data:
-                exercise.difficulty = data['difficulty']
             if 'instructions' in data:
                 exercise.instructions = data['instructions']
+            if 'activity_name' in data:
+                exercise.activity_name = data['activity_name'] or None
                 
             exercise.save()
             
@@ -2338,440 +2380,11 @@ def detect_pose(request):
         return Response({"error": str(e)}, status=500)
 
 
-# ==================== NEW ACTION LEARNING API VIEWS ====================
-
-from .models import Action, ActionSample, ActionTemplate
-from .services.pipeline import (
-    finalize_action_from_video, 
-    dtw_infer_update, 
-    setup_action_for_inference,
-    process_realtime_frame
-)
-from .services.dtw_recognition import reset_recognizer, get_recognizer_status
-
-
-@api_view(['POST'])
-def create_action(request):
-    """Create new action for video-based learning"""
-    try:
-        name = request.data.get('name')
-        description = request.data.get('description', '')
-        created_by = request.data.get('created_by')
-        
-        if not name:
-            return JsonResponse({'error': 'Action name is required'}, status=400)
-        
-        action = Action.objects.create(
-            name=name,
-            description=description,
-            created_by=created_by,
-            mode='dtw'  # Default to DTW mode
-        )
-        
-        return JsonResponse({
-            'id': action.id,
-            'name': action.name,
-            'description': action.description,
-            'mode': action.mode,
-            'created_at': action.created_at.isoformat()
-        })
-        
-    except Exception as e:
-        return JsonResponse({'error': str(e)}, status=500)
-
-
-@api_view(['GET'])
-def list_actions(request):
-    """List all actions"""
-    try:
-        actions = Action.objects.all().order_by('-created_at')
-        
-        data = []
-        for action in actions:
-            # Count templates and samples
-            template_count = ActionTemplate.objects.filter(action=action).count()
-            sample_count = ActionSample.objects.filter(action=action).count()
-            
-            data.append({
-                'id': action.id,
-                'name': action.name,
-                'description': action.description,
-                'mode': action.mode,
-                'template_count': template_count,
-                'sample_count': sample_count,
-                'params': action.params_json,
-                'created_at': action.created_at.isoformat()
-            })
-        
-        return JsonResponse({'actions': data})
-        
-    except Exception as e:
-        return JsonResponse({'error': str(e)}, status=500)
-
-
-@api_view(['DELETE'])
-def delete_action(request, action_id):
-    """
-    Delete an action and all associated data:
-    - Delete all ActionSample records and their video files
-    - Delete all ActionTemplate records
-    - Set action_id to NULL for all linked Exercise records
-    - Delete the Action record itself
-    """
-    try:
-        import os
-        from django.conf import settings
-        
-        action = Action.objects.get(id=action_id)
-        action_name = action.name
-        
-        # 1. Get all samples and delete their video files
-        samples = ActionSample.objects.filter(action=action)
-        deleted_videos = 0
-        for sample in samples:
-            if sample.video_url:
-                # Handle both relative URLs and absolute paths
-                if sample.video_url.startswith('/media/'):
-                    # Relative URL - construct full path
-                    video_path = os.path.join(settings.BASE_DIR, sample.video_url.lstrip('/'))
-                else:
-                    # Absolute path (legacy)
-                    video_path = sample.video_url
-                
-                if os.path.exists(video_path):
-                    try:
-                        os.remove(video_path)
-                        deleted_videos += 1
-                    except Exception as e:
-                        print(f"Failed to delete video file {video_path}: {e}")
-        
-        # Count records before deletion
-        template_count = ActionTemplate.objects.filter(action=action).count()
-        sample_count = samples.count()
-        
-        # 2. Update all linked exercises (set action_id to NULL)
-        # Note: This happens automatically due to on_delete=SET_NULL, but we'll count them
-        linked_exercises = Exercise.objects.filter(action_id=action).count()
-        
-        # 3. Delete the action (this will CASCADE delete samples and templates)
-        action.delete()
-        
-        return JsonResponse({
-            'success': True,
-            'message': f'Action "{action_name}" deleted successfully',
-            'details': {
-                'templates_deleted': template_count,
-                'samples_deleted': sample_count,
-                'videos_deleted': deleted_videos,
-                'exercises_unlinked': linked_exercises
-            }
-        })
-        
-    except Action.DoesNotExist:
-        return JsonResponse({'error': 'Action not found'}, status=404)
-    except Exception as e:
-        import traceback
-        traceback.print_exc()
-        return JsonResponse({'error': str(e)}, status=500)
-
-
-@api_view(['POST'])
-@parser_classes([MultiPartParser, FormParser])
-def upload_record(request, action_id):
-    """Upload demo video or keypoints data for action learning"""
-    try:
-        action = Action.objects.get(id=action_id)
-        
-        # Handle video file upload
-        video_file = request.FILES.get('video')
-        keypoints_data = request.data.get('keypoints')
-        fps = int(request.data.get('fps', 30))
-        
-        if video_file:
-            # Save video file
-            import os
-            from django.conf import settings
-            
-            # Create media directory if it doesn't exist
-            media_dir = os.path.join(settings.BASE_DIR, 'media', 'action_videos')
-            os.makedirs(media_dir, exist_ok=True)
-            
-            # Save video with unique filename
-            video_filename = f"action_{action_id}_{int(time.time())}.mp4"
-            video_path = os.path.join(media_dir, video_filename)
-            
-            with open(video_path, 'wb') as f:
-                for chunk in video_file.chunks():
-                    f.write(chunk)
-            
-            # Create sample record with relative URL
-            # Convert absolute path to relative URL for web access
-            relative_url = f"/media/action_videos/{video_filename}"
-            sample = ActionSample.objects.create(
-                action=action,
-                video_url=relative_url,
-                fps=fps
-            )
-            
-            return JsonResponse({
-                'sample_id': sample.id,
-                'video_saved': True,
-                'video_path': video_path
-            })
-        
-        elif keypoints_data:
-            # Handle direct keypoints upload
-            try:
-                if isinstance(keypoints_data, str):
-                    keypoints_json = json.loads(keypoints_data)
-                else:
-                    keypoints_json = keypoints_data
-            except json.JSONDecodeError:
-                return JsonResponse({'error': 'Invalid keypoints JSON format'}, status=400)
-            
-            sample = ActionSample.objects.create(
-                action=action,
-                keypoints_json=keypoints_json,
-                fps=fps
-            )
-            
-            return JsonResponse({
-                'sample_id': sample.id,
-                'keypoints_saved': True,
-                'frame_count': len(keypoints_json)
-            })
-        
-        else:
-            return JsonResponse({'error': 'No video file or keypoints data provided'}, status=400)
-        
-    except Action.DoesNotExist:
-        return JsonResponse({'error': 'Action not found'}, status=404)
-    except Exception as e:
-        return JsonResponse({'error': str(e)}, status=500)
-
-
-@api_view(['POST'])
-def finalize_action(request, action_id):
-    """Finalize action: extract features, segment, create templates, estimate thresholds"""
-    try:
-        result = finalize_action_from_video(action_id)
-        
-        if result['success']:
-            return JsonResponse(result)
-        else:
-            return JsonResponse(result, status=400)
-        
-    except Exception as e:
-        return JsonResponse({'error': str(e)}, status=500)
-
-
-@api_view(['POST'])
-def infer_stream(request):
-    """Real-time inference endpoint for DTW-based action recognition"""
-    try:
-        features = None
-        update_thresholds = None
-        
-        # Handle different input formats
-        if request.content_type.startswith('multipart/form-data'):
-            # Image frame upload
-            frame_file = request.FILES.get('frame')
-            if frame_file:
-                # Read image
-                img_array = np.frombuffer(frame_file.read(), np.uint8)
-                image = cv2.imdecode(img_array, cv2.IMREAD_COLOR)
-                
-                # Process frame
-                frame_result = process_realtime_frame(image)
-                if not frame_result['success']:
-                    return JsonResponse(frame_result, status=400)
-                
-                features = frame_result['features']
-                
-                # Check for threshold updates in form data
-                thr_in = request.POST.get('thr_in')
-                thr_out = request.POST.get('thr_out')
-                if thr_in and thr_out:
-                    update_thresholds = {
-                        'thr_in': float(thr_in),
-                        'thr_out': float(thr_out)
-                    }
-                else:
-                    update_thresholds = None
-            else:
-                return JsonResponse({'error': 'No frame data provided'}, status=400)
-        
-        else:
-            # JSON payload with features or keypoints
-            payload = request.data if hasattr(request, 'data') else json.loads(request.body)
-            
-            if 'features' in payload:
-                # Direct features input
-                features = payload['features']
-            elif 'keypoints' in payload:
-                # Process keypoints to features
-                frame_result = process_realtime_frame(payload['keypoints'])
-                if not frame_result['success']:
-                    return JsonResponse(frame_result, status=400)
-                features = frame_result['features']
-            else:
-                return JsonResponse({'error': 'No features or keypoints provided'}, status=400)
-            
-            # Extract threshold updates if present
-            update_thresholds = payload.get('update_thresholds')
-        
-        # Run DTW inference
-        
-        inference_payload = {
-            'features': features,
-            'update_thresholds': update_thresholds
-        }
-        
-        result = dtw_infer_update(inference_payload)
-        # Ensure debug observability fields
-        if isinstance(result, dict):
-            dbg = result.get('debug', {}) or {}
-            # Attach reason_code if recognizer provided it (present in dtw_recognition debug or pipeline state machine)
-            # If missing, keep 'OK' as default
-            dbg.setdefault('reason_code', 'OK')
-            result['debug'] = dbg
-        return JsonResponse(result)
-        
-    except Exception as e:
-        import traceback
-        traceback.print_exc()
-        return JsonResponse({'error': str(e)}, status=500)
-
-
-@api_view(['POST'])
-def setup_action_inference(request, action_id):
-    """Setup DTW recognizer for a specific action"""
-    try:
-        result = setup_action_for_inference(action_id)
-        
-        if result['success']:
-            return JsonResponse(result)
-        else:
-            return JsonResponse(result, status=400)
-        
-    except Exception as e:
-        return JsonResponse({'error': str(e)}, status=500)
-
-
-@api_view(['POST'])
-def reset_inference(request):
-    """Reset DTW recognizer state"""
-    try:
-        result = reset_recognizer()
-        return JsonResponse(result)
-        
-    except Exception as e:
-        return JsonResponse({'error': str(e)}, status=500)
-
-
-@api_view(['GET'])
-def inference_status(request):
-    """Get current DTW recognizer status"""
-    try:
-        result = get_recognizer_status()
-        return JsonResponse(result)
-        
-    except Exception as e:
-        return JsonResponse({'error': str(e)}, status=500)
-
-
-@api_view(['GET', 'PATCH'])
-def action_detail(request, action_id):
-    """Get detailed information about an action or update it"""
-    try:
-        action = Action.objects.get(id=action_id)
-        
-        if request.method == 'GET':
-            # Get related data
-            templates = ActionTemplate.objects.filter(action=action)
-            samples = ActionSample.objects.filter(action=action)
-            
-            template_data = []
-            for template in templates:
-                template_data.append({
-                    'id': template.id,
-                    'length': template.length,
-                    'feature_dim': template.feature_dim,
-                    'created_at': template.created_at.isoformat()
-                })
-            
-            sample_data = []
-            for sample in samples:
-                sample_data.append({
-                    'id': sample.id,
-                    'has_video': bool(sample.video_url),
-                    'video_url': sample.video_url if sample.video_url else None,
-                    'has_keypoints': bool(sample.keypoints_json),
-                    'fps': sample.fps,
-                    'created_at': sample.created_at.isoformat()
-                })
-            
-            return JsonResponse({
-                'action': {
-                    'id': action.id,
-                    'name': action.name,
-                    'description': action.description,
-                    'mode': action.mode,
-                    'params': action.params_json,
-                    'created_at': action.created_at.isoformat()
-                },
-                'templates': template_data,
-                'samples': sample_data
-            })
-        
-        elif request.method == 'PATCH':
-            # Update action fields
-            data = request.data
-            
-            if 'description' in data:
-                action.description = data['description']
-            
-            if 'name' in data:
-                action.name = data['name']
-            
-            action.save()
-            
-            return JsonResponse({
-                'id': action.id,
-                'name': action.name,
-                'description': action.description,
-                'mode': action.mode,
-                'message': 'Action updated successfully'
-            })
-        
-    except Action.DoesNotExist:
-        return JsonResponse({'error': 'Action not found'}, status=404)
-    except Exception as e:
-        return JsonResponse({'error': str(e)}, status=500)
-
-
-# ==================== LEGACY MODE SUPPORT ====================
-
-@api_view(['GET'])
-def legacy_mode_status(request):
-    """Check if legacy mode is enabled"""
-    # For now, always return available but disabled by default
-    return JsonResponse({
-        'legacy_mode_available': True,
-        'legacy_mode_enabled': False,
-        'legacy_endpoints': [
-            '/api/legacy/detect-pose/',
-            '/api/legacy/exercises/',
-        ]
-    })
-
-
-# Legacy endpoint aliases for backward compatibility
-@api_view(['POST'])
-@parser_classes([MultiPartParser])
-def legacy_detect_pose(request):
-    """Legacy pose detection endpoint - identical to original detect_pose"""
-    return detect_pose(request)
+# Action Learning API views removed - replaced with new model and pipeline
+# All related views (create_action, list_actions, delete_action, upload_record, 
+# finalize_action, infer_stream, setup_action_inference, reset_inference, 
+# inference_status, action_detail, get_action_config, legacy_mode_status, 
+# legacy_detect_pose) have been removed.
 
 @api_view(['POST'])
 def change_password(request):
@@ -2862,9 +2475,9 @@ def admin_force_complete_appointment(request, appointment_id):
     try:
         appointment = get_object_or_404(Appointment, appointment_code=appointment_id)
         
-        # Only allow completing Pending or Scheduled appointments
-        if appointment.status not in ["Pending", "Scheduled"]:
-            return Response({"error": "Can only complete Pending or Scheduled appointments"}, status=status.HTTP_400_BAD_REQUEST)
+        # Only allow completing Scheduled appointments
+        if appointment.status != "Scheduled":
+            return Response({"error": "Can only complete Scheduled appointments"}, status=status.HTTP_400_BAD_REQUEST)
         
         old_status = appointment.status
         appointment.status = "Completed"
@@ -2906,19 +2519,19 @@ def admin_force_reject_appointment(request, appointment_id):
     try:
         appointment = get_object_or_404(Appointment, appointment_code=appointment_id)
         
-        # Only allow rejecting Pending or Scheduled appointments
-        if appointment.status not in ["Pending", "Scheduled"]:
-            return Response({"error": "Can only reject Pending or Scheduled appointments"}, status=status.HTTP_400_BAD_REQUEST)
+        # Only allow cancelling Scheduled appointments
+        if appointment.status != "Scheduled":
+            return Response({"error": "Can only cancel Scheduled appointments"}, status=status.HTTP_400_BAD_REQUEST)
         
         old_status = appointment.status
         appointment.status = "Cancelled"
         appointment.cancelled_at = timezone.now()
-        appointment.cancel_reason = "Admin force reject" if old_status == "Pending" else "Admin force cancel"
+        appointment.cancel_reason = "Admin force cancel"
         appointment.save()
         
         # Create notification for patient
         if appointment.patient_id:
-            action_text = "rejected" if old_status == "Pending" else "cancelled"
+            action_text = "cancelled"
             Notification.objects.create(
                 user=appointment.patient_id,
                 title=f"Appointment {action_text.title()}",
@@ -2928,7 +2541,7 @@ def admin_force_reject_appointment(request, appointment_id):
             )
         
         # Create notification for therapist
-        action_text = "rejected" if old_status == "Pending" else "cancelled"
+        action_text = "cancelled"
         Notification.objects.create(
             user=appointment.therapist_id,
             title=f"Appointment {action_text.title()} by Admin",
@@ -2937,7 +2550,7 @@ def admin_force_reject_appointment(request, appointment_id):
             related_id=appointment.appointment_code
         )
         
-        action_text = "rejected" if old_status == "Pending" else "cancelled"
+        action_text = "cancelled"
         return Response({
             "message": f"Appointment {action_text} successfully",
             "appointment_id": appointment.appointment_code,
