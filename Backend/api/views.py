@@ -1881,21 +1881,21 @@ def patient_report_detail(request, patient_id):
                             float(score) for score in record.rep_rom_scores
                             if isinstance(score, (int, float)) and score is not None and score >= 0
                         ]
-                        
+
                         if len(rom_scores) >= 2:
                             mid_point = len(rom_scores) // 2
                             first_half = rom_scores[:mid_point]
                             second_half = rom_scores[mid_point:]
-                    
+
                             if first_half and second_half:
-                                        rom_first = statistics.mean(first_half)
-                                        rom_last = statistics.mean(second_half)
-                                        
-                                        # Calculate fatigue index for this session: FI = (ROM_first - ROM_last) / ROM_first
-                                        if rom_first > 0:
-                                            fatigue_index = ((rom_first - rom_last) / rom_first) * 100
-                                            fatigue_index = max(0, fatigue_index)  # Ensure non-negative
-                                            session_fatigue_indices.append(fatigue_index)
+                                rom_first = statistics.mean(first_half)
+                                rom_last = statistics.mean(second_half)
+
+                                # Calculate fatigue index for this session: FI = (ROM_first - ROM_last) / ROM_first
+                                if rom_first > 0:
+                                    fatigue_index = ((rom_first - rom_last) / rom_first) * 100
+                                    fatigue_index = max(0, fatigue_index)  # Ensure non-negative
+                                    session_fatigue_indices.append(fatigue_index)
                     except Exception as e:
                         print(f"Error calculating fatigue index: {str(e)}")
                         continue

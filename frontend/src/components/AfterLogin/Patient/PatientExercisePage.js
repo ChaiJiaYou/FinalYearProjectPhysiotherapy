@@ -17,6 +17,7 @@ import {
   DialogActions,
   Paper,
   Divider,
+  IconButton,
 } from "@mui/material";
 import {
   Videocam as VideocamIcon,
@@ -34,6 +35,7 @@ import {
   FiberManualRecord as RecordIcon,
   Warning as WarningIcon,
   WhatsApp as WhatsAppIcon,
+  Close as CloseIcon,
 } from "@mui/icons-material";
 import { toast } from "react-toastify";
 
@@ -126,7 +128,15 @@ const PatientExercisePage = () => {
   
   // Video refs
   const demoVideoRef = useRef(null);
+  const demoVideoPlayerRef = useRef(null);
+  const isSeekingRef = useRef(false);
   const recognitionIntervalRef = useRef(null);
+  
+  // Demo video dialog states
+  const [showDemoVideoDialog, setShowDemoVideoDialog] = useState(false);
+  const [demoVideoUrl, setDemoVideoUrl] = useState(null);
+  const [demoVideoLoading, setDemoVideoLoading] = useState(false);
+  const [demoVideoExerciseName, setDemoVideoExerciseName] = useState('');
   const restTimerRef = useRef(null);
   const exerciseTimerRef = useRef(null);
   const countdownTimerRef = useRef(null);
@@ -259,6 +269,33 @@ const resetRomScores = () => {
     const mins = Math.floor(seconds / 60);
     const secs = Math.floor(seconds % 60);
     return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+  };
+
+  // View demo video function
+  const viewDemoVideo = async (exercise) => {
+    setDemoVideoLoading(true);
+    setDemoVideoExerciseName(exercise.exercise_name || 'Exercise');
+    setShowDemoVideoDialog(true);
+    
+    try {
+      // Check if exercise has demo_video_url
+      if (exercise.demo_video_url) {
+        // Build full video URL
+        const videoUrl = exercise.demo_video_url.startsWith('http')
+          ? exercise.demo_video_url
+          : `http://127.0.0.1:8000${exercise.demo_video_url}`;
+        setDemoVideoUrl(videoUrl);
+      } else {
+        setDemoVideoUrl(null);
+        toast.info('No demo video available for this exercise');
+      }
+    } catch (error) {
+      console.error('Error loading demo video:', error);
+      toast.error('Failed to load demo video');
+      setDemoVideoUrl(null);
+    } finally {
+      setDemoVideoLoading(false);
+    }
   };
 
   const formatDate = (dateString) => {
@@ -1731,6 +1768,10 @@ const getWhatsappLink = (contactNumber, message) => {
                           variant="outlined"
                           startIcon={<PlayCircleOutlineIcon />}
                           sx={{ textTransform: 'none', fontWeight: 600 }}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            viewDemoVideo(exercise);
+                          }}
                         >
                           Demo Video
                         </Button>
@@ -1774,7 +1815,7 @@ const getWhatsappLink = (contactNumber, message) => {
                             Complete within
                         </Typography>
                           <Typography variant="subtitle1" fontWeight={600} color="error.main">
-                            {exerciseDuration} min
+                            {exerciseDuration} min / set
                         </Typography>
                           {isCurrent && (
                             <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.5 }}>
@@ -1833,6 +1874,117 @@ const getWhatsappLink = (contactNumber, message) => {
             Yes, End Exercise
           </Button>
         </DialogActions>
+      </Dialog>
+
+      {/* Demo Video Dialog */}
+      <Dialog 
+        open={showDemoVideoDialog} 
+        onClose={() => {
+          // Pause video when closing dialog
+          if (demoVideoPlayerRef.current) {
+            demoVideoPlayerRef.current.pause();
+            demoVideoPlayerRef.current.currentTime = 0;
+          }
+          setShowDemoVideoDialog(false);
+          setDemoVideoUrl(null);
+          setDemoVideoExerciseName('');
+        }} 
+        maxWidth="md" 
+        fullWidth
+      >
+        <DialogTitle>
+          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <Typography variant="h6">
+              Demo Video {demoVideoExerciseName ? `- ${demoVideoExerciseName}` : ''}
+            </Typography>
+            <IconButton 
+              onClick={() => {
+                // Pause video when closing dialog
+                if (demoVideoPlayerRef.current) {
+                  demoVideoPlayerRef.current.pause();
+                  demoVideoPlayerRef.current.currentTime = 0;
+                }
+                setShowDemoVideoDialog(false);
+                setDemoVideoUrl(null);
+                setDemoVideoExerciseName('');
+              }}
+            >
+              <CloseIcon />
+            </IconButton>
+          </Box>
+        </DialogTitle>
+        <DialogContent>
+          {demoVideoLoading ? (
+            <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: 300 }}>
+              <CircularProgress />
+              <Typography variant="body1" sx={{ ml: 2 }}>Loading demo video...</Typography>
+            </Box>
+          ) : demoVideoUrl ? (
+            <Box sx={{ 
+              position: 'relative', 
+              paddingTop: '56.25%', // 16:9 aspect ratio
+              backgroundColor: '#000',
+              borderRadius: 1,
+              overflow: 'hidden'
+            }}>
+              <video
+                key={demoVideoUrl}
+                ref={demoVideoPlayerRef}
+                controls
+                autoPlay
+                loop
+                preload="metadata"
+                onSeeking={() => {
+                  // Mark that user is actively seeking
+                  isSeekingRef.current = true;
+                }}
+                onSeeked={() => {
+                  // User finished seeking, allow normal playback
+                  isSeekingRef.current = false;
+                }}
+                onTimeUpdate={() => {
+                  // Prevent loop from interfering during seek
+                  if (!isSeekingRef.current && demoVideoPlayerRef.current) {
+                    // Normal playback, loop will handle restart
+                  }
+                }}
+                style={{
+                  position: 'absolute',
+                  top: 0,
+                  left: 0,
+                  width: '100%',
+                  height: '100%',
+                  objectFit: 'contain'
+                }}
+              >
+                <source src={demoVideoUrl} type="video/mp4" />
+                <source src={demoVideoUrl} type="video/webm" />
+                Your browser does not support the video tag.
+              </video>
+            </Box>
+          ) : (
+            <Box sx={{ 
+              display: 'flex', 
+              flexDirection: 'column',
+              justifyContent: 'center', 
+              alignItems: 'center', 
+              minHeight: 300,
+              backgroundColor: 'grey.100',
+              borderRadius: 1,
+              p: 3
+            }}>
+              <VideocamOffIcon sx={{ fontSize: 64, color: 'grey.400', mb: 2 }} />
+              <Typography variant="h6" color="text.secondary" gutterBottom>
+                No Demo Video Available
+              </Typography>
+              <Typography variant="body2" color="text.secondary" textAlign="center">
+                This exercise doesn't have a demonstration video yet.
+                <br />
+                Please contact your therapist for more information.
+              </Typography>
+            </Box>
+          )}
+        </DialogContent>
       </Dialog>
     </Box>
   );

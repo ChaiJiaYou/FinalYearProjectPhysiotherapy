@@ -42,6 +42,8 @@ import {
   Clear as ClearIcon,
   Refresh as RefreshIcon,
   Close as CloseIcon,
+  PlayCircleOutline as PlayCircleOutlineIcon,
+  VideocamOff as VideocamOffIcon,
 } from "@mui/icons-material";
 import { toast } from "react-toastify";
 
@@ -61,6 +63,12 @@ const ExerciseManagementCenter = () => {
     activity_name: ''
   };
   const [formData, setFormData] = useState(initialFormState);
+  
+  // Demo video states
+  const [showDemoVideo, setShowDemoVideo] = useState(false);
+  const [demoVideoUrl, setDemoVideoUrl] = useState(null);
+  const [demoVideoLoading, setDemoVideoLoading] = useState(false);
+  const [demoVideoExerciseName, setDemoVideoExerciseName] = useState('');
 
   // 获取所有运动记录
   const fetchExercises = async () => {
@@ -231,6 +239,33 @@ const ExerciseManagementCenter = () => {
     setFilters({
       search: ''
     });
+  };
+
+  // View demo video function
+  const viewDemoVideo = async (exercise) => {
+    setDemoVideoLoading(true);
+    setDemoVideoExerciseName(exercise.name);
+    setShowDemoVideo(true);
+    
+    try {
+      // Check if exercise has demo_video_url
+      if (exercise.demo_video_url) {
+        // Build full video URL
+        const videoUrl = exercise.demo_video_url.startsWith('http')
+          ? exercise.demo_video_url
+          : `http://127.0.0.1:8000${exercise.demo_video_url}`;
+        setDemoVideoUrl(videoUrl);
+      } else {
+        setDemoVideoUrl(null);
+        toast.info('No demo video available for this exercise');
+      }
+    } catch (error) {
+      console.error('Error loading demo video:', error);
+      toast.error('Failed to load demo video');
+      setDemoVideoUrl(null);
+    } finally {
+      setDemoVideoLoading(false);
+    }
   };
 
 
@@ -425,6 +460,18 @@ const ExerciseManagementCenter = () => {
                         </CardContent>
 
                         <CardActions sx={{ justifyContent: 'flex-start', px: 2, pb: 2 }}>
+                          <Tooltip title="View Demo Video">
+                            <IconButton 
+                              size="small" 
+                              color="primary"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                viewDemoVideo(exercise);
+                              }}
+                            >
+                              <PlayCircleOutlineIcon />
+                            </IconButton>
+                          </Tooltip>
                           <Tooltip title="Edit Exercise">
                             <IconButton size="small" onClick={() => openEditDialog(exercise)}>
                               <EditIcon />
@@ -538,6 +585,92 @@ const ExerciseManagementCenter = () => {
           <Button onClick={() => setEditDialogOpen(false)}>Cancel</Button>
           <Button onClick={handleEditExercise} variant="contained">Update</Button>
         </DialogActions>
+      </Dialog>
+
+      {/* Demo Video Dialog */}
+      <Dialog 
+        open={showDemoVideo} 
+        onClose={() => {
+          setShowDemoVideo(false);
+          setDemoVideoUrl(null);
+          setDemoVideoExerciseName('');
+        }} 
+        maxWidth="md" 
+        fullWidth
+      >
+        <DialogTitle>
+          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <Typography variant="h6">
+              Demo Video {demoVideoExerciseName ? `- ${demoVideoExerciseName}` : ''}
+            </Typography>
+            <IconButton 
+              onClick={() => {
+                setShowDemoVideo(false);
+                setDemoVideoUrl(null);
+                setDemoVideoExerciseName('');
+              }}
+            >
+              <CloseIcon />
+            </IconButton>
+          </Box>
+        </DialogTitle>
+        <DialogContent>
+          {demoVideoLoading ? (
+            <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: 300 }}>
+              <CircularProgress />
+              <Typography variant="body1" sx={{ ml: 2 }}>Loading demo video...</Typography>
+            </Box>
+          ) : demoVideoUrl ? (
+            <Box sx={{ 
+              position: 'relative', 
+              paddingTop: '56.25%', // 16:9 aspect ratio
+              backgroundColor: '#000',
+              borderRadius: 1,
+              overflow: 'hidden'
+            }}>
+              <video
+                key={demoVideoUrl}
+                controls
+                autoPlay
+                loop
+                preload="metadata"
+                style={{
+                  position: 'absolute',
+                  top: 0,
+                  left: 0,
+                  width: '100%',
+                  height: '100%',
+                  objectFit: 'contain'
+                }}
+              >
+                <source src={demoVideoUrl} type="video/mp4" />
+                <source src={demoVideoUrl} type="video/webm" />
+                Your browser does not support the video tag.
+              </video>
+            </Box>
+          ) : (
+            <Box sx={{ 
+              display: 'flex', 
+              flexDirection: 'column',
+              justifyContent: 'center', 
+              alignItems: 'center', 
+              minHeight: 300,
+              backgroundColor: 'grey.100',
+              borderRadius: 1,
+              p: 3
+            }}>
+              <VideocamOffIcon sx={{ fontSize: 64, color: 'grey.400', mb: 2 }} />
+              <Typography variant="h6" color="text.secondary" gutterBottom>
+                No Demo Video Available
+              </Typography>
+              <Typography variant="body2" color="text.secondary" textAlign="center">
+                This exercise doesn't have a demonstration video yet.
+                <br />
+                Please upload a demo video to the exercise_videos folder and update the database.
+              </Typography>
+            </Box>
+          )}
+        </DialogContent>
       </Dialog>
 
     </Box>
