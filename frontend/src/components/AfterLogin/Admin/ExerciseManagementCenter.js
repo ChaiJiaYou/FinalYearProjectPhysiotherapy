@@ -46,6 +46,7 @@ import {
   VideocamOff as VideocamOffIcon,
 } from "@mui/icons-material";
 import { toast } from "react-toastify";
+import ConfirmationDialog from "../../CustomComponents/ConfirmationDialog";
 
 const ExerciseManagementCenter = () => {
   const [exercises, setExercises] = useState([]);
@@ -69,6 +70,10 @@ const ExerciseManagementCenter = () => {
   const [demoVideoUrl, setDemoVideoUrl] = useState(null);
   const [demoVideoLoading, setDemoVideoLoading] = useState(false);
   const [demoVideoExerciseName, setDemoVideoExerciseName] = useState('');
+  
+  // Delete confirmation dialog states
+  const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
+  const [exerciseToDelete, setExerciseToDelete] = useState(null);
 
   // 获取所有运动记录
   const fetchExercises = async () => {
@@ -193,24 +198,37 @@ const ExerciseManagementCenter = () => {
     }
   };
 
-  const handleDeleteExercise = async (exerciseId) => {
-    if (window.confirm('Are you sure you want to delete this exercise?')) {
-      try {
-        const response = await fetch(`http://127.0.0.1:8000/api/exercises/${exerciseId}/`, {
-          method: 'DELETE'
-        });
+  const handleDeleteExercise = (exerciseId, exerciseName) => {
+    setExerciseToDelete({ id: exerciseId, name: exerciseName });
+    setDeleteConfirmOpen(true);
+  };
 
-        if (response.ok) {
-          toast.success('Exercise deleted successfully!');
-          fetchExercises();
-        } else {
-          toast.error('Failed to delete exercise');
-        }
-      } catch (error) {
-        console.error('Error deleting exercise:', error);
-        toast.error('Something went wrong while deleting exercise');
+  const confirmDeleteExercise = async () => {
+    if (!exerciseToDelete) return;
+
+    try {
+      const response = await fetch(`http://127.0.0.1:8000/api/exercises/${exerciseToDelete.id}/`, {
+        method: 'DELETE'
+      });
+
+      if (response.ok) {
+        toast.success('Exercise deleted successfully!');
+        fetchExercises();
+      } else {
+        toast.error('Failed to delete exercise');
       }
+    } catch (error) {
+      console.error('Error deleting exercise:', error);
+      toast.error('Something went wrong while deleting exercise');
+    } finally {
+      setDeleteConfirmOpen(false);
+      setExerciseToDelete(null);
     }
+  };
+
+  const cancelDeleteExercise = () => {
+    setDeleteConfirmOpen(false);
+    setExerciseToDelete(null);
   };
 
   const openCreateDialog = () => {
@@ -481,7 +499,7 @@ const ExerciseManagementCenter = () => {
                             <IconButton
                               size="small"
                               color="error"
-                              onClick={() => handleDeleteExercise(exercise.exercise_id)}
+                              onClick={() => handleDeleteExercise(exercise.exercise_id, exercise.name)}
                             >
                               <DeleteIcon />
                             </IconButton>
@@ -672,6 +690,19 @@ const ExerciseManagementCenter = () => {
           )}
         </DialogContent>
       </Dialog>
+
+      {/* Delete Confirmation Dialog */}
+      <ConfirmationDialog
+        open={deleteConfirmOpen}
+        title="Delete Exercise"
+        message={exerciseToDelete 
+          ? `Are you sure you want to delete "${exerciseToDelete.name}"? This action cannot be undone.`
+          : "Are you sure you want to delete this exercise? This action cannot be undone."}
+        confirmText="Delete"
+        cancelText="Cancel"
+        onConfirm={confirmDeleteExercise}
+        onCancel={cancelDeleteExercise}
+      />
 
     </Box>
   );

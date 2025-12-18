@@ -1,0 +1,13 @@
+customuser.tbl
+admin.tbl
+therapist.tbl
+patient.tbl
+appointment.tbl
+unavailableslot.tbl
+medicalhistory.tbl
+notification.tbl
+exercise.tbl
+treatment.tbl
+treatmentexercise.tbl
+exerciserecord.tbl
+

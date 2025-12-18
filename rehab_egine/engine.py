@@ -494,7 +494,7 @@ def process_video(activity=None, stop_event=None, target_reps=None, initial_reps
     try:
         repetition_count = max(0, int(initial_reps or 0))
     except (TypeError, ValueError):
-        repetition_count = 0
+    repetition_count = 0
     target_value = None
     if target_reps is not None:
         try:
@@ -829,20 +829,20 @@ def process_video(activity=None, stop_event=None, target_reps=None, initial_reps
                         # print(smoothed_dx, smoothed_dy, smoothed_45, smoothed_neg45)
                        
                         peaks = []  # initialize peaks for transformer logic
-
+                        
                         if not use_custom_logic:
                             # Initialize default direction vector
                             norm_dx, norm_dy = 0, 0
-
+                        
                             # Estimate overall motion direction from variance
-                            if len(motion_history_x) > 3:
+                        if len(motion_history_x) > 3:
                                 variance_x = statistics.variance(motion_history_x)
                                 variance_y = statistics.variance(motion_history_y)
                                 variance_45 = statistics.variance(motion_history_45)
                                 variance_neg45 = statistics.variance(motion_history_neg45)
-
-                                variance_array = np.array([variance_x, variance_y, variance_45, variance_neg45])
-                                max_variance_idx = np.argmax(variance_array)
+                            
+                            variance_array = np.array([variance_x, variance_y, variance_45, variance_neg45])
+                            max_variance_idx = np.argmax(variance_array)
                                 overall_direction = get_direction(
                                     max_variance_idx, smoothed_dx, smoothed_dy, smoothed_45, smoothed_neg45
                                 )
@@ -888,33 +888,33 @@ def process_video(activity=None, stop_event=None, target_reps=None, initial_reps
                                 )
 
                             # Peak-based counting
-                            motion_distance.append(motion_amplitude * overall_direction)
-                            motion_history_full.append(motion_amplitude * overall_direction)
+                        motion_distance.append(motion_amplitude * overall_direction)
+                        motion_history_full.append(motion_amplitude * overall_direction)
 
                             if frame_count > 2 and wait_idx <= 0:
-                                if len(motion_distance) > motion_distance_arr_limit:
-                                    motion_distance.pop(0)
-
-                                autocorr = pearson_autocorrelation(np.array(motion_distance))
+                            if len(motion_distance) > motion_distance_arr_limit:
+                                motion_distance.pop(0)
+                        
+                            autocorr = pearson_autocorrelation(np.array(motion_distance))
                                 if np.max(autocorr) != 0:
-                                    autocorr = autocorr / np.max(autocorr)
-
-                                prominence_threshold = np.max(autocorr) * dynamic_prominence_ratio
+                            autocorr = autocorr / np.max(autocorr)   
+                            
+                            prominence_threshold = np.max(autocorr) * dynamic_prominence_ratio  
                                 peaks = []
-
-                                if len(autocorr) > 20:
-                                    autocorr = autocorr[:-20]
-
-                                    peaks, properties = find_peaks(
-                                        autocorr,
+                            
+                            if len(autocorr) > 20:
+                                autocorr = autocorr[:-20]
+                                
+                                peaks, properties = find_peaks(
+                                    autocorr,
                                         height=peak_detect_threshold,
-                                        prominence=prominence_threshold,
-                                        distance=min_distance,
+                                    prominence=prominence_threshold,  
+                                    distance=min_distance,  
                                         width=2,
-                                    )
-
+                                )
+                            
                                 peak_buffer_limit = 3
-
+                                
                                 if (
                                     motion_amplitude > motion_amplitude_threshold
                                     and current_activity == desired_activity
@@ -939,9 +939,9 @@ def process_video(activity=None, stop_event=None, target_reps=None, initial_reps
                                             f"at frame {frame_count}, activity={current_activity}, "
                                             f"confidence={conf:.3f}, count={repetition_count}"
                                         )
-
-                                prev_peak_array_length = len(peaks)
-
+         
+                                    prev_peak_array_length = len(peaks)
+                            
                             # Display motion vector (transformer mode only)
                             center_x, center_y = frame.shape[1] // 2, frame.shape[0] // 2
                             if motion_amplitude and motion_amplitude > motion_amplitude_threshold:
