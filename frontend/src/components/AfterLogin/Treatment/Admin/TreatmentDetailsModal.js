@@ -7,18 +7,12 @@ import {
   Button,
   Typography,
   Box,
-  Grid,
-  Card,
-  CardContent,
-  Chip,
   Divider,
   CircularProgress,
   Alert,
 } from '@mui/material';
 import {
   FitnessCenter as FitnessCenterIcon,
-  Person as PersonIcon,
-  CalendarToday as CalendarIcon,
   Assignment as AssignmentIcon,
 } from '@mui/icons-material';
 
@@ -194,36 +188,18 @@ const TreatmentDetailsModal = ({ open, onClose, treatmentId, patientId }) => {
                       }}
                     >
                       <Typography variant="subtitle1" sx={{ fontWeight: 'bold', mb: 1 }}>
-                        {exercise.exercise_name}
+                        {index + 1}. {exercise.exercise_name}
                       </Typography>
                       
-                      <Box sx={{ display: 'flex', gap: 2, flexWrap: 'wrap', mb: 1 }}>
-                        <Chip 
-                          label={exercise.category} 
-                          size="small" 
-                          color="primary" 
-                          variant="outlined"
-                        />
-                        <Chip 
-                          label={exercise.difficulty} 
-                          size="small" 
-                          color="secondary" 
-                          variant="outlined"
-                        />
-                      </Box>
-                      
-                      <Box sx={{ display: 'flex', gap: 3, flexWrap: 'wrap' }}>
-                        {exercise.reps_per_set && (
-                          <Typography variant="body2" color="text.secondary">
-                            <strong>Reps:</strong> {exercise.reps_per_set}
-                          </Typography>
-                        )}
-                        {exercise.sets && (
-                          <Typography variant="body2" color="text.secondary">
-                            <strong>Sets:</strong> {exercise.sets}
-                          </Typography>
-                        )}
-                      </Box>
+                      <Typography variant="body2" color="text.secondary">
+                        {exercise.reps_per_set && exercise.sets ? (
+                          <>Reps: {exercise.reps_per_set} | Sets: {exercise.sets}</>
+                        ) : exercise.reps_per_set ? (
+                          <>Reps: {exercise.reps_per_set}</>
+                        ) : exercise.sets ? (
+                          <>Sets: {exercise.sets}</>
+                        ) : null}
+                      </Typography>
                       
                       {exercise.notes && (
                         <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
